@@ -1,0 +1,34 @@
+{
+    "base_path": {
+        "abs_root_dir": "/Users/vignesh/Documents/HighSociety"
+    },
+    "logging": {
+        "log_dir": "Logs",
+        "generic_log_file": "highSociety.log",
+        "security_log_file": "Security.log",
+        "log_level": "DEBUG",
+        "log_format": "[%(asctime)s] %(levelname)-8s %(module)-20s %(message)s",
+        "backup_count": 10,
+        "max_nbytes": 10000000
+    },
+    "game_settings": {
+        "metadata": {
+            "game_name": "HighSociety",
+            "version": "0.1",
+            "author": "Vignesh",
+            "description": "A simple game of high society"
+        },
+        "rules": {
+            "starting_cash_values": [1,2,3,4,6,8,10,12,15,20,25],
+            "painting_values":[1,2,3,4,5,6,7,8,9,10],
+            "prestige_card_count": 3, 
+            "disgrace_card_types": ["faux_pas", "passe", "scandale"], 
+            "green_card_limit": 4,
+            "_comment_green_card_limit": "indicates the number of green cards at which the game stops. If 4, then the game stops when 4 green cards are drawn. The fourth green status card is not considered for aunction.",
+            "_comment_prestige_card_count": "indicates number of prestige (multiplier) cards",
+            "_comment_disgrace_card_types": "add items in the list to have these in the game. Can be repeated",
+            "max_players": 5,
+            "min_players": 2
+        }
+    }
+}
