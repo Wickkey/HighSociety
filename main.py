@@ -1,5 +1,5 @@
 from highsociety.code.gamecore.game_manager.gameplay import PlayGame
-from highsociety.code.gamecore.utils.utility import get_all_configurations
+from highsociety.code.common.utils.utility import get_all_configurations
 from highsociety.code.common.logger_module.logger.logging_manager import LoggingManager
 from highsociety.code.gamecore.game_manager.host import CLIPlayer, CLIHost
 from highsociety.code.gamecore.player.cliplayer import CLIPlayer
@@ -21,7 +21,7 @@ def get_num_players() -> int:
 
 def get_player_details(player_idx: int):
     """Collect name and username for each player."""
-    print(f"\n--- Player {player_idx + 1} Details ---")
+    print(f"--- Player {player_idx + 1} Details ---")
     username = input("Enter username: ").strip()
     name = input("Enter display name: ").strip()
 

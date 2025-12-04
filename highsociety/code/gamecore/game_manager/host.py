@@ -10,7 +10,7 @@ class CLIHost:
 
 
 class NetworkHost:
-    def __init(self, players: list[NetworkPlayer]):
+    def __init__(self, players: list[NetworkPlayer]):
         self.players = players 
 
     def send_message(self, message: str):

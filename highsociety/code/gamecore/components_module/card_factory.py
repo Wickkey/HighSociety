@@ -4,7 +4,7 @@ from highsociety.code.gamecore.components_module.prestige_card import PrestigeCa
 from highsociety.code.gamecore.components_module.painting import Painting
 from highsociety.code.gamecore.components_module.disgrace_card import FauxPas, Passe, Scandale
 from highsociety.code.common.logger_module.logger.logging_manager import LoggingManager
-from highsociety.code.gamecore.utils.utility import get_all_configurations
+from highsociety.code.common.utils.utility import get_all_configurations
 
 
 class CardFactory:
@@ -33,7 +33,7 @@ class CardFactory:
         card_type = card_type.lower()
 
         if card_type not in self.card_types:
-            logging_manager.error(f"Invalid Card Type {card_type}")
+            LoggingManager.error(f"Invalid Card Type {card_type}")
             raise ValueError(f"{card_type} is invalid")
         
         return card_type

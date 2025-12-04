@@ -4,7 +4,7 @@ from highsociety.code.common.logger_module.logger.logging_manager import Logging
 from highsociety.code.gamecore.components_module.money_card import MoneyCard
 from typing import Union, Optional
 from highsociety.code.common.logger_module.logger.logging_manager import LoggingManager
-from highsociety.code.gamecore.utils.utility import get_all_configurations, get_game_setting_configurations
+from highsociety.code.common.utils.utility import get_all_configurations, get_game_setting_configurations
 
 
 class MoneyCardManager:
@@ -53,11 +53,11 @@ class MoneyCardManager:
             self.__cards.append(card)
         elif isinstance(card, list):
             if not all(isinstance(c, MoneyCard) for c in card):
-                logging_manager.error("List contains non-Moneycard elements")
+                LoggingManager.error("List contains non-Moneycard elements")
                 raise ValueError("All elements in list must be MoneyCard instances")
             self.__cards.extend(card)
         else:
-            logging_manager.error("Invalid type passed to add_cards method. Only MoneyCard or it's list is allowed")
+            LoggingManager.error("Invalid type passed to add_cards method. Only MoneyCard or it's list is allowed")
             raise ValueError("Only MoneyCard or list[MoneyCard] allowed")
         
 
@@ -83,17 +83,17 @@ class MoneyCardManager:
 
         elif isinstance(value, list):
             if not all(isinstance(v, int) for v in value):
-                logging_manager.error("All elements in the value list must be ints. Discarding operation")
+                LoggingManager.error("All elements in the value list must be ints. Discarding operation")
                 raise ValueError
 
             if len(value) != len(set(value)):
-                logging_manager.error("Duplicate values in removing cards; values must be unique. Discarding operation")
+                LoggingManager.error("Duplicate values in removing cards; values must be unique. Discarding operation")
                 raise ValueError
 
             cards_to_be_removed = set(value)
 
         else:
-            logging_manager.error("Value must be int or a list of ints")
+            LoggingManager.error("Value must be int or a list of ints")
             raise ValueError
 
         
@@ -101,7 +101,7 @@ class MoneyCardManager:
         missing_cards = cards_to_be_removed - present_cards
 
         if missing_cards:
-            logging_manager.error(f"Requested card(s) with value(s) {sorted(missing_cards)} not found in hand.  Discarding operation")
+            LoggingManager.error(f"Requested card(s) with value(s) {sorted(missing_cards)} not found in hand.  Discarding operation")
             raise ValueError(f"Card(s) with value(s) {sorted(missing_cards)} not found in hand.  Discarding operation")
 
         

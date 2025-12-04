@@ -5,14 +5,14 @@ from highsociety.code.gamecore.player.cliplayer import CLIPlayer
 from highsociety.code.gamecore.player.networkplayer import NetworkPlayer
 from highsociety.code.gamecore.card_manager.status_card_manager import StatusCardManager
 from highsociety.code.common.logger_module.logger.logging_manager import LoggingManager
-from highsociety.code.gamecore.utils.utility import get_game_setting_configurations
+from highsociety.code.common.utils.utility import get_game_setting_configurations
 from highsociety.code.gamecore.components_module.disgrace_card import DisgraceCard, FauxPas
 from highsociety.code.gamecore.game_manager.host import CLIHost, NetworkHost
 from highsociety.code.gamecore.components_module.status_card import StatusCard
 from highsociety.code.gamecore.components_module.painting import Painting
 
 class PlayGame():
-    def __init__(self, players: list[CLIPlayer], mode = 'cli'):
+    def __init__(self, players: list[BasePlayer], mode = 'cli'):
         self.players = players
         self.num_players= len(players)
 
@@ -94,11 +94,20 @@ class PlayGame():
         Returns 
             (int) bid_value by the player
         """
-        player.send_message(f"\n Auctioning: {status_card}: {status_card.description}")
-        player.send_message(f"Current Highest Bid: {max_bid}")
+        # player.send_message(f"\nAuctioning: {status_card}: {status_card.description}")
+        player.send_message(f"\nCurrent Highest Bid: {max_bid}")
 
         while True:
+            # Check if player is still active before getting bid
+            if not player.active:
+                player.withdraw_bid()
+                return "pass"
+            
             bids = player.get_bid()
+
+            # If get_bid() returns None, treat as pass (shouldn't happen normally for active players)
+            if bids is None:
+                bids = "pass"
 
             if isinstance(bids, str):
                 cmd = bids.lower()
@@ -121,6 +130,7 @@ class PlayGame():
 
 
     def normal_card_auction(self, status_card: StatusCard, starting_player_id: int) -> int:
+        self.host.send_message(f"\nAuctioning: {status_card}: {status_card.description}")
         num_players_in_auction = self._count_active_auction_players()
         current_player_id = starting_player_id                        
         max_bid = 0
@@ -138,16 +148,16 @@ class PlayGame():
                 # Handle result types
                 if action_result in ["pass", "fold"]:
                     num_players_in_auction -= 1
-                    self.host.send_message(f"⚪ {player.username} passed.")
+                    self.host.send_message(f"⚪ {player.username} passed.\n")
 
                 elif action_result == "quit":
                     player.active = False
                     num_players_in_auction -= 1
-                    self.host.send_message(f"❌ {player.username} quit the game.")
+                    self.host.send_message(f"❌ {player.username} quit the game.\n")
 
                 elif isinstance(action_result, int) and action_result > max_bid:
                     max_bid = action_result
-                    self.host.send_message(f"💰 {player.username} raised to {max_bid}.")
+                    self.host.send_message(f"💰 {player.username} raised to {max_bid}.\n")
 
                 else:
                     # Invalid / repeated bid
@@ -306,7 +316,7 @@ class PlayGame():
             player_points.append(pts)
             player_money_left.append(money_left)
 
-        # Step 1: Find minimum money among active players
+        # Step 1: Find minimum money among all players
         active_money = [m for i, m in enumerate(player_money_left) if winner_candidates[i]]
         if not active_money:
             self.host.send_message("⚠️ No active players remain.")

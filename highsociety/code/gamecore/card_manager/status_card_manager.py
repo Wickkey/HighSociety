@@ -2,7 +2,7 @@ import random
 from highsociety.code.gamecore.components_module.card_factory import CardFactory
 from highsociety.code.gamecore.components_module.status_card import StatusCard
 from highsociety.code.common.logger_module.logger.logging_manager import LoggingManager
-from highsociety.code.gamecore.utils.utility import get_game_setting_configurations, get_all_configurations
+from highsociety.code.common.utils.utility import get_game_setting_configurations, get_all_configurations
 
 config = get_all_configurations()
 LoggingManager = LoggingManager(config)

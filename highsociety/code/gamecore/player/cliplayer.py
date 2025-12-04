@@ -9,6 +9,9 @@ class CLIPlayer(BasePlayer):
         super().__init__(name, username)
         self.active = True
 
+    def send_message(self, message: str):
+        print(message)
+
     def print_player_info(self):
         self.send_message(f"{self.username}'s status cards: {self.status_cards}")
         self.send_message(f"{self.username}'s points: {self.points}")
@@ -103,8 +106,3 @@ class CLIPlayer(BasePlayer):
                 self.send_message(f"Invalid input. Let's try again..")
                 
         return painting
-
-
-
-    def send_message(self, message: str):
-        print(message)
