@@ -22,6 +22,7 @@ from highsociety.code.common.logger_module.logger.logging_manager import Logging
 from highsociety.code.common.utils.network_utility import send_json, receive_json
 from highsociety.code.gamecore.player.networkspectator import NetworkSpectator
 from highsociety.code.gamecore.player.player import BasePlayer
+from highsociety.code.gamecore.network.transport import SocketTransport
 from highsociety.code.gamecore.recording.session_recorder import SessionRecorder
 from highsociety.code.gamecore.recording.recording_player import RecordingPlayer
 
@@ -87,7 +88,7 @@ def players_heartbeat_monitor_thread(players: list[NetworkPlayer], timeout_secon
                 player.active = False
 
                 try:
-                    player.conn.close()
+                    player.transport.close()
                 except:
                     pass
 
@@ -146,7 +147,8 @@ def accept_players(server_socket: socket.socket, expected_players:int, game_id: 
 
             name = data["prompt"]
 
-            player = NetworkPlayer(name=name, username=username, conn=conn, game_id=game_id)
+            transport = SocketTransport(conn, label=f"{username}@{addr[0]}:{addr[1]}")
+            player = NetworkPlayer(name=name, username=username, transport=transport, game_id=game_id)
 
             with players_lock:
                 players.append(player)
@@ -220,7 +222,8 @@ def accept_spectators(server_socket: socket.socket, spectators: list[NetworkSpec
                 return
 
             username = data["prompt"]
-            spectator = NetworkSpectator(conn=conn, name=name, username=username, game_id=game_id)
+            transport = SocketTransport(conn, label=f"{username}@{addr[0]}:{addr[1]}")
+            spectator = NetworkSpectator(transport=transport, name=name, username=username, game_id=game_id)
             spectators.append(spectator)  # accept_spectators runs single-threaded; list.append is GIL-atomic
 
             print(f"👁️ Spectator joined: {name}")

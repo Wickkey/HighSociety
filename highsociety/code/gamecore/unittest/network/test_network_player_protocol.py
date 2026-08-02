@@ -5,6 +5,7 @@ import time
 import pytest
 
 from highsociety.code.gamecore.player.networkplayer import NetworkPlayer
+from highsociety.code.gamecore.network.transport import SocketTransport
 from highsociety.code.common.utils.network_utility import send_json
 from highsociety.code.gamecore.components_module.painting import Painting
 
@@ -12,7 +13,8 @@ from highsociety.code.gamecore.components_module.painting import Painting
 @pytest.fixture
 def player_and_peer():
     server_end, client_end = socket.socketpair()
-    player = NetworkPlayer(name="Alice", username="alice", conn=server_end, game_id="g1")
+    transport = SocketTransport(server_end, label="alice")
+    player = NetworkPlayer(name="Alice", username="alice", transport=transport, game_id="g1")
     player.start_receiver_thread()
     yield player, client_end
     player.close()
