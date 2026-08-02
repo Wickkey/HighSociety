@@ -135,3 +135,57 @@ def test_two_players_complete_a_full_game_over_real_sockets(running_server):
 
     c1.close()
     c2.close()
+
+
+def test_recorded_network_game_replays_identically_via_a_plain_cli_replay(tmp_path):
+    """
+    Cross-mode record/replay: a game actually played over real sockets is
+    recorded with network_server.py's --record, then replayed purely through
+    PlayGame + ReplayPlayer (the same mechanism main.py --replay uses) with
+    no networking involved at all — replay never needs a live connection,
+    since ReplayPlayer's wrapped state-holder is a plain CLIPlayer regardless
+    of how the original game was played.
+    """
+    from highsociety.code.gamecore.game_manager.gameplay import PlayGame
+    from highsociety.code.gamecore.player.cliplayer import CLIPlayer
+    from highsociety.code.gamecore.recording.session_recorder import SessionRecorder
+    from highsociety.code.gamecore.recording.replay_player import ReplayPlayer
+
+    port = 19600 + (id(threading.current_thread()) % 500)
+    record_path = tmp_path / "network_session.json"
+    t = threading.Thread(
+        target=start_server,
+        kwargs={"host": "127.0.0.1", "port": port, "num_players": 2, "seed": 5, "record_path": str(record_path)},
+        daemon=True,
+    )
+    t.start()
+    threading.Event().wait(0.5)
+
+    c1 = ScriptedSocketClient("127.0.0.1", port, "alice")
+    c2 = ScriptedSocketClient("127.0.0.1", port, "bob")
+    c1.handshake()
+    c2.handshake()
+    c1.start()
+    c2.start()
+
+    deadline = time.time() + 30
+    while time.time() < deadline:
+        if not c1._running and not c2._running:
+            break
+        threading.Event().wait(0.2)
+    c1.close()
+    c2.close()
+
+    assert record_path.exists()
+    recording = SessionRecorder.load(record_path)
+    assert recording["seed"] == 5
+    assert len(recording["players"]) == 2
+
+    replay_players = [
+        ReplayPlayer(CLIPlayer(name=p["name"], username=p["username"]), recording["actions"][p["username"]])
+        for p in recording["players"]
+    ]
+    replay_game = PlayGame(players=replay_players, mode="cli", seed=recording["seed"])
+    replay_game.play_game()  # must complete without raising ReplayMismatch/ReplayReachedEndOfRecording
+
+    assert any(p.points for p in replay_game.players)  # sanity: game actually progressed

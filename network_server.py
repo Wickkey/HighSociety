@@ -6,6 +6,7 @@ Run this on the host machine (the one that will run the game).
 """
 
 import logging
+import random
 import socket
 import threading
 from socket import error as SocketError
@@ -21,6 +22,8 @@ from highsociety.code.common.logger_module.logger.logging_manager import Logging
 from highsociety.code.common.utils.network_utility import send_json, receive_json
 from highsociety.code.gamecore.player.networkspectator import NetworkSpectator
 from highsociety.code.gamecore.player.player import BasePlayer
+from highsociety.code.gamecore.recording.session_recorder import SessionRecorder
+from highsociety.code.gamecore.recording.recording_player import RecordingPlayer
 
 def generate_game_id() -> str:
     raw = uuid.uuid4().bytes
@@ -232,14 +235,20 @@ def accept_spectators(server_socket: socket.socket, spectators: list[NetworkSpec
             LoggingManager.exception("❌  Error accepting spectator:", e)
 
 
-def start_server(host='0.0.0.0', port=8888, num_players=2):
+def start_server(host='0.0.0.0', port=8888, num_players=2, seed=None, record_path=None):
     """
     Start the game server and wait for players to connect.
-    
+
     Args:
         host: Host address to bind to (0.0.0.0 for all interfaces)
         port: Port number to listen on
         num_players: Number of players to wait for
+        seed: Seed the RNG for a fully reproducible game; auto-generated if not given
+        record_path: If given, records every player decision to this path (see
+            highsociety.code.gamecore.recording) so the game can be replayed
+            later with `python3 main.py --replay PATH` — no networking needed
+            to replay, so this works the same whether the original game was
+            played over CLI or network.
     """
     # Initialize game
     config = get_all_configurations()
@@ -284,9 +293,9 @@ def start_server(host='0.0.0.0', port=8888, num_players=2):
 
         players = accept_players(server_socket, num_players, game_id)
 
-        
+
         # Close server socket
-        server_socket.close() # can't close if spectators needs to be added.        
+        server_socket.close() # can't close if spectators needs to be added.
         # Start receiver threads for all players
         print("🔌 Starting receiver threads for all players...")
         for player in players:
@@ -296,11 +305,18 @@ def start_server(host='0.0.0.0', port=8888, num_players=2):
         print(f"\n{'='*60}")
         print(f"🎉 All players connected! Starting game...")
         print(f"{'='*60}\n")
-                
+
+        game_seed = seed if seed is not None else random.randint(0, 2**31 - 1)
+        game_players = players
+        if record_path:
+            recorder = SessionRecorder(path=record_path, seed=game_seed)
+            game_players = [RecordingPlayer(p, recorder) for p in players]
+            print(f"⏺️  Recording this session to {record_path} (seed={game_seed})\n")
+
         # Create and start game
         heartbeat_monitor_thread = threading.Thread(target=players_heartbeat_monitor_thread, args=(players, 120, 5), daemon=True)
         heartbeat_monitor_thread.start()
-        game = PlayGame(players=players, spectators = spectators, mode='network', game_id = game_id)
+        game = PlayGame(players=game_players, spectators=spectators, mode='network', game_id=game_id, seed=game_seed)
         game.play_game()
         
         # Close all player connections
@@ -332,12 +348,17 @@ if __name__ == '__main__':
                        help='Port number to listen on (default: 8888)')
     parser.add_argument('--players', type=int, default=2,
                        help='Number of players (default: 2)')
-    
+    parser.add_argument('--seed', type=int, default=None,
+                       help='Seed the RNG for a fully reproducible game (deck order, player order, starting player)')
+    parser.add_argument('--record', type=str, default=None, metavar='PATH',
+                       help='Record every decision made this game to PATH. Replay it later with '
+                            '`python3 main.py --replay PATH` (no networking needed to replay).')
+
     args = parser.parse_args()
-    
+
     if args.players < 2:
         print("⚠️ At least 2 players are required!")
         sys.exit(1)
-    
-    start_server(host=args.host, port=args.port, num_players=args.players)
+
+    start_server(host=args.host, port=args.port, num_players=args.players, seed=args.seed, record_path=args.record)
 
