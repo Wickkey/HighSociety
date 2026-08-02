@@ -38,10 +38,12 @@ replay system, and Transport/protocol modularity refactor.
 
 ## Networking robustness gaps
 
-- **A failed handshake silently reduces the player count.** `accept_players()`'s loop just counts
-  `accept()` calls, not successful handshakes — if one connecting client sends garbage during
-  IDENTIFY and gets dropped, the server proceeds with fewer real players than `--players` asked
-  for, instead of waiting for a replacement connection.
+- ~~**A failed handshake silently reduces the player count.**~~ **Fixed.** `accept_players()` now
+  waits for `expected_players` *successful* handshakes, not just that many accepted connections —
+  a client that fails IDENTIFY no longer permanently steals a slot; the server keeps accepting
+  replacement connections until enough real players actually join. Regression test:
+  `unittest/network/test_end_to_end_socket.py::test_a_failed_handshake_does_not_permanently_steal_a_player_slot`
+  (verified it fails against the old logic, passes against the fix).
 - **No reconnection support.** Once a `NetworkPlayer`'s transport disconnects (`active` flips to
   `False`), there's no path back in — same effect as quitting. If a player's WiFi blips mid-game,
   they're permanently out, not just paused.

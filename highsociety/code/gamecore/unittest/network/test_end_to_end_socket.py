@@ -5,7 +5,7 @@ import time
 
 import pytest
 
-from network_server import start_server
+from network_server import start_server, accept_players
 from highsociety.code.common.utils.network_utility import send_json, receive_json
 
 
@@ -189,3 +189,61 @@ def test_recorded_network_game_replays_identically_via_a_plain_cli_replay(tmp_pa
     replay_game.play_game()  # must complete without raising ReplayMismatch/ReplayReachedEndOfRecording
 
     assert any(p.points for p in replay_game.players)  # sanity: game actually progressed
+
+
+def test_a_failed_handshake_does_not_permanently_steal_a_player_slot():
+    """
+    Regression test: accept_players() used to count accepted connections,
+    not successful handshakes, so a client that failed the IDENTIFY
+    handshake would permanently occupy one of the `expected_players` slots
+    — the server proceeded with fewer real players than requested instead
+    of waiting for a replacement connection.
+    """
+    port = 20700 + (id(threading.current_thread()) % 500)
+    server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    server_socket.bind(("127.0.0.1", port))
+    server_socket.listen(5)
+
+    result = {}
+
+    def run_accept():
+        result["players"] = accept_players(server_socket, expected_players=2, game_id="g1")
+
+    t = threading.Thread(target=run_accept, daemon=True)
+    t.start()
+    threading.Event().wait(0.3)  # let accept_players start listening
+
+    # Bad client: connects, then sends a bogus first response instead of IDENTIFY_ACK.
+    bad = socket.create_connection(("127.0.0.1", port), timeout=5)
+    receive_json(bad)  # username prompt
+    send_json(bad, {"message_type": "NOT_IDENTIFY_ACK", "prompt": "oops"})
+    receive_json(bad)  # IDENTIFY_ERROR
+    bad.close()
+
+    def good_client(username):
+        sock = socket.create_connection(("127.0.0.1", port), timeout=5)
+        receive_json(sock)  # username prompt
+        send_json(sock, {"message_type": "IDENTIFY_ACK", "prompt": username})
+        receive_json(sock)  # display name prompt
+        send_json(sock, {"message_type": "IDENTIFY_ACK", "prompt": f"{username}-display"})
+        welcome = receive_json(sock)
+        return sock, welcome
+
+    good1_sock, welcome1 = good_client("alice")
+    good2_sock, welcome2 = good_client("bob")
+
+    t.join(timeout=10)
+    assert not t.is_alive()
+
+    players = result["players"]
+    assert len(players) == 2
+    assert {p.username for p in players} == {"alice", "bob"}
+    assert welcome1["message_type"] == "IDENTIFY_SUCCESS"
+    assert welcome2["message_type"] == "IDENTIFY_SUCCESS"
+
+    for p in players:
+        p.close()
+    good1_sock.close()
+    good2_sock.close()
+    server_socket.close()

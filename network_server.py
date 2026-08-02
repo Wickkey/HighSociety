@@ -147,12 +147,26 @@ def accept_players(server_socket: socket.socket, expected_players:int, game_id: 
 
             name = data["prompt"]
 
-            transport = SocketTransport(conn, label=f"{username}@{addr[0]}:{addr[1]}")
-            player = NetworkPlayer(name=name, username=username, transport=transport, game_id=game_id)
-
             with players_lock:
+                if len(players) >= expected_players:
+                    # Enough players already joined while this handshake was
+                    # in flight (e.g. it was slow, or filled a slot freed up
+                    # by an earlier failed handshake) — don't overfill.
+                    send_json(conn, {
+                        "game_id": game_id,
+                        "message_type": "IDENTIFY_ERROR",
+                        "prompt": "Sorry, the game is already full.",
+                        "requires_response": False
+                    })
+                    conn.close()
+                    return
+
+                transport = SocketTransport(conn, label=f"{username}@{addr[0]}:{addr[1]}")
+                player = NetworkPlayer(name=name, username=username, transport=transport, game_id=game_id)
                 players.append(player)
-                print(f"✅ Player joined: {username} ({name}) — {len(players)}/{expected_players}")
+                joined_count = len(players)
+
+            print(f"✅ Player joined: {username} ({name}) — {joined_count}/{expected_players}")
 
             send_json(conn, {
                 "game_id": game_id,
@@ -162,19 +176,34 @@ def accept_players(server_socket: socket.socket, expected_players:int, game_id: 
             })
 
         except Exception as e:
-            print(f"❌ Error with player at {addr}: {e}")
+            print(f"❌ Error with player at {addr}: {e} — still waiting for a replacement connection.")
             try:
                 conn.close()
             except:
                 pass
 
+    # Keep accepting connections until `expected_players` handshakes actually
+    # succeed — a failed/malformed handshake must not permanently steal a
+    # slot. Accept() needs a timeout so this loop wakes up to recheck the
+    # player count even when no new connection is currently arriving (e.g.
+    # right after a slow handshake finally completes in the background).
     threads = []
-    while len(threads) < expected_players:
-        conn, addr = server_socket.accept()
+    server_socket.settimeout(1.0)
+    while True:
+        with players_lock:
+            if len(players) >= expected_players:
+                break
+        try:
+            conn, addr = server_socket.accept()
+        except socket.timeout:
+            continue
         t = threading.Thread(target=handle_single_connection, args=(conn, addr), daemon=True)
         t.start()
         threads.append(t)
 
+    # Wait for every spawned handshake (including any still in flight) to
+    # finish before returning, so a straggler can never append to `players`
+    # after this function has already handed the list off to the caller.
     for t in threads:
         t.join()
 
