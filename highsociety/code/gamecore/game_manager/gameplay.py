@@ -1,5 +1,7 @@
 import random
-from typing import Union
+import time
+from typing import Optional, Union
+from highsociety.code.gamecore.player.networkspectator import NetworkSpectator
 from highsociety.code.gamecore.player.player import BasePlayer
 from highsociety.code.gamecore.player.cliplayer import CLIPlayer
 from highsociety.code.gamecore.player.networkplayer import NetworkPlayer
@@ -10,25 +12,45 @@ from highsociety.code.gamecore.components_module.disgrace_card import DisgraceCa
 from highsociety.code.gamecore.game_manager.host import CLIHost, NetworkHost
 from highsociety.code.gamecore.components_module.status_card import StatusCard
 from highsociety.code.gamecore.components_module.painting import Painting
+from highsociety.code.gamecore.game_manager.disgrace_settlement import DisgraceAuctionSettlement, ForfeitSettlement
 
 class PlayGame():
-    def __init__(self, players: list[BasePlayer], mode = 'cli'):
+    """
+    Notes:
+    spectators is a shared list, which will get updated in the run-time if new specators join.
+    """
+    def __init__(self, players: list[BasePlayer], spectators: list[NetworkSpectator] = None, mode = 'cli', game_id: str = None,
+                 disgrace_settlement: DisgraceAuctionSettlement = None, seed: Optional[int] = None):
+        """
+        seed: if given, seeds the RNG before anything random happens (deck
+        shuffle here, then player shuffle / starting-player pick in
+        play_game()), making the entire game 100% reproducible — same seed +
+        same sequence of player decisions always produces the same game.
+        """
         self.players = players
+        self.spectators = spectators
+        self.game_id = game_id
         self.num_players= len(players)
+        self.seed = seed
+
+        if seed is not None:
+            random.seed(seed)
 
         self.game_state = "initialized"
         self.auction_rounds = []
         self.current_auction = None
         self.status_card_manager = StatusCardManager()
+        self.disgrace_settlement = disgrace_settlement or ForfeitSettlement()
 
         self.__game_config = get_game_setting_configurations()
+        self.__TURN_DURATION = self.__game_config['time_per_move']
         self.__green_card_limit = self.__game_config.get("green_card_limit", 4)
 
         if mode.lower() == 'cli':
             self.host = CLIHost(players)
 
         elif mode.lower() == 'network':
-            self.host = NetworkHost(players)
+            self.host = NetworkHost(players, spectators)
 
         else:
             LoggingManager.info("Invalid Host. Default host: cli")
@@ -79,6 +101,11 @@ class PlayGame():
         else:
             self.host.send_message("⚠️ Auction ended. No active bidders left.")
 
+    def _compute_deadline(self):
+        if self.__TURN_DURATION is None:
+            return None
+        return time.time() + self.__TURN_DURATION
+
 
     def _handle_player_turn(self, player: BasePlayer, max_bid: int, status_card: StatusCard) -> Union[int,str]:
         """
@@ -94,34 +121,58 @@ class PlayGame():
         Returns 
             (int) bid_value by the player
         """
-        # player.send_message(f"\nAuctioning: {status_card}: {status_card.description}")
-        player.send_message(f"\nCurrent Highest Bid: {max_bid}")
+        # Initial message: 
+        created_at = time.time()
+        for p in self.players:
+            if p != player:
+                p.send_message(f"{player.username}'s turn. Player is playing..", 
+                message_type = "GLOBAL_MOVE_INFO", 
+                created_at = created_at)
+            else:
+                p.send_message(f"Your Turn!", message_type = "PLAYER_MOVE", created_at = created_at)
+        for s in (self.spectators or []):
+            s.send_message(f"{player.username}'s turn. Player is playing..", message_type = "GLOBAL_MOVE_INFO",
+            created_at = created_at)
+
+
+        player.send_message(f"\nCurrent Highest Bid: {max_bid}", message_type = "PLAYER_INFO")
+        player.send_message(f"You have {self.__TURN_DURATION}s to make a move.", message_type="PLAYER_INFO")
+        turn_expires_at = self._compute_deadline()
 
         while True:
+            if turn_expires_at:
+                remaining_time = turn_expires_at - time.time()
+                if remaining_time <=0:
+                    player.send_message(f"⏳ Time up! Auto pass.", message_type = "PLAYER_INFO")
+                    player.withdraw_bid()
+                    return "pass"
+            else:
+                remaining_time = None
+            
             # Check if player is still active before getting bid
             if not player.active:
                 player.withdraw_bid()
                 return "pass"
             
-            bids = player.get_bid()
+            bids = player.get_bid(timeout=remaining_time)
 
             # If get_bid() returns None, treat as pass (shouldn't happen normally for active players)
             if bids is None:
-                bids = "pass"
+                continue
 
             if isinstance(bids, str):
                 cmd = bids.lower()
                 if cmd in ["pass", "fold", "quit"]:
                     player.withdraw_bid()
                     return cmd
-                else:
-                    player.send_message("⚠️ Invalid command. Try again.")
+                else: # shouldn't need this ideally as it will be handled by get_bid function.
+                    player.send_message("⚠️ Invalid command. Try again.", message_type = "INPUT_ERROR")
                     continue
 
             # Numeric bids
             bid_value = player.current_bid_value + sum(bids)
             if bid_value <= max_bid:
-                player.send_message(f"⚠️ Your bid must exceed the current highest bid ({max_bid}). Try again.")
+                player.send_message(f"⚠️ Your bid must exceed the current highest bid ({max_bid}). Try again.", message_type = "INPUT_ERROR")
                 continue
 
             # Place bid
@@ -230,7 +281,7 @@ class PlayGame():
                     break
                 else:
                     # unexpected string (shouldn't happen) — ask again in next loop
-                    player.send_message("⚠️ Invalid command. You must raise or 'pass' to take the card.")
+                    player.send_message("⚠️ Invalid command. You must raise or 'pass' to take the card.", message_type = "INPUT_ERROR")
                     continue
 
             # numeric bid placed
@@ -244,7 +295,7 @@ class PlayGame():
 
             else:
                 # defensive fallback
-                player.send_message("⚠️ Invalid response. Try again.")
+                player.send_message("⚠️ Invalid response. Try again.", message_type = "INPUT_ERROR")
                 continue
 
         # finalize: loser_id should be the player who passed / quit
@@ -259,6 +310,9 @@ class PlayGame():
         # Give the disgrace card to loser and announce
         loser = self.players[loser_id]
         self._finalize_auction(loser_id, status_card, max_bid)
+
+        # Settle bid money per the configured strategy (default: non-passers forfeit)
+        self.disgrace_settlement.settle(self.players, loser_id)
 
         # Reset auction state for all players
         for player in self.players:
@@ -290,8 +344,11 @@ class PlayGame():
         paintings = [card for card in player.status_cards if isinstance(card, Painting)]
 
         if paintings:
-            card_to_discard = player.choose_painting_to_discard().value
-            player.discard_painting_card(card_to_discard)
+            chosen = player.choose_painting_to_discard()
+            if chosen is None:
+                # Player disconnected or otherwise failed to choose; retry on the next opportunity.
+                return False
+            player.discard_painting_card(chosen.value)
             self.host.send_message(f"🎨 {player.username} discarded a painting due to Faux Pas.")
             return True
 
@@ -316,25 +373,23 @@ class PlayGame():
             player_points.append(pts)
             player_money_left.append(money_left)
 
-        # Step 1: Find minimum money among all players
-        active_money = [m for i, m in enumerate(player_money_left) if winner_candidates[i]]
-        if not active_money:
+        # Step 1: Find minimum money among active players only (inactive/quit
+        # players' leftover money is irrelevant to this comparison).
+        active_indices = [i for i in range(len(self.players)) if winner_candidates[i]]
+        if not active_indices:
             self.host.send_message("⚠️ No active players remain.")
             self.host.send_message("No Winners for this game.")
             return None
 
-        min_money = min(active_money)
+        # Step 2: Eliminate the active player with the least money, unless
+        # there's a tie for least (nobody eliminated) or only one active
+        # player remains (nobody left to compare against, so they win outright).
+        if len(active_indices) > 1:
+            min_money = min(player_money_left[i] for i in active_indices)
+            lowest_money_indices = [i for i in active_indices if player_money_left[i] == min_money]
 
-        # Step 2: Eliminate player with least money. If 2 people have min money, no boyd has min money.
-        num_players_with_min_money = 0
-        for idx, money in enumerate(player_money_left):
-            if money == min_money:
-                num_players_with_min_money +=1
-
-        if num_players_with_min_money == 1:
-            for idx, money in enumerate(player_money_left):
-                if winner_candidates[idx] and money == min_money:
-                    winner_candidates[idx] = False
+            if len(lowest_money_indices) == 1:
+                winner_candidates[lowest_money_indices[0]] = False
 
         # Step 3: From remaining candidates, find the highest point(s)
         remaining_points = [player_points[i] if winner_candidates[i] else float('-inf') 
@@ -364,8 +419,20 @@ class PlayGame():
 
         return winners
 
+    def countdown_to_start(self, countdown: int = 5) -> None:
+        for remaining in range(countdown, 0, -1):
+            self.host.send_message(f"⏳  Game starting in {remaining}...")
+            time.sleep(1)
+
+        # final message:
+        self.host.send_message(f"🚀 Game Started!")
+
 
     def play_game(self):
+        # 5-second countdown
+        self.countdown_to_start(countdown=5)
+
+        
         LoggingManager.info("Game Started..")
         self.shuffle_players()
 
@@ -392,7 +459,8 @@ class PlayGame():
 
                 if isinstance(status_card, FauxPas):
                     faux_pas_holder_id = starting_player_id
-                    self.players[faux_pas_holder_id].send_message(f"You have to discard a painting in this/subsequent rounds as you are holding a faux pass")
+                    self.players[faux_pas_holder_id].send_message(f"You have to discard a painting in this/subsequent rounds as you are holding a faux pass",
+                    message_type = "PLAYER_INFO", created_at = time.time())
 
 
             else:

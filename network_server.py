@@ -5,18 +5,26 @@ This script runs the game server that accepts network connections from players.
 Run this on the host machine (the one that will run the game).
 """
 
+import logging
 import socket
 import threading
 from socket import error as SocketError
 import sys
 from tabnanny import check
 import time
+import uuid
+import base64
 from highsociety.code.gamecore.player.networkplayer import NetworkPlayer
 from highsociety.code.gamecore.game_manager.gameplay import PlayGame
 from highsociety.code.common.utils.utility import get_all_configurations
 from highsociety.code.common.logger_module.logger.logging_manager import LoggingManager
-from highsociety.code.common.utils.network_utility import receive_message, send_message
+from highsociety.code.common.utils.network_utility import send_json, receive_json
+from highsociety.code.gamecore.player.networkspectator import NetworkSpectator
 from highsociety.code.gamecore.player.player import BasePlayer
+
+def generate_game_id() -> str:
+    raw = uuid.uuid4().bytes
+    return base64.urlsafe_b64encode(raw).decode().rstrip("=")
 
 def get_local_ip():
     """Get the local IP address of this machine."""
@@ -29,6 +37,7 @@ def get_local_ip():
         return ip
     except Exception:
         return "127.0.0.1"  # Fallback to localhost
+
 
 def set_keepalive(sock, after_idle_sec=60, interval_sec=30, max_fails=3):
     """
@@ -81,6 +90,147 @@ def players_heartbeat_monitor_thread(players: list[NetworkPlayer], timeout_secon
 
         time.sleep(check_interval)
 
+def accept_players(server_socket: socket.socket, expected_players:int, game_id: str):
+    print(f"🎮 Waiting for players....\n")
+    players = []
+    players_lock = threading.Lock()
+
+    def handle_single_connection(conn, addr):
+        try:
+            LoggingManager.info(f"A Player connected from {addr[0]}:{addr[1]}")
+            print(f"[info]: A Player is trying to connect from {addr[0]}:{addr[1]}")
+            set_keepalive(conn)
+
+            username_payload = {
+                "game_id": game_id,
+                "message_type": "IDENTIFY",
+                "prompt": "Enter your username",
+                "requires_response": True
+            }
+            send_json(conn, username_payload)
+            data = receive_json(conn)
+
+            if data["message_type"] != "IDENTIFY_ACK":
+                send_json(conn, {
+                    "game_id": game_id,
+                    "message_type": "IDENTIFY_ERROR",
+                    "prompt": "Expected username first",
+                    "requires_response": False
+                })
+                conn.close()
+                return
+
+            username = data["prompt"]
+
+            name_payload = {
+                "game_id": game_id,
+                "message_type": "IDENTIFY",
+                "prompt": "Enter your display name",
+                "requires_response": True
+            }
+            send_json(conn, name_payload)
+            data = receive_json(conn)
+
+            if data["message_type"] != "IDENTIFY_ACK":
+                send_json(conn, {
+                    "game_id": game_id,
+                    "message_type": "IDENTIFY_ERROR",
+                    "prompt": "Expected display name",
+                    "requires_response": False
+                })
+                conn.close()
+                return  
+
+            name = data["prompt"]
+
+            player = NetworkPlayer(name=name, username=username, conn=conn, game_id=game_id)
+
+            with players_lock:
+                players.append(player)
+                print(f"✅ Player joined: {username} ({name}) — {len(players)}/{expected_players}")
+
+            send_json(conn, {
+                "game_id": game_id,
+                "message_type": "IDENTIFY_SUCCESS",
+                "prompt": f"Welcome {username}! Waiting for other players...",
+                "requires_response": False
+            })
+
+        except Exception as e:
+            print(f"❌ Error with player at {addr}: {e}")
+            try:
+                conn.close()
+            except:
+                pass
+
+    threads = []
+    while len(threads) < expected_players:
+        conn, addr = server_socket.accept()
+        t = threading.Thread(target=handle_single_connection, args=(conn, addr), daemon=True)
+        t.start()
+        threads.append(t)
+
+    for t in threads:
+        t.join()
+
+    return players
+
+def accept_spectators(server_socket: socket.socket, spectators: list[NetworkSpectator], game_id: str):
+    print("👁️ Spectator mode enabled: Waiting for spectators...\n")
+    while True:
+        try:
+            conn, addr = server_socket.accept()
+            set_keepalive(conn)
+            send_json(conn, {
+                "game_id": game_id,
+                "message_type": "IDENTIFY",
+                "prompt": "You are connected as a spectator. Enter your name:",
+                "requires_response": True
+            })
+            data = receive_json(conn)
+            if data["message_type"] != "IDENTIFY_ACK":
+                send_json(conn, {
+                    "game_id": game_id,
+                    "message_type": "IDENTIFY_ERROR",
+                    "prompt": "Expected name",
+                    "requires_response": False
+                })
+                conn.close()
+                return
+
+            name = data["prompt"]
+            send_json(conn, {
+                "game_id": game_id,
+                "message_type": "IDENTIFY",
+                "prompt": f"Enter your username:",
+                "requires_response": True
+            })
+            data = receive_json(conn)
+            if data["message_type"] != "IDENTIFY_ACK":
+                send_json(conn, {
+                    "game_id": game_id,
+                    "message_type": "IDENTIFY_ERROR",
+                    "prompt": "Expected username",
+                    "requires_response": False
+                })
+                conn.close()
+                return
+
+            username = data["prompt"]
+            spectator = NetworkSpectator(conn=conn, name=name, username=username, game_id=game_id)
+            spectators.append(spectator)  # accept_spectators runs single-threaded; list.append is GIL-atomic
+
+            print(f"👁️ Spectator joined: {name}")
+            send_json(conn, {
+                "game_id": game_id,
+                "message_type": "IDENTIFY_SUCCESS",
+                "prompt": f"Welcome {name}! You are now watching the game live.",
+                "requires_response": False
+            })
+
+        except Exception as e:
+            LoggingManager.exception("❌  Error accepting spectator:", e)
+
 
 def start_server(host='0.0.0.0', port=8888, num_players=2):
     """
@@ -94,15 +244,25 @@ def start_server(host='0.0.0.0', port=8888, num_players=2):
     # Initialize game
     config = get_all_configurations()
     logging_manager = LoggingManager(config)
+    print("debug point: logger initialized on server.")
+    logging_manager.info("logger initialized on server.")
 
     # Create socket
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM) #IPV4, TCP
     server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+
+    # Create spectator server socket
+    spectator_server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    spectator_server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    spectator_server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
     
     try:
         server_socket.bind((host, port)) # server_socket needs to be bound to a host and port. 
         server_socket.listen(num_players)
+
+        spectator_server_socket.bind((host, port+1))
+        spectator_server_socket.listen()
         
         local_ip = get_local_ip()
         print(f"\n{'='*60}")
@@ -115,78 +275,41 @@ def start_server(host='0.0.0.0', port=8888, num_players=2):
         print("Share this information with players:")
         print(f"   IP: {local_ip}")
         print(f"   Port: {port}\n")
+
+        game_id = generate_game_id()
         
-        players = []
-        i = 0
+        spectators = []
+        spectator_thread = threading.Thread(target=accept_spectators, args=(spectator_server_socket, spectators, game_id), daemon=True) # accept spectators indefinitely.
+        spectator_thread.start()
 
-        while i < num_players:
-            try:
-                print(f"⏳ Waiting for player {i+1}/{num_players}...")
-                conn, addr = server_socket.accept() # conn -> client's socket, addr -> (IP, PORT)
-                LoggingManager.info(f"Player {i+1} connected from {addr[0]}:{addr[1]}")
-                print(f"✅ Player {i+1} connected from {addr[0]}:{addr[1]}")
-                set_keepalive(conn)
-
-                username = None
-                name = None
-                # Send username prompt (with newline for better compatibility)
-                send_message(conn, "Enter your username:")
-                # Wait for response with timeout
-                conn.settimeout(None)  
-
-                while (username is None):
-                    username = receive_message(conn)
-                    if not username:
-                        print(f"⚠️ Empty input. Please enter a valid username.")
-                        continue
-                    
-                # Send display name prompt
-                send_message(conn, "Enter your display name:")
-                while (not name):
-                    name = receive_message(conn)
-                    if not name:
-                        print(f"⚠️ Empty input. Please enter a valid display name.")
-                        continue
-                    
-                # Create NetworkPlayer
-                player = NetworkPlayer(name=name, username=username, conn=conn)
-                players.append(player)
-                send_message(conn, f"Welcome {username}! Waiting for other players...")
-                print(f"   Player: {username} ({name})\n")
-                i += 1
-            except socket.timeout:
-                print(f"⏰ Player {i+1} timed out during setup")
-                conn.close()
-                continue
-            except Exception as e:
-                print(f"❌ Error during player {i+1} setup: {e}")
-                conn.close()
-                continue
+        players = accept_players(server_socket, num_players, game_id)
 
         
         # Close server socket
-        # server_socket.close() # can't close if spectators needs to be added.
-        
-        print(f"\n{'='*60}")
-        print(f"🎉 All players connected! Starting game...")
-        print(f"{'='*60}\n")
-        
+        server_socket.close() # can't close if spectators needs to be added.        
         # Start receiver threads for all players
         print("🔌 Starting receiver threads for all players...")
         for player in players:
             player.start_receiver_thread()
         print("✅ All receiver threads started.\n")
+
+        print(f"\n{'='*60}")
+        print(f"🎉 All players connected! Starting game...")
+        print(f"{'='*60}\n")
                 
         # Create and start game
         heartbeat_monitor_thread = threading.Thread(target=players_heartbeat_monitor_thread, args=(players, 120, 5), daemon=True)
         heartbeat_monitor_thread.start()
-        game = PlayGame(players=players, mode='network')
+        game = PlayGame(players=players, spectators = spectators, mode='network', game_id = game_id)
         game.play_game()
         
         # Close all player connections
         print("\n🔌 Closing connections...")
         for player in players:
             player.close()
+
+        for spectator in spectators:
+            spectator.close()
         
         print("👋 Server shutting down. Thanks for playing!")
         
