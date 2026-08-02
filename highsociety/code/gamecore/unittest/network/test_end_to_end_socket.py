@@ -1,3 +1,4 @@
+import itertools
 import json
 import socket
 import threading
@@ -7,6 +8,12 @@ import pytest
 
 from network_server import start_server, accept_players
 from highsociety.code.common.utils.network_utility import send_json, receive_json
+
+# NOTE: id(threading.current_thread()) is constant across the whole pytest
+# session (same main thread), so it can't be used to pick a fresh port when
+# a fixture is invoked more than once — every invocation would collide on
+# the same port. A real counter guarantees a never-reused port instead.
+_chat_test_port_counter = itertools.count(21000, 2)  # step by 2: each game also uses port+1 for spectators
 
 
 class ScriptedSocketClient:
@@ -84,6 +91,77 @@ class ScriptedSocketClient:
     def prompts(self):
         with self._lock:
             return [p.get("prompt", "") for p in self.received]
+
+    def chat_messages(self):
+        with self._lock:
+            return [p for p in self.received if p.get("message_type") == "CHAT"]
+
+    def close(self):
+        self._running = False
+        try:
+            self.sock.close()
+        except OSError:
+            pass
+
+
+class ScriptedSpectatorSocketClient:
+    """Drives the spectator wire protocol (handshake + chat) over a real TCP socket."""
+
+    def __init__(self, host, port, name):
+        self.name = name
+        self.username = f"{name}-user"
+        self.game_id = None
+        self.sock = socket.create_connection((host, port), timeout=5)
+        self.sock.settimeout(5)
+        self.received = []
+        self._buffer = ""
+        self._lock = threading.Lock()
+        self._running = True
+        self._thread = None
+
+    def handshake(self):
+        prompt = receive_json(self.sock)  # "Enter your name"
+        self.game_id = prompt.get("game_id")
+        send_json(self.sock, {"game_id": self.game_id, "message_type": "IDENTIFY_ACK", "prompt": self.name})
+        receive_json(self.sock)  # "Enter your username"
+        send_json(self.sock, {"game_id": self.game_id, "message_type": "IDENTIFY_ACK", "prompt": self.username})
+        welcome = receive_json(self.sock)
+        assert welcome.get("message_type") == "IDENTIFY_SUCCESS", welcome
+
+    def start(self):
+        self._thread = threading.Thread(target=self._loop, daemon=True)
+        self._thread.start()
+
+    def _loop(self):
+        while self._running:
+            try:
+                self.sock.settimeout(1.0)
+                chunk = self.sock.recv(4096).decode("utf-8", errors="ignore")
+                if not chunk:
+                    self._running = False
+                    break
+                self._buffer += chunk
+                while "\n" in self._buffer:
+                    line, self._buffer = self._buffer.split("\n", 1)
+                    line = line.strip()
+                    if not line:
+                        continue
+                    payload = json.loads(line)
+                    with self._lock:
+                        self.received.append(payload)
+            except socket.timeout:
+                continue
+            except OSError:
+                self._running = False
+                break
+
+    def send_chat(self, text, target="all", game_id=None):
+        send_json(self.sock, {"game_id": game_id if game_id is not None else self.game_id,
+                               "message_type": "CHAT", "prompt": text, "target": target})
+
+    def chat_messages(self):
+        with self._lock:
+            return [p for p in self.received if p.get("message_type") == "CHAT"]
 
     def close(self):
         self._running = False
@@ -299,3 +377,80 @@ def test_handshake_rejects_a_mismatched_game_id_and_waits_for_a_replacement():
     players[0].close()
     good.close()
     server_socket.close()
+
+
+@pytest.fixture
+def running_game_with_spectators():
+    """A full server with 2 real players and 2 real spectators, all connected."""
+    port = next(_chat_test_port_counter)
+    t = threading.Thread(
+        target=start_server,
+        kwargs={"host": "127.0.0.1", "port": port, "num_players": 2},
+        daemon=True,
+    )
+    t.start()
+    threading.Event().wait(0.5)
+
+    p1 = ScriptedSocketClient("127.0.0.1", port, "alice")
+    p2 = ScriptedSocketClient("127.0.0.1", port, "bob")
+    p1.handshake()
+    p2.handshake()
+    p1.start()
+    p2.start()
+
+    s1 = ScriptedSpectatorSocketClient("127.0.0.1", port + 1, "spec1")
+    s2 = ScriptedSpectatorSocketClient("127.0.0.1", port + 1, "spec2")
+    s1.handshake()
+    s2.handshake()
+    s1.start()
+    s2.start()
+
+    threading.Event().wait(0.5)  # let each spectator's chat-listener thread spin up
+
+    yield p1, p2, s1, s2
+
+    for conn in (p1, p2, s1, s2):
+        conn.close()
+
+
+def _wait_for_chat(client, text, deadline_seconds=5):
+    deadline = time.time() + deadline_seconds
+    while time.time() < deadline:
+        if any(m.get("prompt", "").endswith(text) for m in client.chat_messages()):
+            return True
+        threading.Event().wait(0.1)
+    return False
+
+
+def test_spectator_chat_to_all_reaches_players_and_other_spectators_not_sender(running_game_with_spectators):
+    p1, p2, s1, s2 = running_game_with_spectators
+
+    s1.send_chat("hello everyone", target="all")
+
+    assert _wait_for_chat(s2, "hello everyone")
+    assert _wait_for_chat(p1, "hello everyone")
+    assert _wait_for_chat(p2, "hello everyone")
+    threading.Event().wait(0.3)  # give a stray echo-to-sender every chance to arrive before asserting its absence
+    assert not any("hello everyone" in m.get("prompt", "") for m in s1.chat_messages())
+
+
+def test_spectator_chat_to_spectators_only_does_not_reach_players(running_game_with_spectators):
+    p1, p2, s1, s2 = running_game_with_spectators
+
+    s2.send_chat("just us spectators", target="spectators")
+
+    assert _wait_for_chat(s1, "just us spectators")
+    threading.Event().wait(0.5)
+    assert not any("just us spectators" in m.get("prompt", "") for m in p1.chat_messages())
+    assert not any("just us spectators" in m.get("prompt", "") for m in p2.chat_messages())
+    assert not any("just us spectators" in m.get("prompt", "") for m in s2.chat_messages())  # not echoed to sender
+
+
+def test_spectator_chat_with_mismatched_game_id_is_dropped(running_game_with_spectators):
+    p1, p2, s1, s2 = running_game_with_spectators
+
+    s1.send_chat("this should never arrive", target="all", game_id="a-completely-different-game")
+
+    threading.Event().wait(1.0)
+    for client in (p1, p2, s2):
+        assert not any("this should never arrive" in m.get("prompt", "") for m in client.chat_messages())

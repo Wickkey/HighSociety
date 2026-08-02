@@ -18,7 +18,7 @@ import base64
 from highsociety.code.gamecore.player.networkplayer import NetworkPlayer
 from highsociety.code.gamecore.game_manager.gameplay import PlayGame
 from highsociety.code.common.utils.utility import get_all_configurations
-from highsociety.code.common.logger_module.logger.logging_manager import LoggingManager
+from highsociety.code.common.logger_module.logger.logging_manager import LoggingManager, LogType
 from highsociety.code.common.utils.network_utility import send_json, receive_json
 from highsociety.code.gamecore.player.networkspectator import NetworkSpectator
 from highsociety.code.gamecore.player.player import BasePlayer
@@ -108,9 +108,17 @@ def players_heartbeat_monitor_thread(players: list[NetworkPlayer], timeout_secon
 
         time.sleep(check_interval)
 
-def accept_players(server_socket: socket.socket, expected_players:int, game_id: str):
+def accept_players(server_socket: socket.socket, expected_players: int, game_id: str, players: list = None):
+    """
+    players: an optional externally-created list to populate (instead of a
+    fresh one) — used so accept_spectators, which starts running
+    concurrently before any player has joined, can hold a reference to the
+    same list and see it fill up over time (needed for the spectator chat
+    relay to reach players).
+    """
     print(f"🎮 Waiting for players....\n")
-    players = []
+    if players is None:
+        players = []
     players_lock = threading.Lock()
 
     def handle_single_connection(conn, addr):
@@ -223,7 +231,47 @@ def accept_players(server_socket: socket.socket, expected_players:int, game_id: 
 
     return players
 
-def accept_spectators(server_socket: socket.socket, spectators: list[NetworkSpectator], game_id: str):
+def _spectator_chat_listener(spectator: NetworkSpectator, players: list, spectators: list, game_id: str):
+    """
+    Runs for the lifetime of one spectator's connection: relays every CHAT
+    message they send to either everyone (players + other spectators,
+    default) or spectators only, per the message's "target" field. Never
+    echoes a message back to its own sender.
+    """
+    while spectator.active:
+        msg = spectator.transport.receive(timeout=1.0)
+        if msg is None:
+            continue
+        if msg.get("message_type") != "CHAT":
+            continue
+
+        incoming_game_id = msg.get("game_id")
+        if incoming_game_id is not None and incoming_game_id != game_id:
+            LoggingManager.warning(
+                f"Ignoring chat with mismatched game_id from {spectator.username} "
+                f"(expected {game_id!r}, got {incoming_game_id!r})",
+                log_type=LogType.SECURITY,
+            )
+            continue
+
+        text = msg.get("prompt", "")
+        if not text:
+            continue
+
+        target = "spectators" if msg.get("target") == "spectators" else "all"
+        formatted = f"💬 {spectator.username}: {text}"
+
+        for other in list(spectators):
+            if other is spectator or not other.active:
+                continue
+            other.send_message(formatted, message_type="CHAT", from_user=spectator.username, to_users=target)
+
+        if target != "spectators":
+            for player in list(players):
+                if player.active:
+                    player.send_message(formatted, message_type="CHAT", from_user=spectator.username, to_users=target)
+
+def accept_spectators(server_socket: socket.socket, spectators: list[NetworkSpectator], game_id: str, players: list):
     print("👁️ Spectator mode enabled: Waiting for spectators...\n")
     while True:
         try:
@@ -267,6 +315,7 @@ def accept_spectators(server_socket: socket.socket, spectators: list[NetworkSpec
             username = data["prompt"]
             transport = SocketTransport(conn, label=f"{username}@{addr[0]}:{addr[1]}")
             spectator = NetworkSpectator(transport=transport, name=name, username=username, game_id=game_id)
+            spectator.start_receiver_thread()
             spectators.append(spectator)  # accept_spectators runs single-threaded; list.append is GIL-atomic
 
             print(f"👁️ Spectator joined: {name}")
@@ -276,6 +325,14 @@ def accept_spectators(server_socket: socket.socket, spectators: list[NetworkSpec
                 "prompt": f"Welcome {name}! You are now watching the game live.",
                 "requires_response": False
             })
+
+            chat_thread = threading.Thread(
+                target=_spectator_chat_listener,
+                args=(spectator, players, spectators, game_id),
+                daemon=True,
+                name=f"Chat-{username}",
+            )
+            chat_thread.start()
 
         except Exception as e:
             LoggingManager.exception("❌  Error accepting spectator:", e)
@@ -332,12 +389,17 @@ def start_server(host='0.0.0.0', port=8888, num_players=2, seed=None, record_pat
         print(f"   Port: {port}\n")
 
         game_id = generate_game_id()
-        
+
         spectators = []
-        spectator_thread = threading.Thread(target=accept_spectators, args=(spectator_server_socket, spectators, game_id), daemon=True) # accept spectators indefinitely.
+        # Created upfront (instead of inside accept_players) and shared so
+        # accept_spectators — which starts running immediately, before any
+        # player has joined — can relay spectator chat to players as they
+        # connect over time.
+        players = []
+        spectator_thread = threading.Thread(target=accept_spectators, args=(spectator_server_socket, spectators, game_id, players), daemon=True) # accept spectators indefinitely.
         spectator_thread.start()
 
-        players = accept_players(server_socket, num_players, game_id)
+        accept_players(server_socket, num_players, game_id, players=players)
 
 
         # Close server socket

@@ -4,10 +4,10 @@ HighSociety Spectator Client
 This script connects to a game server and allows you to watch the game.
 Run this on each spectator's machine/terminal.
 
-Speaks the server's newline-delimited JSON protocol. Spectators are read-only:
-after the handshake, the server never reads anything further from this
-connection (see NetworkSpectator / accept_spectators), so this client just
-displays whatever arrives until disconnected or the user quits.
+Speaks the server's newline-delimited JSON protocol. Spectators can chat:
+type a message and press Enter to send it to everyone (players + other
+spectators), or prefix it with "/spectators " to send it to spectators
+only. Chat you send is never echoed back to you.
 """
 
 import json
@@ -160,6 +160,14 @@ class SpectatorClient:
                 self.running = False
                 break
 
+    def send_chat(self, text, target="all"):
+        """Sends a chat message. target is "all" (players + other spectators) or "spectators"."""
+        try:
+            send_json(self.sock, {"game_id": self.game_id, "message_type": "CHAT", "prompt": text, "target": target})
+            return True
+        except (socket.error, OSError):
+            return False
+
     def run(self):
         """Main client loop."""
         if not self.connect():
@@ -172,7 +180,11 @@ class SpectatorClient:
                 self.sock.close()
             return
 
-        print("\n💡 Spectating — type 'quit' and press Enter any time to leave.\n")
+        print("\n💡 Spectating:")
+        print("   - Type a message + Enter to chat with everyone")
+        print("   - Prefix with '/spectators ' to chat with spectators only")
+        print("   - Type 'quit' to leave")
+        print()
 
         receive_thread = threading.Thread(target=self.receive_messages, daemon=True)
         receive_thread.start()
@@ -186,8 +198,19 @@ class SpectatorClient:
                 except KeyboardInterrupt:
                     print("\n\n⚠️ Disconnecting...")
                     break
+
                 if user_input.strip().lower() == 'quit':
                     break
+
+                if not user_input.strip():
+                    continue
+
+                if user_input.startswith("/spectators "):
+                    self.send_chat(user_input[len("/spectators "):], target="spectators")
+                elif user_input.strip() == "/spectators":
+                    continue  # no message body
+                else:
+                    self.send_chat(user_input, target="all")
         except Exception as e:
             print(f"\n❌ Error: {e}")
         finally:

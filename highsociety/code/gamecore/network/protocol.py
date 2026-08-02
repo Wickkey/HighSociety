@@ -17,9 +17,22 @@ PLAYER_MESSAGE_TYPES = {
     "INPUT_ERROR",
     "GLOBAL_EVENT",
     "GLOBAL_MOVE_INFO",
+    "CHAT",
 }
 
 SPECTATOR_MESSAGE_TYPES = {"GLOBAL_EVENT", "GLOBAL_MOVE_INFO", "CHAT"}
+
+
+def _chat_payload(*, game_id, prompt, created_at, from_user, to_users) -> dict:
+    return {
+        "game_id": game_id,
+        "message_type": "CHAT",
+        "prompt": prompt,
+        "from_user": from_user or "nan",
+        "to_user(s)": to_users or "all",
+        "requires_response": False,
+        "created_at": created_at,
+    }
 
 
 def build_player_payload(
@@ -30,12 +43,17 @@ def build_player_payload(
     prompt: str,
     created_at: Optional[float] = None,
     constraints: Optional[dict] = None,
+    from_user: Optional[str] = None,
+    to_users: Optional[str] = None,
 ) -> dict:
     """Builds the payload a NetworkPlayer sends. Raises ValueError on an unknown message_type."""
     if message_type not in PLAYER_MESSAGE_TYPES:
         raise ValueError(f"Invalid message type: {message_type}")
 
     created_at = created_at if created_at is not None else time.time()
+
+    if message_type == "CHAT":
+        return _chat_payload(game_id=game_id, prompt=prompt, created_at=created_at, from_user=from_user, to_users=to_users)
 
     if message_type == "GLOBAL_EVENT":
         return {
@@ -85,6 +103,8 @@ def build_spectator_payload(
     message_type: str,
     prompt: str,
     created_at: Optional[float] = None,
+    from_user: Optional[str] = None,
+    to_users: Optional[str] = None,
 ) -> dict:
     """Builds the payload a NetworkSpectator sends. Raises ValueError on an unknown message_type."""
     if message_type not in SPECTATOR_MESSAGE_TYPES:
@@ -93,14 +113,7 @@ def build_spectator_payload(
     created_at = created_at if created_at is not None else time.time()
 
     if message_type == "CHAT":
-        return {
-            "game_id": game_id,
-            "message_type": message_type,
-            "prompt": prompt,
-            "from_user": "nan",
-            "to_user(s)": "nan",
-            "created_at": created_at,
-        }
+        return _chat_payload(game_id=game_id, prompt=prompt, created_at=created_at, from_user=from_user, to_users=to_users)
 
     if message_type == "GLOBAL_MOVE_INFO":
         return {

@@ -17,12 +17,16 @@ replay system, and Transport/protocol modularity refactor.
   to `ForfeitSettlement` and neither `main.py` nor `network_server.py` expose a flag to choose the
   other. If you want the "official rules" refund-everyone behavior available to a real user, it
   needs a `--settlement` flag or config entry.
-- **Spectator `CHAT` messages don't go anywhere.** `network/protocol.py` defines a `CHAT` message
-  shape, but no spectator client ever sends one, and spectators don't even get a receiver thread
-  on the server (`accept_spectators` never calls anything like `start_receiver_thread` for them).
-  It's a payload shape with no sender and no listener.
-- ~~**`LogType.SECURITY` is never invoked.**~~ **Fixed as a side effect of the `game_id` validation
-  fix below** — `NetworkPlayer._belongs_to_this_game()` now logs a mismatched `game_id` there.
+- ~~**Spectator `CHAT` messages don't go anywhere.**~~ **Fixed.** Spectators now get a receiver
+  thread and a per-connection chat-relay thread (`network_server.py::_spectator_chat_listener`).
+  `network_spectator_client.py` sends typed input as chat: plain text → `target="all"` (players +
+  other spectators), `/spectators <message>` → `target="spectators"` only. Never echoed back to the
+  sender; a mismatched `game_id` on an incoming chat message is dropped (reusing the validation
+  pattern from the earlier `game_id` fix). Players can now receive `CHAT` too (`protocol.py`'s
+  `PLAYER_MESSAGE_TYPES` gained it). Tests:
+  `test_end_to_end_socket.py::test_spectator_chat_to_all_reaches_players_and_other_spectators_not_sender`,
+  `::test_spectator_chat_to_spectators_only_does_not_reach_players`,
+  `::test_spectator_chat_with_mismatched_game_id_is_dropped`.
 
 ## Config values that are silently ignored
 
@@ -37,23 +41,9 @@ replay system, and Transport/protocol modularity refactor.
 
 ## Networking robustness gaps
 
-- ~~**A failed handshake silently reduces the player count.**~~ **Fixed.** `accept_players()` now
-  waits for `expected_players` *successful* handshakes, not just that many accepted connections —
-  a client that fails IDENTIFY no longer permanently steals a slot; the server keeps accepting
-  replacement connections until enough real players actually join. Regression test:
-  `unittest/network/test_end_to_end_socket.py::test_a_failed_handshake_does_not_permanently_steal_a_player_slot`
-  (verified it fails against the old logic, passes against the fix).
 - **No reconnection support.** Once a `NetworkPlayer`'s transport disconnects (`active` flips to
   `False`), there's no path back in — same effect as quitting. If a player's WiFi blips mid-game,
   they're permanently out, not just paused.
-- ~~**No `game_id` validation.**~~ **Fixed.** `NetworkPlayer.get_bid()`/`choose_painting_to_discard()`
-  now silently discard (and log to the security logger — the first real use of `LogType.SECURITY`)
-  any incoming message whose `game_id` is present but doesn't match the player's own; the server
-  handshake (`accept_players`/`accept_spectators`) rejects an `IDENTIFY_ACK` the same way. A
-  *missing* `game_id` stays permissive, for lightweight clients/tests that don't set one. Tests:
-  `test_network_player_protocol.py::test_get_bid_ignores_a_message_with_mismatched_game_id` (+
-  the `choose_painting_to_discard` equivalent) and
-  `test_end_to_end_socket.py::test_handshake_rejects_a_mismatched_game_id_and_waits_for_a_replacement`.
 - **One game per server process.** `start_server()` runs exactly one `PlayGame` and exits. There's
   no lobby/matchmaking layer for hosting multiple concurrent games from one running server.
 

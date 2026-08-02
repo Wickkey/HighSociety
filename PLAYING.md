@@ -43,10 +43,13 @@ Prints the host's IP and port, then waits for that many players to connect.
 python3 network_client.py --host <ip-from-server-output> --port 8888
 ```
 
-**Spectators** (read-only, optional) connect to `<port + 1>`:
+**Spectators** (optional) connect to `<port + 1>`:
 ```bash
 python3 network_spectator_client.py --host <ip-from-server-output> --port 8889
 ```
+Spectators watch the game live and can chat: type a message + Enter to reach everyone (players and
+other spectators), or prefix with `/spectators ` to reach spectators only. A chat message is never
+echoed back to whoever sent it.
 
 Same bid syntax as CLI mode (numbers, lists, `pass`/`fold`/`quit`).
 

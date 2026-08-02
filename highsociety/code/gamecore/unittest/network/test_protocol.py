@@ -43,11 +43,30 @@ class TestSpectatorPayload:
         assert payload["requires_response"] is False
         assert payload["prompt"] == "hi"
 
-    def test_chat_includes_from_and_to_user_fields(self):
+    def test_chat_defaults_from_user_and_scope_when_not_given(self):
         payload = build_spectator_payload(game_id="g1", message_type="CHAT", prompt="gg")
         assert payload["from_user"] == "nan"
-        assert payload["to_user(s)"] == "nan"
+        assert payload["to_user(s)"] == "all"
+
+    def test_chat_carries_the_actual_sender_and_scope(self):
+        payload = build_spectator_payload(
+            game_id="g1", message_type="CHAT", prompt="gg", from_user="alice", to_users="spectators",
+        )
+        assert payload["from_user"] == "alice"
+        assert payload["to_user(s)"] == "spectators"
 
     def test_unknown_message_type_raises(self):
         with pytest.raises(ValueError):
             build_spectator_payload(game_id="g1", message_type="PLAYER_MOVE", prompt="x")
+
+
+class TestPlayerChatPayload:
+    def test_player_can_receive_a_chat_message(self):
+        payload = build_player_payload(
+            game_id="g1", username="alice", message_type="CHAT", prompt="hi",
+            from_user="bob-the-spectator", to_users="all",
+        )
+        assert payload["message_type"] == "CHAT"
+        assert payload["from_user"] == "bob-the-spectator"
+        assert payload["to_user(s)"] == "all"
+        assert "player_id" not in payload  # CHAT isn't addressed to a specific player_id

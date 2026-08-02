@@ -35,7 +35,14 @@ class NetworkPlayer(BasePlayer):
     def get_last_heartbeat(self) -> float:
         return self.transport.get_last_heartbeat()
 
-    def send_message(self, msg: str, message_type: str, created_at: Optional[float] = None) -> None:
+    def send_message(
+        self,
+        msg: str,
+        message_type: str,
+        created_at: Optional[float] = None,
+        from_user: Optional[str] = None,
+        to_users: Optional[str] = None,
+    ) -> None:
         """Sends a message to the remote player via its transport."""
         constraints = None
         if message_type == "PLAYER_MOVE":
@@ -53,6 +60,8 @@ class NetworkPlayer(BasePlayer):
             prompt=msg,
             created_at=created_at,
             constraints=constraints,
+            from_user=from_user,
+            to_users=to_users,
         )
         try:
             self.transport.send(payload)
