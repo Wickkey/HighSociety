@@ -146,7 +146,7 @@ class BasePlayer:
     def get_bid(self):
         raise NotImplementedError("Subclasses must implement this method")
 
-    def send_message(self, message: str):
+    def send_message(self, message: str, message_type: str, created_at: float):
         raise NotImplementedError("Subclasses must implement this method")
 
     

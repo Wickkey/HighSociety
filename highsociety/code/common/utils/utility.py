@@ -1,6 +1,7 @@
 import json
 import os
 import logging
+from pathlib import Path
 from highsociety.code.common.logger_module.logger.logging_manager import LoggingManager
 
 
@@ -11,6 +12,9 @@ if not _bootstrap_logger.handlers:
     formatter = logging.Formatter("[CONFIG ERROR] %(message)s")
     handler.setFormatter(formatter)
     _bootstrap_logger.addHandler(handler)
+
+# .../<repo_root>/highsociety/code/common/utils/utility.py -> <repo_root>
+_REPO_ROOT = Path(__file__).resolve().parents[4]
 
 def get_base_path():
     all_config_details = get_all_configurations()
@@ -23,12 +27,12 @@ def get_base_path():
 
 def get_all_configurations() -> dict:
     try:
-        gameconfigdir = os.getcwd() + "//highsociety//HSConfig.json"
+        gameconfigdir = _REPO_ROOT / "highsociety" / "HSConfig.json"
         with open(gameconfigdir, "r") as f:
             data = json.load(f)
 
         return data
-    
+
     except Exception as e:
         _bootstrap_logger.error(f"Error getting base path: {e}")
         return None
@@ -52,6 +56,7 @@ def get_game_setting_configurations():
     except Exception as e:
         _bootstrap_logger.error(f"Error getting base path: {e}")
         return None
+
 
 def get_game_metadata_configurations():
     all_config_details = get_all_configurations()

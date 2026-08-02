@@ -63,6 +63,17 @@ class LoggingManager:
         return cls._instance
 
     @classmethod
+    def _ensure_initialized(cls):
+        """
+        Lazily initializes the singleton with the default configuration if no
+        caller has explicitly constructed a LoggingManager yet. This lets any
+        module log safely regardless of import/startup order.
+        """
+        if cls._instance is None:
+            from highsociety.code.common.utils.utility import get_all_configurations
+            cls(get_all_configurations())
+
+    @classmethod
     def log(cls, level, module, msg, log_type: LogType = LogType.GENERIC, *args, **kwargs):
         """
             Function responsible for logging.
@@ -76,6 +87,7 @@ class LoggingManager:
                 *args       -
                 **kwargs    -
         """
+        cls._ensure_initialized()
         args = args or ()
         kwargs = kwargs or {}
         kwargs['stacklevel'] = 2
@@ -94,6 +106,7 @@ class LoggingManager:
                 *args       -
                 **kwargs    -
         """
+        cls._ensure_initialized()
         kwargs = kwargs or {}
         kwargs['stacklevel'] = 2
         logger = cls._security_logger if log_type == LogType.SECURITY else cls._generic_logger
@@ -111,6 +124,7 @@ class LoggingManager:
                 *args       -
                 **kwargs    -
         """
+        cls._ensure_initialized()
         kwargs = kwargs or {}
         kwargs['stacklevel'] = 2
         logger = cls._security_logger if log_type == LogType.SECURITY else cls._generic_logger
@@ -128,6 +142,7 @@ class LoggingManager:
                 *args       -
                 **kwargs    -
         """
+        cls._ensure_initialized()
         kwargs = kwargs or {}
         kwargs['stacklevel'] = 2
         logger = cls._security_logger if log_type == LogType.SECURITY else cls._generic_logger
@@ -145,6 +160,7 @@ class LoggingManager:
                 *args       -
                 **kwargs    -
         """
+        cls._ensure_initialized()
         kwargs = kwargs or {}
         kwargs['stacklevel'] = 2
         logger = cls._security_logger if log_type == LogType.SECURITY else cls._generic_logger
@@ -162,6 +178,7 @@ class LoggingManager:
                 *args       -
                 **kwargs    -
         """
+        cls._ensure_initialized()
         kwargs = kwargs or {}
         kwargs['stacklevel'] = 2
         msg = f'{msg} \n {traceback.format_exc()}'
