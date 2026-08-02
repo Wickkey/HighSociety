@@ -65,3 +65,22 @@ def get_game_metadata_configurations():
     except Exception as e:
         _bootstrap_logger.error(f"Error getting base path: {e}")
         return None
+
+
+def validate_player_count(num_players: int, rules: dict = None) -> str:
+    """
+    Checks num_players against HSConfig.json's min_players/max_players (a
+    dict from get_game_setting_configurations(), fetched automatically if
+    not given). Returns an error message string if out of range, or None if
+    valid — shared by main.py and network_server.py so both entry points
+    enforce the exact same rule instead of each hardcoding their own.
+    """
+    rules = rules if rules is not None else (get_game_setting_configurations() or {})
+    min_players = rules.get("min_players", 2)
+    max_players = rules.get("max_players")
+
+    if num_players < min_players:
+        return f"At least {min_players} players are required."
+    if max_players is not None and num_players > max_players:
+        return f"At most {max_players} players are allowed."
+    return None

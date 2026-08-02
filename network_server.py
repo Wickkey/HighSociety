@@ -17,7 +17,7 @@ import uuid
 import base64
 from highsociety.code.gamecore.player.networkplayer import NetworkPlayer
 from highsociety.code.gamecore.game_manager.gameplay import PlayGame
-from highsociety.code.common.utils.utility import get_all_configurations
+from highsociety.code.common.utils.utility import get_all_configurations, validate_player_count
 from highsociety.code.common.logger_module.logger.logging_manager import LoggingManager, LogType
 from highsociety.code.common.utils.network_utility import send_json, receive_json
 from highsociety.code.gamecore.player.networkspectator import NetworkSpectator
@@ -464,8 +464,9 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
 
-    if args.players < 2:
-        print("⚠️ At least 2 players are required!")
+    error = validate_player_count(args.players)
+    if error:
+        print(f"⚠️ {error}")
         sys.exit(1)
 
     start_server(host=args.host, port=args.port, num_players=args.players, seed=args.seed, record_path=args.record)

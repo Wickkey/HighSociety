@@ -1,7 +1,7 @@
 import random
 
 from highsociety.code.gamecore.game_manager.gameplay import PlayGame
-from highsociety.code.common.utils.utility import get_all_configurations
+from highsociety.code.common.utils.utility import get_all_configurations, validate_player_count
 from highsociety.code.common.logger_module.logger.logging_manager import LoggingManager
 from highsociety.code.gamecore.player.cliplayer import CLIPlayer
 from highsociety.code.gamecore.recording.session_recorder import SessionRecorder
@@ -9,12 +9,13 @@ from highsociety.code.gamecore.recording.recording_player import RecordingPlayer
 from highsociety.code.gamecore.recording.replay_player import ReplayPlayer
 
 def get_num_players() -> int:
-    """Prompt user for the number of players."""
+    """Prompt user for the number of players, enforcing HSConfig.json's min_players/max_players."""
     while True:
         try:
             num = int(input("Enter number of players: ").strip())
-            if num < 2:
-                print("⚠️ At least 2 players are required to start the game.")
+            error = validate_player_count(num)
+            if error:
+                print(f"⚠️ {error}")
                 continue
             return num
         except ValueError:

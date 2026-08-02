@@ -30,10 +30,6 @@ replay system, and Transport/protocol modularity refactor.
 
 ## Config values that are silently ignored
 
-- **`max_players` / `min_players` in `HSConfig.json` are dead.** Neither `main.py`'s
-  `get_num_players()` nor `network_server.py`'s `--players` argument reference them at all — both
-  only hardcode a `< 2` check. You can start a 20-player game today even though the config claims
-  a max of 5.
 - **A recording doesn't pin the config it was made under.** `SessionRecorder` saves the seed, but
   not a snapshot/hash of `HSConfig.json` at record time. If painting values, disgrace card counts,
   etc. change before you replay, the replay could silently diverge from the original game (or hit
