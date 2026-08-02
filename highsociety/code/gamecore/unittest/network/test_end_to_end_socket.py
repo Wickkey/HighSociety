@@ -247,3 +247,55 @@ def test_a_failed_handshake_does_not_permanently_steal_a_player_slot():
     good1_sock.close()
     good2_sock.close()
     server_socket.close()
+
+
+def test_handshake_rejects_a_mismatched_game_id_and_waits_for_a_replacement():
+    """
+    A client whose IDENTIFY_ACK carries a *different, present* game_id (e.g.
+    stale data from a previous connection attempt, or a confused client
+    talking to the wrong server) must be rejected rather than accepted into
+    this game — same "wait for a real replacement" behavior as a malformed
+    handshake.
+    """
+    port = 20800 + (id(threading.current_thread()) % 500)
+    server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    server_socket.bind(("127.0.0.1", port))
+    server_socket.listen(5)
+
+    result = {}
+
+    def run_accept():
+        result["players"] = accept_players(server_socket, expected_players=1, game_id="the-real-game")
+
+    t = threading.Thread(target=run_accept, daemon=True)
+    t.start()
+    threading.Event().wait(0.3)
+
+    # Wrong game_id: should be rejected with IDENTIFY_ERROR, not joined.
+    wrong = socket.create_connection(("127.0.0.1", port), timeout=5)
+    receive_json(wrong)  # username prompt (carries the real game_id, which this client ignores)
+    send_json(wrong, {"game_id": "a-stale-or-different-game", "message_type": "IDENTIFY_ACK", "prompt": "mallory"})
+    rejection = receive_json(wrong)
+    assert rejection["message_type"] == "IDENTIFY_ERROR"
+    wrong.close()
+
+    # A correctly-tagged client should still be accepted to fill the slot.
+    good = socket.create_connection(("127.0.0.1", port), timeout=5)
+    prompt = receive_json(good)
+    send_json(good, {"game_id": prompt["game_id"], "message_type": "IDENTIFY_ACK", "prompt": "alice"})
+    receive_json(good)  # display name prompt
+    send_json(good, {"game_id": prompt["game_id"], "message_type": "IDENTIFY_ACK", "prompt": "Alice"})
+    welcome = receive_json(good)
+
+    t.join(timeout=10)
+    assert not t.is_alive()
+
+    players = result["players"]
+    assert len(players) == 1
+    assert players[0].username == "alice"
+    assert welcome["message_type"] == "IDENTIFY_SUCCESS"
+
+    players[0].close()
+    good.close()
+    server_socket.close()

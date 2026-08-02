@@ -108,3 +108,40 @@ def test_get_bid_returns_quit_when_connection_closes_while_inactive(player_and_p
     peer.close()  # triggers the receiver thread to mark the player inactive
     result = player.get_bid(timeout=2.0)
     assert result == "quit"
+
+
+def test_get_bid_ignores_a_message_with_mismatched_game_id(player_and_peer):
+    """
+    A message tagged with a *different, present* game_id must not be treated
+    as this turn's input — it belongs to another game (a confused client, or
+    stale data), not this one. A missing game_id stays permissive.
+    """
+    player, peer = player_and_peer  # fixture's player has game_id="g1"
+
+    send_json(peer, {"game_id": "some-other-game", "message_type": "RESPONSE", "prompt": "1"})
+    result = player.get_bid(timeout=0.3)
+    assert result is None  # discarded, not delivered as a bid
+
+    # the real response, correctly tagged, is still picked up normally afterwards
+    send_json(peer, {"game_id": "g1", "message_type": "RESPONSE", "prompt": "1"})
+    result = player.get_bid(timeout=2.0)
+    assert result == [1]
+
+
+def test_get_bid_accepts_a_message_with_no_game_id(player_and_peer):
+    """Permissive on a missing game_id — lightweight clients/tests aren't required to set it."""
+    player, peer = player_and_peer
+    send_json(peer, {"message_type": "RESPONSE", "prompt": "pass"})
+    result = player.get_bid(timeout=2.0)
+    assert result == "pass"
+
+
+def test_choose_painting_to_discard_ignores_a_message_with_mismatched_game_id(player_and_peer):
+    player, peer = player_and_peer
+    player.add_status_card(Painting(value=5))
+
+    send_json(peer, {"game_id": "some-other-game", "message_type": "RESPONSE", "prompt": "5"})
+    send_json(peer, {"game_id": "g1", "message_type": "RESPONSE", "prompt": "5"})
+
+    chosen = player.choose_painting_to_discard()
+    assert chosen.value == 5

@@ -30,6 +30,20 @@ def generate_game_id() -> str:
     raw = uuid.uuid4().bytes
     return base64.urlsafe_b64encode(raw).decode().rstrip("=")
 
+def _is_valid_identify_ack(data: dict, game_id: str) -> bool:
+    """
+    Permissive on a missing game_id (lightweight clients/tests that don't
+    bother setting it), strict on one that's present but wrong — that means
+    the response belongs to a different game (a confused client, or stale
+    data from a previous connection attempt), not this handshake.
+    """
+    if data.get("message_type") != "IDENTIFY_ACK":
+        return False
+    incoming_game_id = data.get("game_id")
+    if incoming_game_id is not None and incoming_game_id != game_id:
+        return False
+    return True
+
 def get_local_ip():
     """Get the local IP address of this machine."""
     try:
@@ -114,7 +128,7 @@ def accept_players(server_socket: socket.socket, expected_players:int, game_id: 
             send_json(conn, username_payload)
             data = receive_json(conn)
 
-            if data["message_type"] != "IDENTIFY_ACK":
+            if not _is_valid_identify_ack(data, game_id):
                 send_json(conn, {
                     "game_id": game_id,
                     "message_type": "IDENTIFY_ERROR",
@@ -135,7 +149,7 @@ def accept_players(server_socket: socket.socket, expected_players:int, game_id: 
             send_json(conn, name_payload)
             data = receive_json(conn)
 
-            if data["message_type"] != "IDENTIFY_ACK":
+            if not _is_valid_identify_ack(data, game_id):
                 send_json(conn, {
                     "game_id": game_id,
                     "message_type": "IDENTIFY_ERROR",
@@ -222,7 +236,7 @@ def accept_spectators(server_socket: socket.socket, spectators: list[NetworkSpec
                 "requires_response": True
             })
             data = receive_json(conn)
-            if data["message_type"] != "IDENTIFY_ACK":
+            if not _is_valid_identify_ack(data, game_id):
                 send_json(conn, {
                     "game_id": game_id,
                     "message_type": "IDENTIFY_ERROR",
@@ -240,7 +254,7 @@ def accept_spectators(server_socket: socket.socket, spectators: list[NetworkSpec
                 "requires_response": True
             })
             data = receive_json(conn)
-            if data["message_type"] != "IDENTIFY_ACK":
+            if not _is_valid_identify_ack(data, game_id):
                 send_json(conn, {
                     "game_id": game_id,
                     "message_type": "IDENTIFY_ERROR",

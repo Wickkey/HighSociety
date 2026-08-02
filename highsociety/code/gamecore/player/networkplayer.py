@@ -5,7 +5,7 @@ from highsociety.code.gamecore.player.player import BasePlayer
 from highsociety.code.gamecore.components_module.painting import Painting
 from highsociety.code.gamecore.network.transport import Transport
 from highsociety.code.gamecore.network.protocol import build_player_payload
-from highsociety.code.common.logger_module.logger.logging_manager import LoggingManager
+from highsociety.code.common.logger_module.logger.logging_manager import LoggingManager, LogType
 
 
 class NetworkPlayer(BasePlayer):
@@ -59,6 +59,24 @@ class NetworkPlayer(BasePlayer):
         except (BrokenPipeError, ConnectionResetError, SocketError):
             print(f"⚠️ Connection lost while sending to {self.username}")
 
+    def _belongs_to_this_game(self, msg: dict) -> bool:
+        """
+        A message's game_id must either be absent (permissive, for lightweight
+        clients/tests that don't bother setting it) or match this player's own
+        game_id. A *present but different* game_id means the message is
+        stale/misdirected (e.g. a confused client, or leftover data from a
+        previous session) and must not be treated as this turn's input.
+        """
+        incoming_game_id = msg.get("game_id")
+        if incoming_game_id is not None and incoming_game_id != self.game_id:
+            LoggingManager.warning(
+                f"Ignoring message for {self.username} with mismatched game_id "
+                f"(expected {self.game_id!r}, got {incoming_game_id!r})",
+                log_type=LogType.SECURITY,
+            )
+            return False
+        return True
+
     def print_player_info(self):
         self.send_message(f"{self.username}'s status cards: {self.status_cards}", message_type="PLAYER_INFO")
         self.send_message(f"{self.username}'s points: {self.points}", message_type="PLAYER_INFO")
@@ -81,6 +99,9 @@ class NetworkPlayer(BasePlayer):
                 self.active = False
                 return "quit"
             return None
+
+        if not self._belongs_to_this_game(bid):
+            return None  # discard silently; caller will re-poll for the real input
 
         if bid["prompt"] == "":
             self.send_message("⚠️ Empty input. Please enter a valid number, list, or command.", message_type="INPUT_ERROR")
@@ -152,6 +173,9 @@ class NetworkPlayer(BasePlayer):
                     # Connection closed or receiver stopped
                     self.active = False
                     return None
+
+                if not self._belongs_to_this_game(choice):
+                    continue  # discard silently; keep waiting for the real input
 
                 choice_text = choice.get("prompt", "")
                 if not choice_text:

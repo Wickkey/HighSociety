@@ -21,9 +21,8 @@ replay system, and Transport/protocol modularity refactor.
   shape, but no spectator client ever sends one, and spectators don't even get a receiver thread
   on the server (`accept_spectators` never calls anything like `start_receiver_thread` for them).
   It's a payload shape with no sender and no listener.
-- **`LogType.SECURITY` is never invoked.** The dual-logger setup (generic + security) is fully
-  built, but nothing in the codebase ever calls a logging method with `log_type=LogType.SECURITY`
-  — the security log file will always stay empty.
+- ~~**`LogType.SECURITY` is never invoked.**~~ **Fixed as a side effect of the `game_id` validation
+  fix below** — `NetworkPlayer._belongs_to_this_game()` now logs a mismatched `game_id` there.
 
 ## Config values that are silently ignored
 
@@ -47,9 +46,14 @@ replay system, and Transport/protocol modularity refactor.
 - **No reconnection support.** Once a `NetworkPlayer`'s transport disconnects (`active` flips to
   `False`), there's no path back in — same effect as quitting. If a player's WiFi blips mid-game,
   they're permanently out, not just paused.
-- **No `game_id` validation.** Every message carries a `game_id`, but nothing on the receiving end
-  ever checks it matches the expected game. Harmless today (one game per server process), but
-  would matter the moment multiple games/lobbies share infrastructure.
+- ~~**No `game_id` validation.**~~ **Fixed.** `NetworkPlayer.get_bid()`/`choose_painting_to_discard()`
+  now silently discard (and log to the security logger — the first real use of `LogType.SECURITY`)
+  any incoming message whose `game_id` is present but doesn't match the player's own; the server
+  handshake (`accept_players`/`accept_spectators`) rejects an `IDENTIFY_ACK` the same way. A
+  *missing* `game_id` stays permissive, for lightweight clients/tests that don't set one. Tests:
+  `test_network_player_protocol.py::test_get_bid_ignores_a_message_with_mismatched_game_id` (+
+  the `choose_painting_to_discard` equivalent) and
+  `test_end_to_end_socket.py::test_handshake_rejects_a_mismatched_game_id_and_waits_for_a_replacement`.
 - **One game per server process.** `start_server()` runs exactly one `PlayGame` and exits. There's
   no lobby/matchmaking layer for hosting multiple concurrent games from one running server.
 
