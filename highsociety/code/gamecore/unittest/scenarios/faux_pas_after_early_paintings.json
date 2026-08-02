@@ -1,0 +1,24 @@
+{
+  "name": "faux_pas_after_early_paintings",
+  "seed": 5,
+  "description": "3 paintings dealt before FauxPas appears, then 2 prestige cards and Passe before the cutoff",
+  "card_order": [
+    "Painting(value=3)",
+    "Painting(value=4)",
+    "Painting(value=5)",
+    "FauxPas()",
+    "Painting(value=10)",
+    "Painting(value=2)",
+    "Painting(value=7)",
+    "Painting(value=8)",
+    "Painting(value=1)",
+    "Scandale(multiplier = 0.5, color=green)",
+    "PrestigeCard(value=0, multiplier=2, color=green)",
+    "Passe(value= -5)",
+    "PrestigeCard(value=0, multiplier=2, color=green)",
+    "Painting(value=6)",
+    "PrestigeCard(value=0, multiplier=2, color=green)",
+    "Painting(value=9)"
+  ],
+  "green_cutoff_index": 14
+}
