@@ -73,7 +73,12 @@ replay system, and Transport/protocol modularity refactor.
 ## Minor polish (not correctness bugs)
 
 - Per-turn time display is a single "Time left: Xs" message, not a live ticking countdown.
-- No colorized/formatted CLI output (plain `print()` throughout).
+- ~~No colorized/formatted CLI output.~~ **Fixed.** `common/utils/terminal_colors.py` provides
+  ANSI helpers that auto-disable when not attached to a real terminal (respects `NO_COLOR`/
+  `FORCE_COLOR`), wired into `CLIPlayer` (by `message_type`), `CLIHost`/`network_client.py`/
+  `network_spectator_client.py` (broadcast text, by the emoji markers `gameplay.py` already uses).
+  Verified escape codes appear under `FORCE_COLOR=1` and are completely absent otherwise (piped/
+  test output unaffected — confirmed 0 occurrences without it).
 - `highsociety/HSConfig.json`'s `abs_root_dir` is still a hardcoded absolute path (used for the log
   directory) — `get_all_configurations()` itself was made portable, but this one field wasn't.
 

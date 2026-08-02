@@ -3,13 +3,14 @@ import time
 from highsociety.code.gamecore.player.cliplayer import CLIPlayer
 from highsociety.code.gamecore.player.networkplayer import NetworkPlayer
 from highsociety.code.gamecore.player.networkspectator import NetworkSpectator
+from highsociety.code.common.utils.terminal_colors import style_game_event
 
 class CLIHost:
     def __init__(self, players:list[CLIPlayer]):
-        self.players = players 
+        self.players = players
 
     def send_message(self, message:str):
-        print(message)
+        print(style_game_event(message))
 
 
 class NetworkHost:

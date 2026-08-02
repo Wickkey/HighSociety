@@ -4,6 +4,18 @@ from typing import Union, Optional
 from highsociety.code.gamecore.player.player import BasePlayer
 from highsociety.code.common.logger_module.logger.logging_manager import LoggingManager
 from highsociety.code.gamecore.components_module.painting import Painting
+from highsociety.code.common.utils.terminal_colors import colorize, BOLD, CYAN, YELLOW, RED, DIM
+
+# Maps the message_type a player is sent to the styling its text gets on a
+# real terminal; colorize() is a no-op when not attached to one (piped
+# output, redirected logs, captured test output), so this never affects
+# anything that reads the message text itself.
+_MESSAGE_TYPE_STYLES = {
+    "INPUT_ERROR": (RED,),
+    "PLAYER_MOVE": (BOLD, CYAN),
+    "PLAYER_MOVE_TIMER": (YELLOW,),
+    "PLAYER_INFO": (DIM,),
+}
 
 class CLIPlayer(BasePlayer):
     def __init__(self, name: str, username: str):
@@ -12,13 +24,14 @@ class CLIPlayer(BasePlayer):
         self._awaiting_input = False
 
     def send_message(self, message: str, message_type: str = None, created_at: float = None):
-        print(message)
+        styles = _MESSAGE_TYPE_STYLES.get(message_type)
+        print(colorize(message, *styles) if styles else message)
 
     def print_player_info(self):
-        self.send_message(f"{self.username}'s status cards: {self.status_cards}")
-        self.send_message(f"{self.username}'s points: {self.points}")
-        self.send_message(f"Current Bid: {self.current_money_card_bids}")
-        self.send_message(f"Remaining Money: {[m.value for m in self.money_cards]}")
+        self.send_message(f"{self.username}'s status cards: {self.status_cards}", message_type="PLAYER_INFO")
+        self.send_message(f"{self.username}'s points: {self.points}", message_type="PLAYER_INFO")
+        self.send_message(f"Current Bid: {self.current_money_card_bids}", message_type="PLAYER_INFO")
+        self.send_message(f"Remaining Money: {[m.value for m in self.money_cards]}", message_type="PLAYER_INFO")
 
     def _read_line(self, timeout: Optional[float] = None) -> Optional[str]:
         """
@@ -31,7 +44,7 @@ class CLIPlayer(BasePlayer):
         """
         if not self._awaiting_input:
             self.print_player_info()
-            print("Enter your bid for the auction: ", end='', flush=True)
+            print(colorize("Enter your bid for the auction: ", BOLD, CYAN), end='', flush=True)
             self._awaiting_input = True
 
         if timeout is not None:
@@ -70,7 +83,7 @@ class CLIPlayer(BasePlayer):
             return None
 
         if not bid:
-            self.send_message("⚠️ Empty input. Please enter a valid number, list, or command.")
+            self.send_message("⚠️ Empty input. Please enter a valid number, list, or command.", message_type="INPUT_ERROR")
             return None
 
         # ✅ Handle special commands
@@ -84,20 +97,20 @@ class CLIPlayer(BasePlayer):
 
                 # check duplicates
                 if len(nums) != len(set(nums)):
-                    self.send_message("⚠️ Duplicate values found in bid. Please enter a valid bid.")
+                    self.send_message("⚠️ Duplicate values found in bid. Please enter a valid bid.", message_type="INPUT_ERROR")
                     return None
 
                 # check if all values exist in money_cards
                 money_values = [m.value for m in self.money_cards]
                 for num in nums:
                     if num not in money_values:
-                        self.send_message(f"⚠️ You don't have money card {num}. Enter a valid bid.")
+                        self.send_message(f"⚠️ You don't have money card {num}. Enter a valid bid.", message_type="INPUT_ERROR")
                         return None
 
                 return nums
 
             except ValueError:
-                self.send_message("⚠️ Invalid list format. Example: [1, 2, 3]")
+                self.send_message("⚠️ Invalid list format. Example: [1, 2, 3]", message_type="INPUT_ERROR")
                 return None
 
         # ✅ Handle integer input
@@ -105,13 +118,13 @@ class CLIPlayer(BasePlayer):
             num = int(bid)
             money_values = [m.value for m in self.money_cards]
             if num not in money_values:
-                self.send_message(f"⚠️ You don't have money card {num}. Enter a valid bid.")
+                self.send_message(f"⚠️ You don't have money card {num}. Enter a valid bid.", message_type="INPUT_ERROR")
                 return None
 
             return [num]
 
         except ValueError:
-            self.send_message("⚠️ Please enter a valid integer, list, or command (pass/fold/quit).")
+            self.send_message("⚠️ Please enter a valid integer, list, or command (pass/fold/quit).", message_type="INPUT_ERROR")
             return None
 
     def choose_painting_to_discard(self) -> Painting:
@@ -129,15 +142,15 @@ class CLIPlayer(BasePlayer):
         paintings = {}
         for s in self.status_cards:
             if isinstance(s, Painting):
-                paintings[s.value] = s 
-                self.send_message(f"{s}: Value: {s.value}")
+                paintings[s.value] = s
+                self.send_message(f"{s}: Value: {s.value}", message_type="PLAYER_INFO")
 
         if not paintings:
             return None
 
         while(True):
             try:
-                line = input("Choose one to discard: ")
+                line = input(colorize("Choose one to discard: ", BOLD, CYAN))
             except EOFError:
                 # stdin closed for good — no point retrying forever. Match get_bid's
                 # EOF handling by marking the player inactive like a disconnect.
@@ -150,6 +163,6 @@ class CLIPlayer(BasePlayer):
                 break
             except (ValueError, KeyError) as e:
                 LoggingManager.error(e)
-                self.send_message(f"Invalid input. Let's try again..")
+                self.send_message(f"Invalid input. Let's try again..", message_type="INPUT_ERROR")
 
         return painting

@@ -16,6 +16,7 @@ import sys
 import threading
 
 from highsociety.code.common.utils.network_utility import send_json, receive_json
+from highsociety.code.common.utils.terminal_colors import colorize, style_game_event, MAGENTA
 
 
 class SpectatorClient:
@@ -145,7 +146,11 @@ class SpectatorClient:
                         payload = json.loads(line)
                     except json.JSONDecodeError:
                         continue
-                    print(payload.get("prompt", ""))
+                    prompt = payload.get("prompt", "")
+                    if payload.get("message_type") == "CHAT":
+                        print(colorize(prompt, MAGENTA) if payload.get("from_user") else prompt)
+                    else:
+                        print(style_game_event(prompt))
 
             except socket.timeout:
                 continue

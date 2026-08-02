@@ -20,6 +20,7 @@ import time
 from highsociety.code.common.utils.network_utility import send_json, receive_json
 from highsociety.code.common.logger_module.logger.logging_manager import LoggingManager
 from highsociety.code.common.utils.utility import get_all_configurations
+from highsociety.code.common.utils.terminal_colors import colorize, style_game_event, BOLD, CYAN, RED, MAGENTA
 
 
 class GameClient:
@@ -144,11 +145,18 @@ class GameClient:
 
         if message_type == "PLAYER_MOVE":
             constraints = payload.get("constraints") or {}
-            print(f"\n{prompt}", end='', flush=True)
+            print(f"\n{colorize(prompt, BOLD, CYAN)}", end='', flush=True)
             allowed_cards = constraints.get("allowed_money_cards")
             allowed_commands = constraints.get("allowed_commands")
             if allowed_cards is not None or allowed_commands is not None:
                 print(f"\n   (money cards: {allowed_cards}, commands: {allowed_commands})")
+        elif message_type == "INPUT_ERROR":
+            print(colorize(prompt, RED))
+        elif message_type == "CHAT":
+            from_user = payload.get("from_user")
+            print(colorize(prompt, MAGENTA) if from_user else prompt)
+        elif message_type == "GLOBAL_EVENT":
+            print(style_game_event(prompt))
         else:
             print(prompt)
 
