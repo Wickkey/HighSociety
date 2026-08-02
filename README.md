@@ -7,7 +7,7 @@ A Python implementation of the High Society card game backend.
 Python 3.9+, no third-party packages needed to play. For running tests:
 
 ```
-pip install -r highsociety/code/gamecore/unittest/requirements.txt
+pip install -r tests/requirements.txt
 ```
 
 ## Playing
@@ -26,7 +26,7 @@ python3 network_client.py --host <ip> --port 8888   # networked: each player
 
 For planning specific test scenarios ahead of time (rather than recording a real session), see
 `highsociety/code/gamecore/dev_tools/inspect_seed.py` and
-`unittest/game_manager/test_scenario_faux_pas_branches.py`.
+`tests/game_manager/test_scenario_faux_pas_branches.py`.
 
 ## Run tests
 
@@ -43,8 +43,8 @@ field-by-field description.
 ## Status
 
 CLI and networked play are both functional, covered by the test suite under
-`highsociety/code/gamecore/unittest/` (including a real-socket end-to-end game in
-`unittest/network/test_end_to_end_socket.py`).
+`tests/` (including a real-socket end-to-end game in
+`tests/network/test_end_to_end_socket.py`).
 
 ## Architecture: adding a new frontend (e.g. a web client)
 

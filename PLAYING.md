@@ -90,7 +90,7 @@ points) while the recorded decisions are fed back into it. So a session recorded
 multi-machine networked game replays through the exact same `python3 main.py --replay` command as
 a session recorded from local hot-seat CLI play. This has been verified with an automated test
 that records a real game over actual sockets and replays it with zero networking involved,
-producing the identical outcome (`highsociety/code/gamecore/unittest/network/test_end_to_end_socket.py::test_recorded_network_game_replays_identically_via_a_plain_cli_replay`).
+producing the identical outcome (`tests/network/test_end_to_end_socket.py::test_recorded_network_game_replays_identically_via_a_plain_cli_replay`).
 
 ### What this is useful for
 
@@ -113,5 +113,5 @@ python3 -m highsociety.code.gamecore.dev_tools.inspect_seed --seed 5
 
 This prints the exact card order that seed produces (and where the green-card limit will end the
 game), so you can plan scripted decisions around a known sequence of auctions. See
-`highsociety/code/gamecore/unittest/game_manager/test_scenario_faux_pas_branches.py` for an
+`tests/game_manager/test_scenario_faux_pas_branches.py` for an
 example of one seed driving two different, deliberately-scripted outcomes.

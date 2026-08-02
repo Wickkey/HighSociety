@@ -22,7 +22,7 @@ from pathlib import Path
 from highsociety.code.gamecore.card_manager.status_card_manager import StatusCardManager
 from highsociety.code.common.utils.utility import get_game_setting_configurations
 
-SCENARIOS_DIR = Path(__file__).resolve().parents[2] / "gamecore" / "unittest" / "scenarios"
+SCENARIOS_DIR = Path(__file__).resolve().parents[4] / "tests" / "scenarios"
 
 
 def draw_order_for_seed(seed: int) -> list:

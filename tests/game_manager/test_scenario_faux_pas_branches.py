@@ -1,7 +1,7 @@
 """
 Demonstrates the seed+script testing workflow: highsociety/code/gamecore/dev_tools/inspect_seed.py
 was used to find and save seed 5 as the "faux_pas_after_early_paintings" scenario
-(highsociety/code/gamecore/unittest/scenarios/faux_pas_after_early_paintings.json)
+(tests/scenarios/faux_pas_after_early_paintings.json)
 because its deck order deals 2 players' worth of paintings before FauxPas comes
 up, then a Scandale/Prestige/Passe tail before the green-card cutoff.
 
