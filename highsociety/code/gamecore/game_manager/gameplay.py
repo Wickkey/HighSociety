@@ -121,16 +121,20 @@ class PlayGame():
         Returns 
             (int) bid_value by the player
         """
-        # Initial message: 
+        # Initial message:
         created_at = time.time()
         for p in self.players:
+            if not p.active:
+                continue  # already quit/disconnected; nothing to notify
             if p != player:
-                p.send_message(f"{player.username}'s turn. Player is playing..", 
-                message_type = "GLOBAL_MOVE_INFO", 
+                p.send_message(f"{player.username}'s turn. Player is playing..",
+                message_type = "GLOBAL_MOVE_INFO",
                 created_at = created_at)
             else:
                 p.send_message(f"Your Turn!", message_type = "PLAYER_MOVE", created_at = created_at)
         for s in (self.spectators or []):
+            if not s.active:
+                continue
             s.send_message(f"{player.username}'s turn. Player is playing..", message_type = "GLOBAL_MOVE_INFO",
             created_at = created_at)
 

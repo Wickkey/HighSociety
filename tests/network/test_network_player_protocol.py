@@ -145,3 +145,30 @@ def test_choose_painting_to_discard_ignores_a_message_with_mismatched_game_id(pl
 
     chosen = player.choose_painting_to_discard()
     assert chosen.value == 5
+
+
+def test_send_message_marks_the_player_inactive_on_a_dead_connection(player_and_peer):
+    """
+    Regression test: a failed send used to only print a warning, never
+    marking the player inactive — so every future broadcast (e.g. "X's turn"
+    notifications to every other player each round) kept retrying and
+    failing against the same dead connection instead of learning once that
+    it's gone and skipping it from then on.
+    """
+    player, peer = player_and_peer
+    peer.close()
+
+    assert player.active is True
+    player.send_message("hello", message_type="GLOBAL_EVENT")
+    assert player.active is False
+
+
+def test_send_message_only_prints_the_warning_once(player_and_peer, capsys):
+    player, peer = player_and_peer
+    peer.close()
+
+    player.send_message("first", message_type="GLOBAL_EVENT")
+    capsys.readouterr()  # discard the first (expected) warning
+    player.send_message("second", message_type="GLOBAL_EVENT")
+    out, _ = capsys.readouterr()
+    assert "Connection lost" not in out

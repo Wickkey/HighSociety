@@ -66,7 +66,9 @@ class NetworkPlayer(BasePlayer):
         try:
             self.transport.send(payload)
         except (BrokenPipeError, ConnectionResetError, SocketError):
-            print(f"⚠️ Connection lost while sending to {self.username}")
+            if self.active:
+                self.active = False
+                print(f"⚠️ Connection lost while sending to {self.username}")
 
     def _belongs_to_this_game(self, msg: dict) -> bool:
         """

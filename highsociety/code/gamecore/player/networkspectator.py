@@ -48,8 +48,9 @@ class NetworkSpectator:
         try:
             self.transport.send(payload)
         except (BrokenPipeError, ConnectionResetError, SocketError):
-            self.active = False
-            print(f"⚠️ Connection lost while sending to {self.name}")
+            if self.active:
+                self.active = False
+                print(f"⚠️ Connection lost while sending to {self.name}")
 
     def close(self):
         """Close the connection."""

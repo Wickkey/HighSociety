@@ -20,7 +20,8 @@ class NetworkHost:
     def send_message(self, message: str):
         created_at = time.time()
         for player in self.players:
-            player.send_message(message, message_type="GLOBAL_EVENT", created_at=created_at)
+            if player.active:
+                player.send_message(message, message_type="GLOBAL_EVENT", created_at=created_at)
 
         if len(self.spectators):
             for spectator in self.spectators:
