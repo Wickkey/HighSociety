@@ -2,8 +2,13 @@
 
 Two ways to build a bot, depending on where it runs:
 
-- **Embedded** — write a Python class implementing the same interface `CLIPlayer`/`NetworkPlayer`
-  do, and hand it to `PlayGame` directly. Simplest option if your bot lives in this codebase.
+- **Embedded** — subclass `BasePlayer` (`player.py`) and implement the three methods
+  `highsociety/code/gamecore/player/bot_interface.py`'s `BotInterface` declares mandatory —
+  `get_bid`, `choose_painting_to_discard`, `send_message` — then hand an instance to `PlayGame`
+  directly. `BasePlayer` gives you bidding/card bookkeeping for free; `BotInterface` is an ABC, so
+  forgetting one of the three raises `TypeError` immediately at construction, not partway through a
+  game. `CLIPlayer`/`NetworkPlayer` are the two existing implementations — read either as a
+  reference. Simplest option if your bot lives in this codebase.
 - **Remote** — connect over the network like any other player (`network_client.py`'s protocol),
   in any language. This is what you want for an external bot-building competition, since entrants
   don't need this repo at all — just a TCP socket and JSON.
