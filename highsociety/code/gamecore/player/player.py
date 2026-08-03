@@ -61,7 +61,11 @@ class BasePlayer:
     @property
     def player_info(self):
         """
-        Should be used to view player information.
+        A snapshot of this player's own state. Auction history is deliberately
+        not included here — it's game-wide, not player-scoped, so it belongs
+        on the game rather than duplicated per player. Use
+        PlayGame.get_auction_history() instead (or, over the network, the
+        AUCTION_RESULT messages broadcast after each auction — see BOT_API.md).
         """
         player_info = {
             "name": self.__name,
@@ -69,7 +73,6 @@ class BasePlayer:
             "money": self.__money_card_manager.cards,
             "status_cards": self.__status_cards,
             "points": self.__points,
-            "auction_history": [] # to implement, should contain card and total_bid
         }
 
         return player_info

@@ -13,6 +13,7 @@ from highsociety.code.gamecore.game_manager.host import CLIHost, NetworkHost
 from highsociety.code.gamecore.components_module.status_card import StatusCard
 from highsociety.code.gamecore.components_module.painting import Painting
 from highsociety.code.gamecore.game_manager.disgrace_settlement import DisgraceAuctionSettlement, ForfeitSettlement
+from highsociety.code.gamecore.game_manager.auction_information import AuctionRecord, summarize_card
 
 class PlayGame():
     """
@@ -57,6 +58,16 @@ class PlayGame():
             self.host = CLIHost()
         
 
+    def get_auction_history(self) -> list[dict]:
+        """
+        Every completed auction so far, oldest first, as plain JSON-serializable
+        dicts (see AuctionRecord.to_dict()). This is the canonical way to read
+        auction history for a locally-embedded bot using the Python API
+        directly; a remote bot gets the same data pushed as an AUCTION_RESULT
+        message right after each auction concludes (see BOT_API.md).
+        """
+        return [record.to_dict() for record in self.auction_rounds]
+
     def get_next_player_id(self, current_player_id: int) -> int:
         """
         Get the next player id in a circular manner.
@@ -89,6 +100,18 @@ class PlayGame():
                 return idx
         return -1
 
+
+    def _broadcast_auction_result(self, record: AuctionRecord) -> None:
+        """
+        Pushes the just-completed auction's full structured record to every
+        player and spectator (network mode) as an AUCTION_RESULT message, so
+        a remote bot has real-time access to auction history without needing
+        to poll for it — see BOT_API.md. In CLI mode this is a no-op for the
+        human-readable side (the win/loss line was already sent separately).
+        """
+        recipient_desc = record.recipient or "nobody"
+        summary = f"[auction_result] {record.card['type']} → {recipient_desc} for {record.price_paid}"
+        self.host.send_message(summary, message_type="AUCTION_RESULT", data=record.to_dict())
 
     def _finalize_auction(self, winner_id: int, status_card: StatusCard, max_bid: int):
         if winner_id != -1:
@@ -186,10 +209,16 @@ class PlayGame():
 
     def normal_card_auction(self, status_card: StatusCard, starting_player_id: int) -> int:
         self.host.send_message(f"\nAuctioning: {status_card}: {status_card.description}")
+        record = AuctionRecord(
+            round_number=len(self.auction_rounds) + 1,
+            auction_type="normal",
+            card=summarize_card(status_card),
+        )
+
         num_players_in_auction = self._count_active_auction_players()
-        current_player_id = starting_player_id                        
+        current_player_id = starting_player_id
         max_bid = 0
-        
+
         while (num_players_in_auction > 1):
             player = self.players[current_player_id]
 
@@ -203,15 +232,18 @@ class PlayGame():
                 # Handle result types
                 if action_result in ["pass", "fold"]:
                     num_players_in_auction -= 1
+                    record.add_event(player.username, action_result)
                     self.host.send_message(f"⚪ {player.username} passed.\n")
 
                 elif action_result == "quit":
                     player.active = False
                     num_players_in_auction -= 1
+                    record.add_event(player.username, "quit")
                     self.host.send_message(f"❌ {player.username} quit the game.\n")
 
                 elif isinstance(action_result, int) and action_result > max_bid:
                     max_bid = action_result
+                    record.add_event(player.username, "bid", max_bid)
                     self.host.send_message(f"💰 {player.username} raised to {max_bid}.\n")
 
                 else:
@@ -228,6 +260,10 @@ class PlayGame():
         self._finalize_auction(winner_id, status_card, max_bid)
         self.host.send_message(f"--- End of Auction ---\n")
 
+        record.recipient = self.players[winner_id].username if winner_id != -1 else None
+        record.price_paid = max_bid if winner_id != -1 else 0
+        self.auction_rounds.append(record)
+        self._broadcast_auction_result(record)
 
         # Reset auction state
         for player in self.players:
@@ -245,9 +281,17 @@ class PlayGame():
         Returns:
         loser_id (int): index of the player who takes the disgrace card.
         """
+        record = AuctionRecord(
+            round_number=len(self.auction_rounds) + 1,
+            auction_type="disgrace",
+            card=summarize_card(status_card),
+        )
+
         num_players_in_auction = self._count_active_auction_players()
         if num_players_in_auction == 0:
             self.host.send_message("⚠️ No active players for disgrace auction.")
+            self.auction_rounds.append(record)
+            self._broadcast_auction_result(record)
             return -1
 
 
@@ -275,12 +319,14 @@ class PlayGame():
                 if cmd in ["pass", "fold"]:
                     # player passes -> they lose and take the disgrace card
                     loser_id = current_player_id
+                    record.add_event(player.username, cmd)
                     self.host.send_message(f"💢 {player.username} passed and takes the disgrace card!")
                     break
                 elif cmd == "quit":
                     # quitting also makes them lose the disgrace card (treated same as pass)
                     player.active = False
                     loser_id = current_player_id
+                    record.add_event(player.username, "quit")
                     self.host.send_message(f"❌ {player.username} quit.")
                     break
                 else:
@@ -292,6 +338,7 @@ class PlayGame():
             elif isinstance(action, int):
                 # update max and continue to next player in order
                 max_bid = action
+                record.add_event(player.username, "bid", max_bid)
                 self.host.send_message(f"💰 {player.username} bid now {max_bid}.")
                 # move to next player
                 current_player_id = self.get_next_player_id(current_player_id)
@@ -306,6 +353,8 @@ class PlayGame():
         if loser_id == -1:
             # should not happen, but safe guard
             self.host.send_message("⚠️ Disgrace auction ended unexpectedly with no loser.")
+            self.auction_rounds.append(record)
+            self._broadcast_auction_result(record)
             # reset auction attributes and return -1
             for p in self.players:
                 p.reset_auction_attributes()
@@ -317,6 +366,11 @@ class PlayGame():
 
         # Settle bid money per the configured strategy (default: non-passers forfeit)
         self.disgrace_settlement.settle(self.players, loser_id)
+
+        record.recipient = loser.username
+        record.price_paid = 0  # the recipient always passed, refunding their own bid; see events for others' forfeits
+        self.auction_rounds.append(record)
+        self._broadcast_auction_result(record)
 
         # Reset auction state for all players
         for player in self.players:

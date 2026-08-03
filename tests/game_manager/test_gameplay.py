@@ -125,6 +125,89 @@ class TestDisgraceCardAuction:
         assert taker.money_left() == taker_money_before  # taker never bid; nothing to refund
 
 
+class TestAuctionHistory:
+    def test_normal_card_auction_records_the_full_event_sequence(self, make_player):
+        painting = Painting(value=5)
+        bidder = make_player("Bidder", actions=[[10], "pass"])
+        rival = make_player("Rival", actions=["pass"])
+        game = make_game([bidder, rival])
+
+        game.normal_card_auction(painting, starting_player_id=0)
+
+        assert len(game.auction_rounds) == 1
+        record = game.auction_rounds[0]
+        assert record.round_number == 1
+        assert record.auction_type == "normal"
+        assert record.card == {
+            "type": "Painting", "value": 5, "multiplier": 1,
+            "is_green": False, "description": "Painting Card with value 5",
+        }
+        assert [e.to_dict() for e in record.events] == [
+            {"player": "bidder", "action": "bid", "amount": 10},
+            {"player": "rival", "action": "pass", "amount": None},
+        ]
+        assert record.recipient == "bidder"
+        assert record.price_paid == 10
+
+    def test_normal_card_auction_with_no_bidders_records_no_recipient(self, make_player):
+        """Documents the "last one standing wins for free" rule showing up correctly
+        as price_paid=0, and a normal auction with zero participants recording recipient=None."""
+        painting = Painting(value=5)
+        p1, p2 = make_player("P1"), make_player("P2")
+        p1.active = False
+        p2.active = False
+        game = make_game([p1, p2])
+
+        game.normal_card_auction(painting, starting_player_id=0)
+
+        record = game.auction_rounds[0]
+        assert record.events == []
+        assert record.recipient is None
+        assert record.price_paid == 0
+
+    def test_disgrace_card_auction_records_recipient_and_the_forfeit_events(self, make_player):
+        card = Passe()
+        raiser = make_player("Raiser", actions=[[10]])
+        taker = make_player("Taker", actions=["pass"])
+        game = make_game([raiser, taker])
+
+        game.disgrace_card_auction(current_player_id=0, status_card=card)
+
+        assert len(game.auction_rounds) == 1
+        record = game.auction_rounds[0]
+        assert record.auction_type == "disgrace"
+        assert record.card["type"] == "Passe"
+        assert [e.to_dict() for e in record.events] == [
+            {"player": "raiser", "action": "bid", "amount": 10},
+            {"player": "taker", "action": "pass", "amount": None},
+        ]
+        assert record.recipient == "taker"
+        assert record.price_paid == 0  # taker's own bid was refunded by passing
+
+    def test_round_numbers_increment_across_multiple_auctions(self, make_player):
+        p1, p2 = make_player("P1"), make_player("P2")
+        game = make_game([p1, p2])
+
+        game.normal_card_auction(Painting(value=1), starting_player_id=0)
+        game.normal_card_auction(Painting(value=2), starting_player_id=0)
+
+        assert [r.round_number for r in game.auction_rounds] == [1, 2]
+
+    def test_get_auction_history_returns_json_serializable_dicts(self, make_player):
+        import json
+
+        p1, p2 = make_player("P1", actions=[[3], "pass"]), make_player("P2", actions=["pass"])
+        game = make_game([p1, p2])
+        game.normal_card_auction(Painting(value=4), starting_player_id=0)
+
+        history = game.get_auction_history()
+        reparsed = json.loads(json.dumps(history))
+
+        assert reparsed == history
+        assert reparsed[0]["recipient"] == "p1"
+        assert reparsed[0]["price_paid"] == 3
+
+
 class TestFauxPasPenalty:
     def test_no_paintings_returns_false(self, make_player):
         player = make_player("P")

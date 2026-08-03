@@ -1,3 +1,4 @@
+import json
 import socket
 import threading
 import time
@@ -8,6 +9,27 @@ from highsociety.code.gamecore.player.networkplayer import NetworkPlayer
 from highsociety.code.gamecore.network.transport import SocketTransport
 from highsociety.code.common.utils.network_utility import send_json
 from highsociety.code.gamecore.components_module.painting import Painting
+
+
+class _LineReader:
+    """
+    Reads one JSON message at a time from a socket, buffering leftover bytes
+    across calls — several send_message() calls in quick succession can
+    arrive coalesced into a single recv(), so a reader that discards
+    anything past the first line it finds loses messages (and then hangs
+    waiting for "new" data that already arrived).
+    """
+
+    def __init__(self, sock):
+        self._sock = sock
+        self._buffer = ""
+
+    def next(self, timeout=2.0):
+        self._sock.settimeout(timeout)
+        while "\n" not in self._buffer:
+            self._buffer += self._sock.recv(4096).decode("utf-8")
+        line, self._buffer = self._buffer.split("\n", 1)
+        return json.loads(line)
 
 
 @pytest.fixture
@@ -172,3 +194,60 @@ def test_send_message_only_prints_the_warning_once(player_and_peer, capsys):
     player.send_message("second", message_type="GLOBAL_EVENT")
     out, _ = capsys.readouterr()
     assert "Connection lost" not in out
+
+
+def test_bid_prompts_are_sent_with_move_type_bid(player_and_peer):
+    player, peer = player_and_peer
+    reader = _LineReader(peer)
+    result = {}
+
+    def call_get_bid():
+        result["bid"] = player.get_bid(timeout=2.0)
+
+    t = threading.Thread(target=call_get_bid, daemon=True)
+    t.start()
+
+    # print_player_info() sends several messages before the actual PLAYER_MOVE
+    # prompt, so drain until we find it.
+    prompt = None
+    for _ in range(10):
+        msg = reader.next()
+        if msg.get("message_type") == "PLAYER_MOVE":
+            prompt = msg
+            break
+    assert prompt is not None
+    assert prompt["move_type"] == "bid"
+
+    _send_response(peer, "pass")
+    t.join(timeout=2.0)
+    assert result["bid"] == "pass"
+
+
+def test_discard_prompts_are_sent_with_move_type_discard_painting(player_and_peer):
+    """
+    Regression test: a discard prompt must be distinguishable from a bid
+    prompt without parsing the human-readable text — a bot that always
+    treats PLAYER_MOVE as a bid request (and answers "pass") would otherwise
+    get stuck retrying a discard prompt forever, since "pass" is not a valid
+    discard answer.
+    """
+    player, peer = player_and_peer
+    player.add_status_card(Painting(value=5))
+    reader = _LineReader(peer)
+
+    def answer():
+        prompt = None
+        for _ in range(10):
+            msg = reader.next()
+            if msg.get("message_type") == "PLAYER_MOVE":
+                prompt = msg
+                break
+        assert prompt["move_type"] == "discard_painting"
+        _send_response(peer, "5")
+
+    t = threading.Thread(target=answer, daemon=True)
+    t.start()
+    chosen = player.choose_painting_to_discard()
+    t.join(timeout=2.0)
+
+    assert chosen.value == 5

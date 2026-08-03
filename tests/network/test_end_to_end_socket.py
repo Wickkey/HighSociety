@@ -454,3 +454,39 @@ def test_spectator_chat_with_mismatched_game_id_is_dropped(running_game_with_spe
     threading.Event().wait(1.0)
     for client in (p1, p2, s2):
         assert not any("this should never arrive" in m.get("prompt", "") for m in client.chat_messages())
+
+
+def _wait_for_message_type(client, message_type, deadline_seconds=10):
+    deadline = time.time() + deadline_seconds
+    while time.time() < deadline:
+        with client._lock:
+            found = [p for p in client.received if p.get("message_type") == message_type]
+        if found:
+            return found
+        threading.Event().wait(0.1)
+    return []
+
+
+def test_auction_result_is_broadcast_to_players_and_spectators_with_structured_data(running_game_with_spectators):
+    """
+    Regression/feature test for auction history: both players (auto-passing,
+    so the game actively runs auctions in the background) and both
+    spectators should receive at least one AUCTION_RESULT message with a
+    fully-formed, JSON-shaped `data` field — this is what a remote bot
+    parses instead of scraping human-readable text.
+    """
+    p1, p2, s1, s2 = running_game_with_spectators
+
+    for client in (p1, p2, s1, s2):
+        results = _wait_for_message_type(client, "AUCTION_RESULT")
+        assert results, f"{client} never received an AUCTION_RESULT message"
+
+        record = results[0]["data"]
+        assert isinstance(record["round_number"], int)
+        assert record["auction_type"] in ("normal", "disgrace")
+        assert set(record["card"].keys()) == {"type", "value", "multiplier", "is_green", "description"}
+        assert isinstance(record["events"], list)
+        for event in record["events"]:
+            assert set(event.keys()) == {"player", "action", "amount"}
+            assert event["action"] in ("bid", "pass", "fold", "quit")
+        assert isinstance(record["price_paid"], int)

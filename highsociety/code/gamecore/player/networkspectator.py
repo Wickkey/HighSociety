@@ -36,6 +36,7 @@ class NetworkSpectator:
         created_at: Optional[float] = None,
         from_user: Optional[str] = None,
         to_users: Optional[str] = None,
+        data: Optional[dict] = None,
     ):
         payload = build_spectator_payload(
             game_id=self.game_id,
@@ -44,6 +45,7 @@ class NetworkSpectator:
             created_at=created_at,
             from_user=from_user,
             to_users=to_users,
+            data=data,
         )
         try:
             self.transport.send(payload)

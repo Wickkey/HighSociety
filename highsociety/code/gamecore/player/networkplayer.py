@@ -42,6 +42,8 @@ class NetworkPlayer(BasePlayer):
         created_at: Optional[float] = None,
         from_user: Optional[str] = None,
         to_users: Optional[str] = None,
+        data: Optional[dict] = None,
+        move_type: Optional[str] = None,
     ) -> None:
         """Sends a message to the remote player via its transport."""
         constraints = None
@@ -62,6 +64,8 @@ class NetworkPlayer(BasePlayer):
             constraints=constraints,
             from_user=from_user,
             to_users=to_users,
+            data=data,
+            move_type=move_type,
         )
         try:
             self.transport.send(payload)
@@ -176,7 +180,7 @@ class NetworkPlayer(BasePlayer):
 
         while True:
             try:
-                self.send_message("Choose one to discard: ", message_type="PLAYER_MOVE")
+                self.send_message("Choose one to discard: ", message_type="PLAYER_MOVE", move_type="discard_painting")
 
                 choice = self.transport.receive(timeout=None)
 

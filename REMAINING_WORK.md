@@ -7,11 +7,17 @@ replay system, and Transport/protocol modularity refactor.
 
 ## Explicitly stubbed / defined-but-dead code
 
-- **Auction history isn't tracked.** `AuctionInformation` (`auction_information.py`) and
-  `PlayGame.auction_rounds` exist, and `add_bid()` is fully implemented — but nothing ever calls
-  it. `player_info`'s `"auction_history": []` is literally commented `# to implement` in the
-  source. If you want a post-game or in-game log of "who bid what on which card," this needs
-  wiring into `normal_card_auction`/`disgrace_card_auction`.
+- ~~**Auction history isn't tracked.**~~ **Fixed and designed for bot consumption specifically**
+  (per product decision — this is the primary interface an external bot-building competition would
+  read). `auction_information.py` was redesigned as clean `BidEvent`/`AuctionRecord` dataclasses;
+  `normal_card_auction`/`disgrace_card_auction` now populate `PlayGame.auction_rounds` as they run.
+  Two ways to read it: `PlayGame.get_auction_history()` (local/embedded bots) or the `AUCTION_RESULT`
+  message broadcast to every player/spectator right after each auction concludes (remote bots —
+  see `BOT_API.md`). Along the way, also added an explicit `move_type` field (`"bid"` vs
+  `"discard_painting"`) to `PLAYER_MOVE` messages, since a bot previously had no way to tell a bid
+  prompt from a FauxPas discard prompt without parsing human-readable text (confirmed by writing
+  BOT_API.md's example bot and watching it hang on a discard prompt before the fix). Verified live
+  against a real two-bot game over real sockets, not just unit tests.
 - **`RefundAllSettlement` isn't reachable from outside a test.** The pluggable disgrace-auction
   settlement strategy (`disgrace_settlement.py`) has two implementations, but `PlayGame` defaults
   to `ForfeitSettlement` and neither `main.py` nor `network_server.py` expose a flag to choose the
