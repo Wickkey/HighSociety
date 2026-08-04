@@ -43,6 +43,13 @@ class PlayGame():
         self.status_card_manager = StatusCardManager()
         self.disgrace_settlement = disgrace_settlement or ForfeitSettlement()
 
+        # Give every player/bot live access to auction history via
+        # player.get_auction_history() (BotInterface) — same list object
+        # self.auction_rounds appends to, so it stays current with no
+        # further wiring as the game progresses.
+        for player in self.players:
+            player._auction_history_source = self.auction_rounds
+
         self.__game_config = get_game_setting_configurations()
         self.__TURN_DURATION = self.__game_config['time_per_move']
         self.__green_card_limit = self.__game_config.get("green_card_limit", 4)

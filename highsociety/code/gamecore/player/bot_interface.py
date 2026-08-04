@@ -24,6 +24,27 @@ class BotInterface(ABC):
     what every existing implementation uses.
     """
 
+    # Wired up by PlayGame.__init__ to the same list it appends AuctionRecord
+    # objects to as auctions conclude, so this stays live for the rest of the
+    # game with no further plumbing. The class-level default here only
+    # covers a player/bot instantiated standalone, outside any PlayGame (e.g.
+    # in a unit test) — get_auction_history() just reads whatever this
+    # currently points to.
+    _auction_history_source: list = []
+
+    def get_auction_history(self) -> list[dict]:
+        """
+        Every completed auction so far this game, oldest first, as the same
+        JSON-serializable dicts PlayGame.get_auction_history() returns (see
+        AuctionRecord.to_dict() in game_manager/auction_information.py).
+
+        Available on every player/bot automatically, not just ones that use
+        it today — so a future bot strategy that wants to react to past
+        auctions (opponents' bidding patterns, what's already gone by, etc.)
+        can call self.get_auction_history() without any interface change.
+        """
+        return [record.to_dict() for record in self._auction_history_source]
+
     @abstractmethod
     def get_bid(self, timeout: Optional[float] = None) -> Union[list[int], str, None]:
         """

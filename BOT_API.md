@@ -157,6 +157,11 @@ and call `game.get_auction_history()` on your `PlayGame` instance — it returns
 list of `data`-shaped dicts, oldest first. Useful for fast local testing before pointing your bot
 at a real server.
 
+Even simpler: every `BotInterface` implementation (so every embedded bot, whether or not it
+currently uses it) also has `self.get_auction_history()` directly — `PlayGame.__init__` wires each
+player straight to its own live `auction_rounds` list, so it's available with no reference to the
+`PlayGame` object at all and stays current as the game progresses.
+
 ## A minimal example bot (Python, stdlib only)
 
 Connects, always passes, and prints every `AUCTION_RESULT` it sees — a starting point, not a
