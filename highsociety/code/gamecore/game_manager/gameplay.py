@@ -163,6 +163,15 @@ class PlayGame():
             created_at = created_at)
 
 
+        # "Auctioning: X" is broadcast once via self.host.send_message() at the
+        # start of normal_card_auction/disgrace_card_auction, but CLIHost
+        # doesn't forward broadcasts to individual players (see host.py) — so
+        # a player object (human or bot) never actually receives it that way.
+        # Resend it here, directly to `player`, every turn, the same way
+        # Current Highest Bid already is, so a bot can key logic off which
+        # card is up without needing a whole new API.
+        player.send_message(f"\nAuctioning: {type(status_card).__name__} (value={status_card.value})",
+                             message_type = "PLAYER_INFO")
         player.send_message(f"\nCurrent Highest Bid: {max_bid}", message_type = "PLAYER_INFO")
         player.send_message(f"You have {self.__TURN_DURATION}s to make a move.", message_type="PLAYER_INFO")
         turn_expires_at = self._compute_deadline()
