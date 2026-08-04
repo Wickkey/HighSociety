@@ -1,6 +1,6 @@
 import pytest
 
-from highsociety.code.gamecore.player.pass_bot import PassBot
+from highsociety.code.ai.pass_bot import PassBot
 from highsociety.code.gamecore.game_manager.gameplay import PlayGame
 from highsociety.code.gamecore.components_module.painting import Painting
 from highsociety.code.gamecore.components_module.disgrace_card import Passe
