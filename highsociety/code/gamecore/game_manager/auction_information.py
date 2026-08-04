@@ -50,16 +50,16 @@ class AuctionRecord:
         recipient: username of the player who ended up with the card, or
             None if a normal auction had no active bidders at all (the card
             went to nobody).
-        price_paid: how much `recipient` actually paid. For a normal
-            auction, this is their winning bid. For a disgrace auction this
-            is always 0 — the recipient is whoever passed, and passing
-            refunds their own committed bids; see `events` to see what
-            *other* players forfeited trying to avoid taking the card
-            (highsociety.code.gamecore.game_manager.disgrace_settlement).
-        cards_paid: the actual money card values `recipient` handed over to
-            make up `price_paid` (e.g. [10, 15] for a bid of 25 made with
-            those two cards). Always [] for a disgrace auction, since
-            price_paid is always 0 there too.
+        money_spent: every player's username mapped to how much money they
+            actually ended up losing this round, e.g.
+            {"alice": 0, "bob": 8}. For a normal auction this is 0 for
+            everyone except recipient (whose bid is real payment). For a
+            disgrace auction recipient is always 0 (they passed, which
+            refunds their own committed bid) while other players may show a
+            nonzero forfeit, depending on the configured
+            DisgraceAuctionSettlement (highsociety.code.gamecore.game_manager
+            .disgrace_settlement) — the default forfeits raised money, but
+            e.g. RefundAllSettlement would leave everyone at 0.
     """
 
     round_number: int
@@ -67,8 +67,7 @@ class AuctionRecord:
     card: dict
     events: list = field(default_factory=list)
     recipient: Optional[str] = None
-    price_paid: int = 0
-    cards_paid: list = field(default_factory=list)
+    money_spent: dict = field(default_factory=dict)
 
     def add_event(self, player: str, action: str, amount: Optional[int] = None, cards: Optional[list] = None) -> None:
         self.events.append(BidEvent(player=player, action=action, amount=amount, cards=cards))
@@ -80,8 +79,7 @@ class AuctionRecord:
             "card": self.card,
             "events": [e.to_dict() for e in self.events],
             "recipient": self.recipient,
-            "price_paid": self.price_paid,
-            "cards_paid": self.cards_paid,
+            "money_spent": self.money_spent,
         }
 
 

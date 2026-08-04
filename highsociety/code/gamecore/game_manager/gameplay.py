@@ -110,7 +110,8 @@ class PlayGame():
         human-readable side (the win/loss line was already sent separately).
         """
         recipient_desc = record.recipient or "nobody"
-        summary = f"[auction_result] {record.card['type']} → {recipient_desc} for {record.price_paid}"
+        spent = record.money_spent.get(record.recipient, 0)
+        summary = f"[auction_result] {record.card['type']} → {recipient_desc} for {spent}"
         self.host.send_message(summary, message_type="AUCTION_RESULT", data=record.to_dict())
 
     def _finalize_auction(self, winner_id: int, status_card: StatusCard, max_bid: int):
@@ -261,9 +262,14 @@ class PlayGame():
         self._finalize_auction(winner_id, status_card, max_bid)
         self.host.send_message(f"--- End of Auction ---\n")
 
+        # current_bid_value is what's still committed at the table for each
+        # player at this point: 0 for anyone who passed/folded/quit (their
+        # bid was already refunded by _handle_player_turn), and the real
+        # committed amount for the winner (whose cards are never returned).
+        # Reading it here — rather than each player's money_left() — keeps
+        # this auction-scoped instead of reaching into wallet state.
         record.recipient = self.players[winner_id].username if winner_id != -1 else None
-        record.price_paid = max_bid if winner_id != -1 else 0
-        record.cards_paid = [c.value for c in self.players[winner_id].current_money_card_bids] if winner_id != -1 else []
+        record.money_spent = {p.username: p.current_bid_value for p in self.players}
         self.auction_rounds.append(record)
         self._broadcast_auction_result(record)
 
@@ -370,8 +376,13 @@ class PlayGame():
         # Settle bid money per the configured strategy (default: non-passers forfeit)
         self.disgrace_settlement.settle(self.players, loser_id)
 
+        # See the comment in normal_card_auction: current_bid_value read here,
+        # after settlement but before reset_auction_attributes(), reflects
+        # whatever the configured DisgraceAuctionSettlement actually did —
+        # 0 for the recipient (refunded by passing) and, under the default
+        # ForfeitSettlement, each raiser's forfeited amount for everyone else.
         record.recipient = loser.username
-        record.price_paid = 0  # the recipient always passed, refunding their own bid; see events for others' forfeits
+        record.money_spent = {p.username: p.current_bid_value for p in self.players}
         self.auction_rounds.append(record)
         self._broadcast_auction_result(record)
 

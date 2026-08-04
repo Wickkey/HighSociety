@@ -116,8 +116,7 @@ player and spectator immediately after each auction concludes — you don't need
       {"player": "alice", "action": "pass", "amount": null, "cards": null}
     ],
     "recipient": "bob",
-    "price_paid": 8,
-    "cards_paid": [3, 5]
+    "money_spent": {"alice": 0, "bob": 8}
   }
 }
 ```
@@ -137,13 +136,13 @@ Field reference (`data`):
   this list if you want to study bidding patterns, not just the final price.
 - **`recipient`** — username who ended up with the card, or `null` if a normal auction had zero
   active bidders (nobody wanted it and nobody was forced to take it).
-- **`price_paid`** — what `recipient` actually paid. For a disgrace auction this is always `0` —
-  the recipient is whoever passed, and passing refunds their own bids; everyone else's bids in
-  `events` were forfeited trying to avoid taking the card (see `README.md`'s architecture section
-  on the disgrace-auction settlement strategy if you want the full rule).
-- **`cards_paid`** — the individual money card values `recipient` handed over to make up
-  `price_paid` (e.g. `[3, 5]` for a price of 8 paid with those two cards). Always `[]` for a
-  disgrace auction, since `price_paid` is always `0` there too.
+- **`money_spent`** — every player's username mapped to how much money they actually ended up
+  losing this round. For a normal auction this is `0` for everyone except `recipient` (their real
+  payment). For a disgrace auction `recipient` is always `0` (they passed, which refunds their own
+  bid) while other players may show a nonzero forfeit — under the default settlement rule, everyone
+  who raised trying to avoid the card permanently loses that money (see `README.md`'s architecture
+  section on the disgrace-auction settlement strategy for the full rule, including the alternate
+  "refund everyone" strategy where this would be `0` for all players).
 
 ### Embedded/local equivalent
 
@@ -191,9 +190,10 @@ while True:
 
     if msg["message_type"] == "AUCTION_RESULT":
         history.append(msg["data"])
+        recipient = msg['data']['recipient']
+        spent = msg['data']['money_spent'].get(recipient, 0)
         print(f"Auction #{msg['data']['round_number']}: "
-              f"{msg['data']['card']['type']} -> {msg['data']['recipient']} "
-              f"for {msg['data']['price_paid']}")
+              f"{msg['data']['card']['type']} -> {recipient} for {spent}")
 
     elif msg["message_type"] == "PLAYER_MOVE":
         try:

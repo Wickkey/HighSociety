@@ -147,12 +147,12 @@ class TestAuctionHistory:
             {"player": "rival", "action": "pass", "amount": None, "cards": None},
         ]
         assert record.recipient == "bidder"
-        assert record.price_paid == 10
-        assert record.cards_paid == [10]
+        assert record.money_spent == {"bidder": 10, "rival": 0}
 
     def test_normal_card_auction_with_no_bidders_records_no_recipient(self, make_player):
         """Documents the "last one standing wins for free" rule showing up correctly
-        as price_paid=0, and a normal auction with zero participants recording recipient=None."""
+        as everyone at 0 in money_spent, and a normal auction with zero participants
+        recording recipient=None."""
         painting = Painting(value=5)
         p1, p2 = make_player("P1"), make_player("P2")
         p1.active = False
@@ -164,8 +164,7 @@ class TestAuctionHistory:
         record = game.auction_rounds[0]
         assert record.events == []
         assert record.recipient is None
-        assert record.price_paid == 0
-        assert record.cards_paid == []
+        assert record.money_spent == {"p1": 0, "p2": 0}
 
     def test_disgrace_card_auction_records_recipient_and_the_forfeit_events(self, make_player):
         card = Passe()
@@ -184,8 +183,9 @@ class TestAuctionHistory:
             {"player": "taker", "action": "pass", "amount": None, "cards": None},
         ]
         assert record.recipient == "taker"
-        assert record.price_paid == 0  # taker's own bid was refunded by passing
-        assert record.cards_paid == []  # nothing paid; nothing to itemize
+        # taker's own bid was refunded by passing; raiser's forfeited under
+        # the default ForfeitSettlement instead of being returned.
+        assert record.money_spent == {"raiser": 10, "taker": 0}
 
     def test_round_numbers_increment_across_multiple_auctions(self, make_player):
         p1, p2 = make_player("P1"), make_player("P2")
@@ -208,7 +208,7 @@ class TestAuctionHistory:
 
         assert reparsed == history
         assert reparsed[0]["recipient"] == "p1"
-        assert reparsed[0]["price_paid"] == 3
+        assert reparsed[0]["money_spent"] == {"p1": 3, "p2": 0}
 
 
 class TestFauxPasPenalty:
