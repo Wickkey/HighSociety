@@ -478,6 +478,9 @@ if __name__ == '__main__':
                        help='Comma-separated bot types (see highsociety/code/ai/) to fill some of '
                             '--players seats with, e.g. --bots greedy,pass — the server then only '
                             'waits for the remaining seats to connect over the network.')
+    parser.add_argument('--bot-think-time', type=float, default=1.0,
+                       help='Seconds each bot pauses before announcing a decision (default: 1.0). '
+                            'Only matters if --bots is given.')
 
     args = parser.parse_args()
 
@@ -499,7 +502,8 @@ if __name__ == '__main__':
         for bot_type in bot_mix:
             counts[bot_type] = counts.get(bot_type, 0) + 1
             username = f"{bot_type}{counts[bot_type]}"
-            bot_players.append(BOT_TYPES[bot_type](name=username.capitalize(), username=username))
+            bot_players.append(BOT_TYPES[bot_type](name=username.capitalize(), username=username,
+                                                     think_time=args.bot_think_time))
 
     start_server(host=args.host, port=args.port, num_players=args.players, seed=args.seed,
                  record_path=args.record, bot_players=bot_players)

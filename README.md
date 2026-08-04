@@ -56,6 +56,10 @@ python3 network_client.py --host <ip> --port 8888            # the remaining hum
 `--players` minus however many `--bots` named to actually connect over the network. Bots aren't
 sockets, so this works with no client-side changes.
 
+Both `--bots` flags default to a 1-second pause before each bot's decision (`--bot-think-time`,
+e.g. `--bot-think-time 0.3`) — a real game is meant to be watched, so an instant decision is easy
+to miss entirely. Set it to `0` for full speed.
+
 **Watching bots play each other live**, without any human or network setup at all:
 
 ```

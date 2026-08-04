@@ -35,23 +35,31 @@ def get_player_details(player_idx: int):
 
     return username, name
 
-def create_bot_players(bot_mix: list[str]) -> list:
-    """Build bot instances (see highsociety/code/ai/) from a list of type names."""
+def create_bot_players(bot_mix: list[str], think_time: float = 1.0) -> list:
+    """
+    Build bot instances (see highsociety/code/ai/) from a list of type names.
+
+    think_time: seconds each bot pauses before announcing a decision. Defaults
+    to 1.0 (not 0) here specifically because a real game is meant to be
+    watched — an instant decision is easy to miss entirely; compare
+    dev_tools/simulate_bots.py, which defaults the same way for the same
+    reason.
+    """
     players = []
     counts = {}
     for bot_type in bot_mix:
         counts[bot_type] = counts.get(bot_type, 0) + 1
         username = f"{bot_type}{counts[bot_type]}"
-        players.append(BOT_TYPES[bot_type](name=username.capitalize(), username=username))
+        players.append(BOT_TYPES[bot_type](name=username.capitalize(), username=username, think_time=think_time))
     return players
 
 
-def create_players(num_players: int, bot_mix: list[str] = None) -> list:
+def create_players(num_players: int, bot_mix: list[str] = None, bot_think_time: float = 1.0) -> list:
     """
     Create and return the full seat list: bot_mix fills that many seats
     without prompting, then CLIPlayer prompts interactively for the rest.
     """
-    players = create_bot_players(bot_mix) if bot_mix else []
+    players = create_bot_players(bot_mix, bot_think_time) if bot_mix else []
     for i in range(len(players), num_players):
         username, name = get_player_details(i)
         player = CLIPlayer(name=name, username=username)
@@ -83,6 +91,9 @@ if __name__ == '__main__':
     parser.add_argument('--bots', type=str, default=None,
                        help='Comma-separated bot types (see highsociety/code/ai/) to fill some seats '
                             'with, e.g. --bots greedy,pass — you are only prompted for the rest.')
+    parser.add_argument('--bot-think-time', type=float, default=1.0,
+                       help='Seconds each bot pauses before announcing a decision (default: 1.0). '
+                            'Only matters if --bots is given.')
     args = parser.parse_args()
 
     config = get_all_configurations()
@@ -104,7 +115,7 @@ if __name__ == '__main__':
         if len(bot_mix) > num_players:
             parser.error(f"--bots has {len(bot_mix)} entries but only {num_players} players were requested")
 
-        players = create_players(num_players, bot_mix)
+        players = create_players(num_players, bot_mix, args.bot_think_time)
         seed = args.seed if args.seed is not None else random.randint(0, 2**31 - 1)
 
         if args.record:
