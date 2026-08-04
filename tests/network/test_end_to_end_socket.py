@@ -8,6 +8,7 @@ import pytest
 
 from network_server import start_server, accept_players
 from highsociety.code.common.utils.network_utility import send_json, receive_json
+from highsociety.code.ai.pass_bot import PassBot
 
 # NOTE: id(threading.current_thread()) is constant across the whole pytest
 # session (same main thread), so it can't be used to pick a fresh port when
@@ -213,6 +214,42 @@ def test_two_players_complete_a_full_game_over_real_sockets(running_server):
 
     c1.close()
     c2.close()
+
+
+def test_a_bot_pre_seeded_into_start_server_fills_a_seat_without_a_socket():
+    """
+    start_server(bot_players=[...]) is how you mix a bot into a networked
+    game (see README.md) — accept_players() only waits for num_players minus
+    however many bots were pre-seeded. Regression test for the three spots
+    in start_server that used to assume every entry in `players` was a real
+    NetworkPlayer (receiver threads, heartbeat monitor, closing sockets) and
+    would crash with AttributeError on a bot instead.
+    """
+    port = next(_chat_test_port_counter)
+    bot = PassBot(name="Bot", username="bot")
+    t = threading.Thread(
+        target=start_server,
+        kwargs={"host": "127.0.0.1", "port": port, "num_players": 2, "bot_players": [bot]},
+        daemon=True,
+    )
+    t.start()
+    threading.Event().wait(0.5)
+
+    c1 = ScriptedSocketClient("127.0.0.1", port, "alice")
+    c1.handshake()
+    c1.start()
+
+    deadline = time.time() + 30
+    while time.time() < deadline:
+        if not c1._running:
+            break
+        threading.Event().wait(0.2)
+
+    all_prompts = " ".join(c1.prompts())
+    assert "Game Started" in all_prompts or "🚀" in all_prompts
+    assert "Game Concluded" in all_prompts
+
+    c1.close()
 
 
 def test_recorded_network_game_replays_identically_via_a_plain_cli_replay(tmp_path):

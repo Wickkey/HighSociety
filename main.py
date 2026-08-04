@@ -7,6 +7,7 @@ from highsociety.code.gamecore.player.cliplayer import CLIPlayer
 from highsociety.code.gamecore.recording.session_recorder import SessionRecorder
 from highsociety.code.gamecore.recording.recording_player import RecordingPlayer
 from highsociety.code.gamecore.recording.replay_player import ReplayPlayer
+from highsociety.code.ai import BOT_TYPES
 
 def get_num_players() -> int:
     """Prompt user for the number of players, enforcing HSConfig.json's min_players/max_players."""
@@ -34,10 +35,24 @@ def get_player_details(player_idx: int):
 
     return username, name
 
-def create_players(num_players: int) -> list[CLIPlayer]:
-    """Create and return a list of CLIPlayer objects."""
+def create_bot_players(bot_mix: list[str]) -> list:
+    """Build bot instances (see highsociety/code/ai/) from a list of type names."""
     players = []
-    for i in range(num_players):
+    counts = {}
+    for bot_type in bot_mix:
+        counts[bot_type] = counts.get(bot_type, 0) + 1
+        username = f"{bot_type}{counts[bot_type]}"
+        players.append(BOT_TYPES[bot_type](name=username.capitalize(), username=username))
+    return players
+
+
+def create_players(num_players: int, bot_mix: list[str] = None) -> list:
+    """
+    Create and return the full seat list: bot_mix fills that many seats
+    without prompting, then CLIPlayer prompts interactively for the rest.
+    """
+    players = create_bot_players(bot_mix) if bot_mix else []
+    for i in range(len(players), num_players):
         username, name = get_player_details(i)
         player = CLIPlayer(name=name, username=username)
         players.append(player)
@@ -65,6 +80,9 @@ if __name__ == '__main__':
                        help='Record every decision made this game to PATH, so it can be replayed later with --replay')
     parser.add_argument('--replay', type=str, default=None, metavar='PATH',
                        help='Replay a previously recorded session from PATH (skips interactive player setup)')
+    parser.add_argument('--bots', type=str, default=None,
+                       help='Comma-separated bot types (see highsociety/code/ai/) to fill some seats '
+                            'with, e.g. --bots greedy,pass — you are only prompted for the rest.')
     args = parser.parse_args()
 
     config = get_all_configurations()
@@ -77,8 +95,16 @@ if __name__ == '__main__':
         game = PlayGame(players=players, mode='cli', seed=recording['seed'])
         game.play_game()
     else:
+        bot_mix = [b.strip() for b in args.bots.split(',') if b.strip()] if args.bots else []
+        unknown = set(bot_mix) - set(BOT_TYPES)
+        if unknown:
+            parser.error(f"Unknown bot type(s) {sorted(unknown)}; choose from {list(BOT_TYPES)}")
+
         num_players = get_num_players()
-        players = create_players(num_players)
+        if len(bot_mix) > num_players:
+            parser.error(f"--bots has {len(bot_mix)} entries but only {num_players} players were requested")
+
+        players = create_players(num_players, bot_mix)
         seed = args.seed if args.seed is not None else random.randint(0, 2**31 - 1)
 
         if args.record:

@@ -28,6 +28,47 @@ For planning specific test scenarios ahead of time (rather than recording a real
 `highsociety/code/gamecore/dev_tools/inspect_seed.py` and
 `tests/game_manager/test_scenario_faux_pas_branches.py`.
 
+## Playing against bots
+
+`highsociety/code/ai/` has three ready-made bots — `PassBot` (always passes), `GreedyBot` (always
+raises with the single cheapest card that beats the current bid), and `CappedGreedyBot` (like
+`GreedyBot`, but refuses to spend past a budget that depends on the card up for auction). Both
+`main.py` and `network_server.py` take a `--bots` flag: a comma-separated list of bot types
+(`pass`, `greedy`, `capped`) that fills that many seats automatically, one bot per entry.
+
+**CLI:**
+
+```
+python3 main.py --bots greedy,pass          # you fill the remaining seat(s) interactively
+```
+
+You're only prompted for whichever seats `--bots` didn't fill — if `--bots` names as many bots as
+you asked for players, nobody is prompted at all and it's a bots-only game.
+
+**Networked:**
+
+```
+python3 network_server.py --players 3 --bots greedy,pass    # server pre-fills 2 of 3 seats
+python3 network_client.py --host <ip> --port 8888            # the remaining human connects as usual
+```
+
+`--players` is the *total* seat count, bots included — the server only waits for
+`--players` minus however many `--bots` named to actually connect over the network. Bots aren't
+sockets, so this works with no client-side changes.
+
+**Watching bots play each other live**, without any human or network setup at all:
+
+```
+python3 -m highsociety.code.gamecore.dev_tools.simulate_bots --bots greedy,greedy,pass,capped,capped
+```
+
+See `highsociety/code/gamecore/dev_tools/simulate_bots.py --help` for `--seed` (reproducible
+games) and `--think-time` (pause between each bot's decision, so you can actually follow along).
+
+Writing your own bot: see [BOT_API.md](BOT_API.md)'s "Embedded" section — subclass `BasePlayer`,
+implement `get_bid`/`choose_painting_to_discard`/`send_message`, and it plugs into `--bots` the
+same way by adding it to the `BOT_TYPES` registry in `highsociety/code/ai/__init__.py`.
+
 ## Run tests
 
 ```

@@ -15,17 +15,9 @@ Usage:
 import argparse
 
 from highsociety.code.gamecore.game_manager.gameplay import PlayGame
-from highsociety.code.ai.capped_greedy_bot import CappedGreedyBot
-from highsociety.code.ai.greedy_bot import GreedyBot
-from highsociety.code.ai.pass_bot import PassBot
+from highsociety.code.ai import BOT_TYPES
 
-_BOT_TYPES = {
-    "pass": PassBot,
-    "greedy": GreedyBot,
-    "capped": CappedGreedyBot,
-}
-
-DEFAULT_BOT_MIX = ["greedy", "greedy", "pass", "capped", "capped"]
+DEFAULT_BOT_MIX = ["greedy", "capped", "pass", "capped", "capped"]
 
 
 def build_players(bot_mix: list, think_time: float) -> list:
@@ -34,7 +26,7 @@ def build_players(bot_mix: list, think_time: float) -> list:
     for bot_type in bot_mix:
         counts[bot_type] = counts.get(bot_type, 0) + 1
         username = f"{bot_type}{counts[bot_type]}"
-        cls = _BOT_TYPES[bot_type]
+        cls = BOT_TYPES[bot_type]
         players.append(cls(name=username.capitalize(), username=username, think_time=think_time))
     return players
 
@@ -42,17 +34,17 @@ def build_players(bot_mix: list, think_time: float) -> list:
 def main():
     parser = argparse.ArgumentParser(description="Watch embedded bots play a full game live")
     parser.add_argument("--seed", type=int, default=None, help="RNG seed for a reproducible game (default: random)")
-    parser.add_argument("--think-time", type=float, default=1.0,
+    parser.add_argument("--think-time", type=float, default=0,
                          help="Seconds each bot pauses before announcing a decision (default: 1.0)")
     parser.add_argument("--bots", type=str, default=",".join(DEFAULT_BOT_MIX),
-                         help=f"Comma-separated bot types from {list(_BOT_TYPES)} "
+                         help=f"Comma-separated bot types from {list(BOT_TYPES)} "
                               f"(default: {','.join(DEFAULT_BOT_MIX)})")
     args = parser.parse_args()
 
     bot_mix = [b.strip() for b in args.bots.split(",") if b.strip()]
-    unknown = set(bot_mix) - set(_BOT_TYPES)
+    unknown = set(bot_mix) - set(BOT_TYPES)
     if unknown:
-        parser.error(f"Unknown bot type(s) {sorted(unknown)}; choose from {list(_BOT_TYPES)}")
+        parser.error(f"Unknown bot type(s) {sorted(unknown)}; choose from {list(BOT_TYPES)}")
 
     players = build_players(bot_mix, args.think_time)
     game = PlayGame(players=players, mode="cli", seed=args.seed)

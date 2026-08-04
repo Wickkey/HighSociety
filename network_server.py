@@ -94,6 +94,8 @@ def players_heartbeat_monitor_thread(players: list[NetworkPlayer], timeout_secon
         now = time.time()
 
         for player in list(players):
+            if not isinstance(player, NetworkPlayer):
+                continue  # e.g. a bot pre-seeded into players -- no socket, nothing to time out
             if not player.active:
                 continue
 
@@ -338,20 +340,27 @@ def accept_spectators(server_socket: socket.socket, spectators: list[NetworkSpec
             LoggingManager.exception("❌  Error accepting spectator:", e)
 
 
-def start_server(host='0.0.0.0', port=8888, num_players=2, seed=None, record_path=None):
+def start_server(host='0.0.0.0', port=8888, num_players=2, seed=None, record_path=None, bot_players=None):
     """
     Start the game server and wait for players to connect.
 
     Args:
         host: Host address to bind to (0.0.0.0 for all interfaces)
         port: Port number to listen on
-        num_players: Number of players to wait for
+        num_players: Total number of seats to fill, bots included
         seed: Seed the RNG for a fully reproducible game; auto-generated if not given
         record_path: If given, records every player decision to this path (see
             highsociety.code.gamecore.recording) so the game can be replayed
             later with `python3 main.py --replay PATH` — no networking needed
             to replay, so this works the same whether the original game was
             played over CLI or network.
+        bot_players: Bot instances (see highsociety/code/ai/) to pre-seed as
+            some of the num_players seats — accept_players() already accepts
+            a pre-populated list and simply waits for fewer real connections,
+            so this is the only hook needed. Everywhere else in this
+            function that assumes every entry in `players` is a real
+            NetworkPlayer (receiver threads, heartbeat monitoring, socket
+            close) skips non-NetworkPlayer entries instead.
     """
     # Initialize game
     config = get_all_configurations()
@@ -395,7 +404,9 @@ def start_server(host='0.0.0.0', port=8888, num_players=2, seed=None, record_pat
         # accept_spectators — which starts running immediately, before any
         # player has joined — can relay spectator chat to players as they
         # connect over time.
-        players = []
+        players = list(bot_players) if bot_players else []
+        if players:
+            print(f"🤖 Pre-seeded {len(players)} bot(s): {', '.join(p.username for p in players)}")
         spectator_thread = threading.Thread(target=accept_spectators, args=(spectator_server_socket, spectators, game_id, players), daemon=True) # accept spectators indefinitely.
         spectator_thread.start()
 
@@ -404,10 +415,11 @@ def start_server(host='0.0.0.0', port=8888, num_players=2, seed=None, record_pat
 
         # Close server socket
         server_socket.close() # can't close if spectators needs to be added.
-        # Start receiver threads for all players
+        # Start receiver threads for all real (socket-backed) players
         print("🔌 Starting receiver threads for all players...")
         for player in players:
-            player.start_receiver_thread()
+            if isinstance(player, NetworkPlayer):
+                player.start_receiver_thread()
         print("✅ All receiver threads started.\n")
 
         print(f"\n{'='*60}")
@@ -427,10 +439,11 @@ def start_server(host='0.0.0.0', port=8888, num_players=2, seed=None, record_pat
         game = PlayGame(players=game_players, spectators=spectators, mode='network', game_id=game_id, seed=game_seed)
         game.play_game()
         
-        # Close all player connections
+        # Close all real player connections (bots have no socket to close)
         print("\n🔌 Closing connections...")
         for player in players:
-            player.close()
+            if isinstance(player, NetworkPlayer):
+                player.close()
 
         for spectator in spectators:
             spectator.close()
@@ -461,6 +474,10 @@ if __name__ == '__main__':
     parser.add_argument('--record', type=str, default=None, metavar='PATH',
                        help='Record every decision made this game to PATH. Replay it later with '
                             '`python3 main.py --replay PATH` (no networking needed to replay).')
+    parser.add_argument('--bots', type=str, default=None,
+                       help='Comma-separated bot types (see highsociety/code/ai/) to fill some of '
+                            '--players seats with, e.g. --bots greedy,pass — the server then only '
+                            'waits for the remaining seats to connect over the network.')
 
     args = parser.parse_args()
 
@@ -469,5 +486,21 @@ if __name__ == '__main__':
         print(f"⚠️ {error}")
         sys.exit(1)
 
-    start_server(host=args.host, port=args.port, num_players=args.players, seed=args.seed, record_path=args.record)
+    bot_players = []
+    if args.bots:
+        from highsociety.code.ai import BOT_TYPES
+        bot_mix = [b.strip() for b in args.bots.split(',') if b.strip()]
+        unknown = set(bot_mix) - set(BOT_TYPES)
+        if unknown:
+            parser.error(f"Unknown bot type(s) {sorted(unknown)}; choose from {list(BOT_TYPES)}")
+        if len(bot_mix) > args.players:
+            parser.error(f"--bots has {len(bot_mix)} entries but --players is only {args.players}")
+        counts = {}
+        for bot_type in bot_mix:
+            counts[bot_type] = counts.get(bot_type, 0) + 1
+            username = f"{bot_type}{counts[bot_type]}"
+            bot_players.append(BOT_TYPES[bot_type](name=username.capitalize(), username=username))
+
+    start_server(host=args.host, port=args.port, num_players=args.players, seed=args.seed,
+                 record_path=args.record, bot_players=bot_players)
 
