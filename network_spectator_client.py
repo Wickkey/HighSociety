@@ -1,35 +1,30 @@
 #!/usr/bin/env python3
 """
-HighSociety Game Client
-This script connects to a game server and allows you to play.
-Run this on each player's machine/terminal.
+HighSociety Spectator Client
+This script connects to a game server and allows you to watch the game.
+Run this on each spectator's machine/terminal.
 
-Speaks the server's newline-delimited JSON protocol (see NetworkPlayer.send_message
-for the message_type contract): during setup it exchanges a couple of
-IDENTIFY/IDENTIFY_ACK messages, then a background thread continuously displays
-whatever the server sends while the main thread forwards each typed line to
-the server as a RESPONSE message.
+Speaks the server's newline-delimited JSON protocol. Spectators can chat:
+type a message and press Enter to send it to everyone (players + other
+spectators), or prefix it with "/spectators " to send it to spectators
+only. Chat you send is never echoed back to you.
 """
 
 import json
 import socket
 import sys
 import threading
-import time
 
 from highsociety.code.common.utils.network_utility import send_json, receive_json
-from highsociety.code.common.logger_module.logger.logging_manager import LoggingManager
-from highsociety.code.common.utils.utility import get_all_configurations
-from highsociety.code.common.utils.terminal_colors import colorize, style_game_event, BOLD, CYAN, RED, MAGENTA
+from highsociety.code.common.utils.terminal_colors import colorize, style_game_event, MAGENTA
 
 
-class GameClient:
+class SpectatorClient:
     def __init__(self, host, port):
         self.host = host
         self.port = port
         self.sock = None
         self.running = True
-        self.username = None
         self.game_id = None
 
     def set_keepalive(self, sock, after_idle_sec=60, interval_sec=30, max_fails=3):
@@ -59,12 +54,9 @@ class GameClient:
     def connect(self):
         """Connect to the game server."""
         print(f"\n{'='*60}")
-        print(f"🎮 HighSociety Game Client")
+        print(f"🎮 HighSociety Spectator Client")
         print(f"{'='*60}")
         print(f"Connecting to {self.host}:{self.port}...\n")
-
-        config = get_all_configurations()
-        LoggingManager(config)
 
         try:
             self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -82,7 +74,6 @@ class GameClient:
             return False
 
     def _ask(self, prompt_payload):
-        """Print a handshake prompt from the server and return the user's raw answer."""
         print(prompt_payload.get("prompt", ""), end='', flush=True)
         try:
             answer = input().strip()
@@ -91,38 +82,33 @@ class GameClient:
         return answer
 
     def handle_initial_setup(self):
-        """Handle the initial username/name collection phase (blocking request/response)."""
+        """Handle the initial name/username collection phase (blocking request/response)."""
         try:
             prompt = receive_json(self.sock)
         except Exception as e:
-            print(f"\n⚠️ Did not receive username prompt from server: {e}")
+            print(f"\n⚠️ Did not receive the first spectator prompt from server: {e}")
             return False
         self.game_id = prompt.get("game_id", self.game_id)
 
-        username = self._ask(prompt)
-        if username is None:
+        first_answer = self._ask(prompt)
+        if first_answer is None:
             return False
-        if not username:
-            username = "player"
-        self.username = username
         try:
-            send_json(self.sock, {"game_id": self.game_id, "message_type": "IDENTIFY_ACK", "prompt": username})
+            send_json(self.sock, {"game_id": self.game_id, "message_type": "IDENTIFY_ACK", "prompt": first_answer or "spectator"})
         except socket.error:
             return False
 
         try:
             prompt = receive_json(self.sock)
         except Exception as e:
-            print(f"\n⚠️ Did not receive display-name prompt from server: {e}")
+            print(f"\n⚠️ Did not receive the second spectator prompt from server: {e}")
             return False
 
-        name = self._ask(prompt)
-        if name is None:
+        second_answer = self._ask(prompt)
+        if second_answer is None:
             return False
-        if not name:
-            name = username
         try:
-            send_json(self.sock, {"game_id": self.game_id, "message_type": "IDENTIFY_ACK", "prompt": name})
+            send_json(self.sock, {"game_id": self.game_id, "message_type": "IDENTIFY_ACK", "prompt": second_answer or "spectator"})
         except socket.error:
             return False
 
@@ -137,28 +123,6 @@ class GameClient:
             return False
 
         return True
-
-    def _display(self, payload):
-        """Render one incoming server message."""
-        message_type = payload.get("message_type")
-        prompt = payload.get("prompt", "")
-
-        if message_type == "PLAYER_MOVE":
-            constraints = payload.get("constraints") or {}
-            print(f"\n{colorize(prompt, BOLD, CYAN)}", end='', flush=True)
-            allowed_cards = constraints.get("allowed_money_cards")
-            allowed_commands = constraints.get("allowed_commands")
-            if allowed_cards is not None or allowed_commands is not None:
-                print(f"\n   (money cards: {allowed_cards}, commands: {allowed_commands})")
-        elif message_type == "INPUT_ERROR":
-            print(colorize(prompt, RED))
-        elif message_type == "CHAT":
-            from_user = payload.get("from_user")
-            print(colorize(prompt, MAGENTA) if from_user else prompt)
-        elif message_type == "GLOBAL_EVENT":
-            print(style_game_event(prompt))
-        else:
-            print(prompt)
 
     def receive_messages(self):
         """Continuously receive and display newline-delimited JSON messages from the server."""
@@ -182,7 +146,11 @@ class GameClient:
                         payload = json.loads(line)
                     except json.JSONDecodeError:
                         continue
-                    self._display(payload)
+                    prompt = payload.get("prompt", "")
+                    if payload.get("message_type") == "CHAT":
+                        print(colorize(prompt, MAGENTA) if payload.get("from_user") else prompt)
+                    else:
+                        print(style_game_event(prompt))
 
             except socket.timeout:
                 continue
@@ -197,23 +165,13 @@ class GameClient:
                 self.running = False
                 break
 
-    def send_input(self, message):
-        """Send a typed line to the server as a response."""
+    def send_chat(self, text, target="all"):
+        """Sends a chat message. target is "all" (players + other spectators) or "spectators"."""
         try:
-            send_json(self.sock, {"game_id": self.game_id, "message_type": "RESPONSE", "prompt": message})
+            send_json(self.sock, {"game_id": self.game_id, "message_type": "CHAT", "prompt": text, "target": target})
             return True
         except (socket.error, OSError):
             return False
-
-    def heartbeat_thread(self, interval: float = 5.0):
-        """Sends heartbeat PING messages periodically while the client is active."""
-        while self.running:
-            try:
-                send_json(self.sock, {"game_id": self.game_id, "message_type": "PING", "prompt": ""})
-            except (BrokenPipeError, ConnectionResetError, OSError):
-                self.running = False
-                break
-            time.sleep(interval)
 
     def run(self):
         """Main client loop."""
@@ -227,64 +185,58 @@ class GameClient:
                 self.sock.close()
             return
 
-        print("\n💡 Tips:")
-        print("   - Enter a number to bid that money card")
-        print("   - Enter [1,2,3] to bid multiple cards")
-        print("   - Enter 'pass' or 'fold' to withdraw")
-        print("   - Enter 'quit' to leave the game")
-        print(f"{'='*60}\n")
+        print("\n💡 Spectating:")
+        print("   - Type a message + Enter to chat with everyone")
+        print("   - Prefix with '/spectators ' to chat with spectators only")
+        print("   - Type 'quit' to leave")
+        print()
 
         receive_thread = threading.Thread(target=self.receive_messages, daemon=True)
-        heartbeat = threading.Thread(target=self.heartbeat_thread, args=(5,), daemon=True)
         receive_thread.start()
-        heartbeat.start()
 
         try:
             while self.running:
                 try:
                     user_input = input()
                 except EOFError:
-                    self.running = False
                     break
                 except KeyboardInterrupt:
                     print("\n\n⚠️ Disconnecting...")
-                    self.send_input("quit")
-                    self.running = False
                     break
 
-                if not self.running:
-                    break
-                if not self.send_input(user_input):
-                    break
                 if user_input.strip().lower() == 'quit':
-                    self.running = False
                     break
+
+                if not user_input.strip():
+                    continue
+
+                if user_input.startswith("/spectators "):
+                    self.send_chat(user_input[len("/spectators "):], target="spectators")
+                elif user_input.strip() == "/spectators":
+                    continue  # no message body
+                else:
+                    self.send_chat(user_input, target="all")
         except Exception as e:
             print(f"\n❌ Error: {e}")
         finally:
             self.running = False
             receive_thread.join(timeout=2.0)
-            heartbeat.join(timeout=2.0)
-            try:
-                if self.sock:
-                    self.sock.shutdown(socket.SHUT_RDWR)
-                    self.sock.close()
-                print("👋 Disconnected from server. Goodbye!")
-            except:
-                pass
+            if self.sock:
+                self.sock.close()
+            print("👋 Spectator Client Disconnected from server. Goodbye!")
 
 def main():
     import argparse
 
-    parser = argparse.ArgumentParser(description='HighSociety Game Client')
+    parser = argparse.ArgumentParser(description='HighSociety Spectator Client')
     parser.add_argument('--host', type=str, default='localhost',
                        help='Server IP address (default: localhost)')
-    parser.add_argument('--port', type=int, default=8888,
+    parser.add_argument('--port', type=int, default=8889,
                        help='Server port number (default: 8888)')
 
     args = parser.parse_args()
 
-    client = GameClient(args.host, args.port)
+    client = SpectatorClient(args.host, args.port)
     client.run()
 
 if __name__ == '__main__':

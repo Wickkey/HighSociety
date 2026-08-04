@@ -4,13 +4,13 @@ from highsociety.code.gamecore.components_module.status_card import StatusCard
 from highsociety.code.common.logger_module.logger.logging_manager import LoggingManager
 from highsociety.code.common.utils.utility import get_game_setting_configurations, get_all_configurations
 
-config = get_all_configurations()
-LoggingManager = LoggingManager(config)
-
 
 class StatusCardManager:
     """
-    This class manages status cards in the game. It is a singleton class.
+    This class manages status cards for a single game's deck.
+
+    Each instance owns its own independently-shuffled deck, so multiple
+    concurrent games (or test cases) never share or exhaust each other's cards.
 
     Usage:
         Objects will have access to the following methods:
@@ -23,16 +23,10 @@ class StatusCardManager:
         Attributes:
             None
     """
-    _instance = None 
-
-    def __new__(cls):
-        if cls._instance is None:
-            cls._instance = super(StatusCardManager, cls).__new__(cls)
-            cls._instance.__cards = []
-            cls._instance.__initialize_status_cards()
-            cls._instance.__shuffle_cards()
-
-        return cls._instance
+    def __init__(self):
+        self.__cards = []
+        self.__initialize_status_cards()
+        self.__shuffle_cards()
 
     def __initialize_status_cards(self):
         card_factory = CardFactory()

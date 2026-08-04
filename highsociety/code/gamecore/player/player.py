@@ -8,11 +8,20 @@ from highsociety.code.gamecore.components_module.painting import Painting
 from highsociety.code.gamecore.components_module.disgrace_card import FauxPas
 from typing import Union, Optional
 from highsociety.code.common.logger_module.logger.logging_manager import LoggingManager
+from highsociety.code.gamecore.player.bot_interface import BotInterface
 
 
-class BasePlayer:
+class BasePlayer(BotInterface):
     """
     A class representing a player in the game.
+
+    Abstract: BasePlayer provides bidding/card bookkeeping (place_bid,
+    withdraw_bid, add_status_card, discard_painting_card, money_left,
+    reset_auction_attributes, ...) but not get_bid/choose_painting_to_discard/
+    send_message — those come from BotInterface and are left to each
+    subclass (CLIPlayer for a terminal, NetworkPlayer for a socket, a bot for
+    whatever it does instead). Instantiating BasePlayer directly raises
+    TypeError; see bot_interface.py for the contract a subclass must fill in.
 
     Main methods:
         - place_bid(value): Places bid of value
@@ -61,7 +70,11 @@ class BasePlayer:
     @property
     def player_info(self):
         """
-        Should be used to view player information.
+        A snapshot of this player's own state. Auction history is deliberately
+        not included here — it's game-wide, not player-scoped, so it belongs
+        on the game rather than duplicated per player. Use
+        PlayGame.get_auction_history() instead (or, over the network, the
+        AUCTION_RESULT messages broadcast after each auction — see BOT_API.md).
         """
         player_info = {
             "name": self.__name,
@@ -69,7 +82,6 @@ class BasePlayer:
             "money": self.__money_card_manager.cards,
             "status_cards": self.__status_cards,
             "points": self.__points,
-            "auction_history": [] # to implement, should contain card and total_bid
         }
 
         return player_info
@@ -143,13 +155,6 @@ class BasePlayer:
         return self.__has_discarded_card
 
 
-    def get_bid(self):
-        raise NotImplementedError("Subclasses must implement this method")
-
-    def send_message(self, message: str):
-        raise NotImplementedError("Subclasses must implement this method")
-
-    
     def money_left(self):
         """
         Calculates money left in the moneycardmanager.
