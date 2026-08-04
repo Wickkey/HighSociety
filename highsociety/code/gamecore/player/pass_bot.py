@@ -1,3 +1,4 @@
+import time
 from typing import Optional, Union
 
 from highsociety.code.gamecore.components_module.painting import Painting
@@ -11,11 +12,19 @@ class PassBot(BasePlayer):
     for testing other bots against.
     """
 
-    def __init__(self, name: str, username: str) -> None:
+    def __init__(self, name: str, username: str, think_time: float = 0) -> None:
+        """
+        think_time: seconds to pause before returning a decision from
+        get_bid(). 0 (default) decides instantly, which is what every test
+        and real game wants; pass e.g. 1 only for a human-watchable
+        simulation, where an instant decision reads as no decision at all.
+        """
         super().__init__(name, username)
         self.active = True
+        self._think_time = think_time
 
     def get_bid(self, timeout: Optional[float] = None) -> Union[list[int], str, None]:
+        time.sleep(self._think_time)
         return "pass"
 
     def choose_painting_to_discard(self) -> Optional[Painting]:

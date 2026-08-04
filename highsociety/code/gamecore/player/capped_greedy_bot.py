@@ -1,4 +1,5 @@
 import re
+import time
 from typing import Optional, Union
 
 from highsociety.code.gamecore.components_module.painting import Painting
@@ -35,11 +36,18 @@ class CappedGreedyBot(BasePlayer):
     total over.
     """
 
-    def __init__(self, name: str, username: str) -> None:
+    def __init__(self, name: str, username: str, think_time: float = 0) -> None:
+        """
+        think_time: seconds to pause before returning a decision from
+        get_bid(). 0 (default) decides instantly, which is what every test
+        and real game wants; pass e.g. 1 only for a human-watchable
+        simulation, where an instant decision reads as no decision at all.
+        """
         super().__init__(name, username)
         self.active = True
         self._current_highest_bid = 0
         self._max_spend = float("inf")
+        self._think_time = think_time
 
     def send_message(self, message: str, message_type: str = None, created_at: float = None, **kwargs) -> None:
         if message_type != "PLAYER_INFO":
@@ -66,6 +74,7 @@ class CappedGreedyBot(BasePlayer):
             c.value for c in self.money_cards
             if c.value >= needed and self.current_bid_value + c.value <= self._max_spend
         ]
+        time.sleep(self._think_time)
         if not affordable:
             return "pass"
         return [min(affordable)]
