@@ -143,11 +143,12 @@ class TestAuctionHistory:
             "is_green": False, "description": "Painting Card with value 5",
         }
         assert [e.to_dict() for e in record.events] == [
-            {"player": "bidder", "action": "bid", "amount": 10},
-            {"player": "rival", "action": "pass", "amount": None},
+            {"player": "bidder", "action": "bid", "amount": 10, "cards": [10]},
+            {"player": "rival", "action": "pass", "amount": None, "cards": None},
         ]
         assert record.recipient == "bidder"
         assert record.price_paid == 10
+        assert record.cards_paid == [10]
 
     def test_normal_card_auction_with_no_bidders_records_no_recipient(self, make_player):
         """Documents the "last one standing wins for free" rule showing up correctly
@@ -164,6 +165,7 @@ class TestAuctionHistory:
         assert record.events == []
         assert record.recipient is None
         assert record.price_paid == 0
+        assert record.cards_paid == []
 
     def test_disgrace_card_auction_records_recipient_and_the_forfeit_events(self, make_player):
         card = Passe()
@@ -178,11 +180,12 @@ class TestAuctionHistory:
         assert record.auction_type == "disgrace"
         assert record.card["type"] == "Passe"
         assert [e.to_dict() for e in record.events] == [
-            {"player": "raiser", "action": "bid", "amount": 10},
-            {"player": "taker", "action": "pass", "amount": None},
+            {"player": "raiser", "action": "bid", "amount": 10, "cards": [10]},
+            {"player": "taker", "action": "pass", "amount": None, "cards": None},
         ]
         assert record.recipient == "taker"
         assert record.price_paid == 0  # taker's own bid was refunded by passing
+        assert record.cards_paid == []  # nothing paid; nothing to itemize
 
     def test_round_numbers_increment_across_multiple_auctions(self, make_player):
         p1, p2 = make_player("P1"), make_player("P2")

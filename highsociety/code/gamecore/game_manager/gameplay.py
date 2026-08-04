@@ -243,7 +243,8 @@ class PlayGame():
 
                 elif isinstance(action_result, int) and action_result > max_bid:
                     max_bid = action_result
-                    record.add_event(player.username, "bid", max_bid)
+                    record.add_event(player.username, "bid", max_bid,
+                                      cards=[c.value for c in player.current_money_card_bids])
                     self.host.send_message(f"💰 {player.username} raised to {max_bid}.\n")
 
                 else:
@@ -262,6 +263,7 @@ class PlayGame():
 
         record.recipient = self.players[winner_id].username if winner_id != -1 else None
         record.price_paid = max_bid if winner_id != -1 else 0
+        record.cards_paid = [c.value for c in self.players[winner_id].current_money_card_bids] if winner_id != -1 else []
         self.auction_rounds.append(record)
         self._broadcast_auction_result(record)
 
@@ -338,7 +340,8 @@ class PlayGame():
             elif isinstance(action, int):
                 # update max and continue to next player in order
                 max_bid = action
-                record.add_event(player.username, "bid", max_bid)
+                record.add_event(player.username, "bid", max_bid,
+                                  cards=[c.value for c in player.current_money_card_bids])
                 self.host.send_message(f"💰 {player.username} bid now {max_bid}.")
                 # move to next player
                 current_player_id = self.get_next_player_id(current_player_id)

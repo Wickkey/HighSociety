@@ -111,12 +111,13 @@ player and spectator immediately after each auction concludes — you don't need
       "description": "Painting Card with value 7"
     },
     "events": [
-      {"player": "alice", "action": "bid", "amount": 5},
-      {"player": "bob", "action": "bid", "amount": 8},
-      {"player": "alice", "action": "pass", "amount": null}
+      {"player": "alice", "action": "bid", "amount": 5, "cards": [5]},
+      {"player": "bob", "action": "bid", "amount": 8, "cards": [3, 5]},
+      {"player": "alice", "action": "pass", "amount": null, "cards": null}
     ],
     "recipient": "bob",
-    "price_paid": 8
+    "price_paid": 8,
+    "cards_paid": [3, 5]
   }
 }
 ```
@@ -131,13 +132,18 @@ Field reference (`data`):
   (a disgrace auction's `card.type` tells you *which* disgrace card it was).
 - **`events`** — the full turn-by-turn sequence, in order. `action` is `"bid"` / `"pass"` /
   `"fold"` / `"quit"`; `amount` is that player's *total* bid after the action (only set for
-  `"bid"`). Replay this list if you want to study bidding patterns, not just the final price.
+  `"bid"`); `cards` is the list of individual money card values that make up `amount` (also only
+  set for `"bid"` — e.g. a bid of 8 made with a 3-card and a 5-card is `"cards": [3, 5]`). Replay
+  this list if you want to study bidding patterns, not just the final price.
 - **`recipient`** — username who ended up with the card, or `null` if a normal auction had zero
   active bidders (nobody wanted it and nobody was forced to take it).
 - **`price_paid`** — what `recipient` actually paid. For a disgrace auction this is always `0` —
   the recipient is whoever passed, and passing refunds their own bids; everyone else's bids in
   `events` were forfeited trying to avoid taking the card (see `README.md`'s architecture section
   on the disgrace-auction settlement strategy if you want the full rule).
+- **`cards_paid`** — the individual money card values `recipient` handed over to make up
+  `price_paid` (e.g. `[3, 5]` for a price of 8 paid with those two cards). Always `[]` for a
+  disgrace auction, since `price_paid` is always `0` there too.
 
 ### Embedded/local equivalent
 

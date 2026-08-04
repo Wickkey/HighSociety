@@ -22,9 +22,10 @@ class BidEvent:
     player: str                    # the acting player's username
     action: str                    # "bid" | "pass" | "fold" | "quit"
     amount: Optional[int] = None   # the player's total bid *after* this action; only set when action == "bid"
+    cards: Optional[list] = None   # the money card values comprising `amount`; only set when action == "bid"
 
     def to_dict(self) -> dict:
-        return {"player": self.player, "action": self.action, "amount": self.amount}
+        return {"player": self.player, "action": self.action, "amount": self.amount, "cards": self.cards}
 
 
 @dataclass
@@ -55,6 +56,10 @@ class AuctionRecord:
             refunds their own committed bids; see `events` to see what
             *other* players forfeited trying to avoid taking the card
             (highsociety.code.gamecore.game_manager.disgrace_settlement).
+        cards_paid: the actual money card values `recipient` handed over to
+            make up `price_paid` (e.g. [10, 15] for a bid of 25 made with
+            those two cards). Always [] for a disgrace auction, since
+            price_paid is always 0 there too.
     """
 
     round_number: int
@@ -63,9 +68,10 @@ class AuctionRecord:
     events: list = field(default_factory=list)
     recipient: Optional[str] = None
     price_paid: int = 0
+    cards_paid: list = field(default_factory=list)
 
-    def add_event(self, player: str, action: str, amount: Optional[int] = None) -> None:
-        self.events.append(BidEvent(player=player, action=action, amount=amount))
+    def add_event(self, player: str, action: str, amount: Optional[int] = None, cards: Optional[list] = None) -> None:
+        self.events.append(BidEvent(player=player, action=action, amount=amount, cards=cards))
 
     def to_dict(self) -> dict:
         return {
@@ -75,6 +81,7 @@ class AuctionRecord:
             "events": [e.to_dict() for e in self.events],
             "recipient": self.recipient,
             "price_paid": self.price_paid,
+            "cards_paid": self.cards_paid,
         }
 
 

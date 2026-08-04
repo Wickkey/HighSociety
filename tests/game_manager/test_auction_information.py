@@ -24,19 +24,21 @@ def test_summarize_card_reflects_the_actual_card_type():
 
 def test_add_event_appends_in_order():
     record = AuctionRecord(round_number=1, auction_type="normal", card=summarize_card(Painting(value=5)))
-    record.add_event("alice", "bid", 3)
-    record.add_event("bob", "bid", 5)
+    record.add_event("alice", "bid", 3, cards=[3])
+    record.add_event("bob", "bid", 5, cards=[5])
     record.add_event("alice", "pass")
 
     assert [e.action for e in record.events] == ["bid", "bid", "pass"]
     assert record.events[1].player == "bob"
     assert record.events[1].amount == 5
+    assert record.events[1].cards == [5]
     assert record.events[2].amount is None
+    assert record.events[2].cards is None
 
 
 def test_to_dict_is_json_serializable_end_to_end():
     record = AuctionRecord(round_number=2, auction_type="disgrace", card=summarize_card(Painting(value=1)))
-    record.add_event("alice", "bid", 4)
+    record.add_event("alice", "bid", 4, cards=[4])
     record.add_event("bob", "pass")
     record.recipient = "bob"
     record.price_paid = 0
@@ -48,12 +50,13 @@ def test_to_dict_is_json_serializable_end_to_end():
     assert reparsed["auction_type"] == "disgrace"
     assert reparsed["recipient"] == "bob"
     assert reparsed["price_paid"] == 0
+    assert reparsed["cards_paid"] == []
     assert reparsed["events"] == [
-        {"player": "alice", "action": "bid", "amount": 4},
-        {"player": "bob", "action": "pass", "amount": None},
+        {"player": "alice", "action": "bid", "amount": 4, "cards": [4]},
+        {"player": "bob", "action": "pass", "amount": None, "cards": None},
     ]
 
 
 def test_bid_event_to_dict():
-    event = BidEvent(player="alice", action="bid", amount=10)
-    assert event.to_dict() == {"player": "alice", "action": "bid", "amount": 10}
+    event = BidEvent(player="alice", action="bid", amount=10, cards=[10])
+    assert event.to_dict() == {"player": "alice", "action": "bid", "amount": 10, "cards": [10]}
