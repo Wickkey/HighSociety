@@ -491,3 +491,5 @@ def test_auction_result_is_broadcast_to_players_and_spectators_with_structured_d
             assert event["action"] in ("bid", "pass", "fold", "quit")
         assert isinstance(record["money_spent"], dict)
         assert all(isinstance(v, int) for v in record["money_spent"].values())
+        assert isinstance(record["cards_spent"], dict)
+        assert all(isinstance(v, list) for v in record["cards_spent"].values())

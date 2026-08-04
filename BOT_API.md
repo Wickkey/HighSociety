@@ -116,7 +116,8 @@ player and spectator immediately after each auction concludes — you don't need
       {"player": "alice", "action": "pass", "amount": null, "cards": null}
     ],
     "recipient": "bob",
-    "money_spent": {"alice": 0, "bob": 8}
+    "money_spent": {"alice": 0, "bob": 8},
+    "cards_spent": {"alice": [], "bob": [3, 5]}
   }
 }
 ```
@@ -143,6 +144,9 @@ Field reference (`data`):
   who raised trying to avoid the card permanently loses that money (see `README.md`'s architecture
   section on the disgrace-auction settlement strategy for the full rule, including the alternate
   "refund everyone" strategy where this would be `0` for all players).
+- **`cards_spent`** — every player's username mapped to the individual money card values behind
+  their `money_spent` total (e.g. `[3, 5]` for a spend of `8` paid with those two cards). Each
+  player's list always sums to their own `money_spent` entry.
 
 ### Embedded/local equivalent
 

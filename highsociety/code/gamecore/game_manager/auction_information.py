@@ -60,6 +60,10 @@ class AuctionRecord:
             DisgraceAuctionSettlement (highsociety.code.gamecore.game_manager
             .disgrace_settlement) — the default forfeits raised money, but
             e.g. RefundAllSettlement would leave everyone at 0.
+        cards_spent: every player's username mapped to the individual money
+            card values behind their money_spent total, e.g.
+            {"alice": [], "bob": [3, 5]}. Same rules as money_spent — a
+            player's own list always sums to their own money_spent entry.
     """
 
     round_number: int
@@ -68,6 +72,7 @@ class AuctionRecord:
     events: list = field(default_factory=list)
     recipient: Optional[str] = None
     money_spent: dict = field(default_factory=dict)
+    cards_spent: dict = field(default_factory=dict)
 
     def add_event(self, player: str, action: str, amount: Optional[int] = None, cards: Optional[list] = None) -> None:
         self.events.append(BidEvent(player=player, action=action, amount=amount, cards=cards))
@@ -80,6 +85,7 @@ class AuctionRecord:
             "events": [e.to_dict() for e in self.events],
             "recipient": self.recipient,
             "money_spent": self.money_spent,
+            "cards_spent": self.cards_spent,
         }
 
 

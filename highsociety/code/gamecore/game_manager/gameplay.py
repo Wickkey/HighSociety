@@ -270,6 +270,7 @@ class PlayGame():
         # this auction-scoped instead of reaching into wallet state.
         record.recipient = self.players[winner_id].username if winner_id != -1 else None
         record.money_spent = {p.username: p.current_bid_value for p in self.players}
+        record.cards_spent = {p.username: [c.value for c in p.current_money_card_bids] for p in self.players}
         self.auction_rounds.append(record)
         self._broadcast_auction_result(record)
 
@@ -383,6 +384,7 @@ class PlayGame():
         # ForfeitSettlement, each raiser's forfeited amount for everyone else.
         record.recipient = loser.username
         record.money_spent = {p.username: p.current_bid_value for p in self.players}
+        record.cards_spent = {p.username: [c.value for c in p.current_money_card_bids] for p in self.players}
         self.auction_rounds.append(record)
         self._broadcast_auction_result(record)
 

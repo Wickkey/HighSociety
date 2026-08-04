@@ -148,6 +148,7 @@ class TestAuctionHistory:
         ]
         assert record.recipient == "bidder"
         assert record.money_spent == {"bidder": 10, "rival": 0}
+        assert record.cards_spent == {"bidder": [10], "rival": []}
 
     def test_normal_card_auction_with_no_bidders_records_no_recipient(self, make_player):
         """Documents the "last one standing wins for free" rule showing up correctly
@@ -165,6 +166,7 @@ class TestAuctionHistory:
         assert record.events == []
         assert record.recipient is None
         assert record.money_spent == {"p1": 0, "p2": 0}
+        assert record.cards_spent == {"p1": [], "p2": []}
 
     def test_disgrace_card_auction_records_recipient_and_the_forfeit_events(self, make_player):
         card = Passe()
@@ -186,6 +188,7 @@ class TestAuctionHistory:
         # taker's own bid was refunded by passing; raiser's forfeited under
         # the default ForfeitSettlement instead of being returned.
         assert record.money_spent == {"raiser": 10, "taker": 0}
+        assert record.cards_spent == {"raiser": [10], "taker": []}
 
     def test_round_numbers_increment_across_multiple_auctions(self, make_player):
         p1, p2 = make_player("P1"), make_player("P2")
@@ -209,6 +212,7 @@ class TestAuctionHistory:
         assert reparsed == history
         assert reparsed[0]["recipient"] == "p1"
         assert reparsed[0]["money_spent"] == {"p1": 3, "p2": 0}
+        assert reparsed[0]["cards_spent"] == {"p1": [3], "p2": []}
 
 
 class TestFauxPasPenalty:

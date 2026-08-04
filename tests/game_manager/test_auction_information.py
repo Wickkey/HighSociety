@@ -42,6 +42,7 @@ def test_to_dict_is_json_serializable_end_to_end():
     record.add_event("bob", "pass")
     record.recipient = "bob"
     record.money_spent = {"alice": 4, "bob": 0}
+    record.cards_spent = {"alice": [4], "bob": []}
 
     payload = record.to_dict()
     reparsed = json.loads(json.dumps(payload))  # would raise if anything weren't JSON-safe
@@ -50,6 +51,7 @@ def test_to_dict_is_json_serializable_end_to_end():
     assert reparsed["auction_type"] == "disgrace"
     assert reparsed["recipient"] == "bob"
     assert reparsed["money_spent"] == {"alice": 4, "bob": 0}
+    assert reparsed["cards_spent"] == {"alice": [4], "bob": []}
     assert reparsed["events"] == [
         {"player": "alice", "action": "bid", "amount": 4, "cards": [4]},
         {"player": "bob", "action": "pass", "amount": None, "cards": None},
