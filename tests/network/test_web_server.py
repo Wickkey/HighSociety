@@ -13,7 +13,11 @@ simple_websocket = pytest.importorskip("simple_websocket")
 Client, ConnectionClosed = simple_websocket.Client, simple_websocket.ConnectionClosed
 web_server = pytest.importorskip("web_server")
 
-_port_counter = itertools.count(19500, 1)
+# test_end_to_end_socket.py's fixtures scatter across roughly 19100-21299
+# (19100/19600/20700/20800 + id(thread) % 500, plus a 21000-step-2 counter) —
+# starting well clear of that avoids an intermittent "port already in use"
+# collision between the two files when the whole suite runs in one process.
+_port_counter = itertools.count(25000, 1)
 
 
 class ScriptedWSClient:
