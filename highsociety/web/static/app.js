@@ -43,10 +43,10 @@ function cardLabel(card) {
   }
 }
 
-function cardEl(card) {
+function cardEl(card, big) {
   const { cls, text } = cardLabel(card);
   const div = document.createElement('div');
-  div.className = `status-card ${cls}`;
+  div.className = `status-card ${cls}${big ? ' big' : ''}`;
   div.innerHTML = `<span class="value">${text}</span>${card.is_green ? '<span class="green-dot"></span>' : ''}`;
   if (card.description) div.title = card.description;
   return div;
@@ -61,7 +61,8 @@ function cardBackEl() {
 
 // Transient floating label on an opponent's tile (e.g. "Raised to 8",
 // "Passed") so their action reads at a glance instead of needing the
-// (collapsed-by-default) game log.
+// (collapsed-by-default) game log. Also flashes the whole tile briefly so
+// the eye actually catches it happening, not just the label itself.
 function showBubble(username, text, tone) {
   const row = document.querySelector(`.opponent-row[data-username="${CSS.escape(username)}"]`);
   if (!row) return;
@@ -70,10 +71,14 @@ function showBubble(username, text, tone) {
   bubble.textContent = text;
   row.appendChild(bubble);
   requestAnimationFrame(() => bubble.classList.add('show'));
+
+  row.classList.add('flash');
+  setTimeout(() => row.classList.remove('flash'), 500);
+
   setTimeout(() => {
     bubble.classList.remove('show');
     setTimeout(() => bubble.remove(), 250);
-  }, 1600);
+  }, 2400);
 }
 
 // Points formula mirrors BasePlayer.__calculate_points(): sum of values,
@@ -553,12 +558,14 @@ function setMovePending() {
 
 function renderAuctionPanel(isSpectator) {
   const prefix = isSpectator ? 'spec-' : '';
-  $(`${prefix}round-label`).textContent = game.round ? `Auction #${game.round}` : '';
-  $(`${prefix}turn-label`).textContent = game.turnPlayer ? `${game.turnPlayer}'s turn` : '';
+  $(`${prefix}round-label`).innerHTML = game.round ? `<span class="suit-icon">🂠</span> Auction <strong>#${game.round}</strong>` : '';
+  $(`${prefix}turn-label`).innerHTML = game.turnPlayer
+    ? `<span class="turn-dot"></span>${game.turnPlayer}'s turn`
+    : '';
   $(`${prefix}max-bid`).textContent = game.maxBid || 0;
   const cardContainer = $(`${prefix}auction-card`);
   cardContainer.innerHTML = '';
-  if (game.card) cardContainer.appendChild(cardEl(game.card));
+  if (game.card) cardContainer.appendChild(cardEl(game.card, true));
   renderOpponents(isSpectator);
 }
 
@@ -569,10 +576,12 @@ function renderOpponents(isSpectator) {
   Object.entries(game.opponents).forEach(([username, o]) => {
     const row = document.createElement('div');
     row.dataset.username = username;
+    const isCurrentTurn = game.turnPlayer === username;
     const classes = ['opponent-row'];
     if (o.active === false) classes.push('inactive');
     if (o.outOfAuction) classes.push('out-of-auction');
-    if (game.turnPlayer === username) classes.push('current-turn');
+    else if (!isCurrentTurn) classes.push('waiting'); // still in this auction, just not acting right now
+    if (isCurrentTurn) classes.push('current-turn');
     row.className = classes.join(' ');
 
     const header = document.createElement('div');
