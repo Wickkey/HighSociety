@@ -52,6 +52,30 @@ function cardEl(card) {
   return div;
 }
 
+function cardBackEl() {
+  const div = document.createElement('div');
+  div.className = 'card-back';
+  div.title = 'Hidden — enable "Reveal cards" to see what this is';
+  return div;
+}
+
+// Transient floating label on an opponent's tile (e.g. "Raised to 8",
+// "Passed") so their action reads at a glance instead of needing the
+// (collapsed-by-default) game log.
+function showBubble(username, text, tone) {
+  const row = document.querySelector(`.opponent-row[data-username="${CSS.escape(username)}"]`);
+  if (!row) return;
+  const bubble = document.createElement('div');
+  bubble.className = `bubble ${tone || ''}`;
+  bubble.textContent = text;
+  row.appendChild(bubble);
+  requestAnimationFrame(() => bubble.classList.add('show'));
+  setTimeout(() => {
+    bubble.classList.remove('show');
+    setTimeout(() => bubble.remove(), 250);
+  }, 1600);
+}
+
 // Points formula mirrors BasePlayer.__calculate_points(): sum of values,
 // times the product of multipliers (Passe: -5/×1, Scandale: 0/×0.5,
 // Prestige: 0/×2) — see components_module/{disgrace_card,prestige_card}.py.
@@ -72,29 +96,38 @@ let pendingSpectate = null;
 let pendingIdentifyError = null;
 let game = null;
 
+// Whether to show opponents' actual won cards/points, or keep them hidden
+// behind card-backs — off by default (per user preference: keeping
+// opponents' progress hidden makes the game more interesting), persisted
+// per-browser so it doesn't reset every game.
+let revealCards = localStorage.getItem('hs_reveal_cards') === '1';
+
 function resetGameState(myUsername) {
   game = {
     round: 0,
     card: null,
     maxBid: 0,
+    myAuctionBid: 0, // my own cumulative committed bid for the *current* auction only
     turnPlayer: null,
     myUsername,
     myPoints: 0,
     myStatusCards: [],
     selectedBid: new Set(),
-    opponents: {}, // username -> {name, statusCards: [], active: true}
+    opponents: {}, // username -> {name, statusCards: [], active: true, outOfAuction: false}
   };
 }
 
 function seedOpponents(status, myUsername) {
   (status.joined || []).forEach((p) => {
     if (p.username === myUsername) return;
-    game.opponents[p.username] = { name: p.name, statusCards: [], active: true };
+    game.opponents[p.username] = { name: p.name, statusCards: [], active: true, outOfAuction: false };
   });
 }
 
 function ensureOpponent(username) {
-  if (!game.opponents[username]) game.opponents[username] = { name: username, statusCards: [], active: true };
+  if (!game.opponents[username]) {
+    game.opponents[username] = { name: username, statusCards: [], active: true, outOfAuction: false };
+  }
   return game.opponents[username];
 }
 
@@ -204,6 +237,18 @@ function wireStaticHandlers() {
   $('btn-quit').addEventListener('click', onQuit);
   $('btn-spec-chat-send').addEventListener('click', onSpecChatSend);
   $('spec-chat-input').addEventListener('keydown', (e) => { if (e.key === 'Enter') onSpecChatSend(); });
+
+  $('reveal-cards-toggle').checked = revealCards;
+  $('spec-reveal-cards-toggle').checked = revealCards;
+  const onRevealToggle = (e) => {
+    revealCards = e.target.checked;
+    localStorage.setItem('hs_reveal_cards', revealCards ? '1' : '0');
+    $('reveal-cards-toggle').checked = revealCards;
+    $('spec-reveal-cards-toggle').checked = revealCards;
+    if (game) { renderOpponents(false); renderOpponents(true); }
+  };
+  $('reveal-cards-toggle').addEventListener('change', onRevealToggle);
+  $('spec-reveal-cards-toggle').addEventListener('change', onRevealToggle);
 
   window.addEventListener('beforeunload', (e) => {
     if (ws && ws.readyState === WebSocket.OPEN && game && game.round > 0) {
@@ -382,8 +427,11 @@ function applyGameMessage(msg, isSpectator) {
     case 'GLOBAL_EVENT': {
       const d = msg.data;
       if (d && d.event === 'faux_pas_discard') {
-        const o = game.myUsername === d.player ? null : ensureOpponent(d.player);
-        if (o) o.statusCards = o.statusCards.filter((c) => c.value !== d.discarded_value);
+        if (d.player !== game.myUsername) {
+          const o = ensureOpponent(d.player);
+          o.statusCards = o.statusCards.filter((c) => c.value !== d.discarded_value);
+          showBubble(d.player, revealCards ? `Discarded ${d.discarded_value}` : 'Discarded a painting', 'discard');
+        }
         renderOpponents(isSpectator);
       }
       if (msg.prompt && !isDuplicateOfStructuredEvent(msg.prompt)) logLine(msg.prompt.trim(), isSpectator);
@@ -426,17 +474,31 @@ function applyAuctionUpdate(msg, isSpectator) {
 
   if (d.kind === 'auction_start') {
     game.maxBid = 0;
+    game.myAuctionBid = 0;
     game.turnPlayer = d.starting_player;
+    // Everyone's back in for the new auction — clear last round's greyed-out state.
+    Object.values(game.opponents).forEach((o) => { o.outOfAuction = false; });
     logLine(`🃏 Auction #${d.round_number}: ${describeCard(d.card)}`, isSpectator);
   } else if (d.kind === 'turn_start') {
     game.turnPlayer = d.player;
   } else if (d.kind === 'bid') {
+    if (d.player === game.myUsername) {
+      game.myAuctionBid = d.max_bid; // this event's max_bid is the bidder's own new cumulative total
+      updateBidStatus();
+    } else {
+      showBubble(d.player, `Raised to ${d.max_bid}`, 'bid');
+    }
     logLine(`💰 ${d.player} raised to ${d.max_bid}`, isSpectator);
   } else if (d.kind === 'pass' || d.kind === 'fold') {
+    if (d.player !== game.myUsername) {
+      showBubble(d.player, 'Passed', 'pass');
+      if (game.opponents[d.player]) game.opponents[d.player].outOfAuction = true;
+    }
     logLine(`⚪ ${d.player} passed`, isSpectator);
   } else if (d.kind === 'quit') {
+    if (d.player !== game.myUsername) showBubble(d.player, 'Quit', 'quit');
+    if (game.opponents[d.player]) { game.opponents[d.player].active = false; game.opponents[d.player].outOfAuction = true; }
     logLine(`❌ ${d.player} quit`, isSpectator);
-    if (game.opponents[d.player]) game.opponents[d.player].active = false;
   }
   renderAuctionPanel(isSpectator);
 }
@@ -464,7 +526,7 @@ function applyPlayerState(msg) {
 
 function applyPlayerMove(msg) {
   $('move-error').classList.add('hidden');
-  $('move-panel').classList.remove('hidden');
+  $('move-panel').classList.remove('hidden', 'pending');
   const bidControls = $('bid-controls');
   const discardControls = $('discard-controls');
   if (msg.move_type === 'discard_painting') {
@@ -476,7 +538,15 @@ function applyPlayerMove(msg) {
     bidControls.classList.remove('hidden');
     game.selectedBid = new Set();
     renderMoneyChips(msg.constraints.allowed_money_cards);
+    updateBidStatus();
   }
+}
+
+// Marks the move panel as "acted on, waiting for the table" — greyed out and
+// non-interactive but still visible (so you can see what you just did),
+// rather than disappearing entirely between your turns.
+function setMovePending() {
+  $('move-panel').classList.add('pending');
 }
 
 // ------------------------------------------------------------- rendering --
@@ -493,20 +563,29 @@ function renderAuctionPanel(isSpectator) {
 }
 
 function renderOpponents(isSpectator) {
+  if (!game) return;
   const container = $(isSpectator ? 'spec-players-list' : 'opponents-list');
   container.innerHTML = '';
   Object.entries(game.opponents).forEach(([username, o]) => {
-    const pts = computePoints(o.statusCards);
     const row = document.createElement('div');
-    row.className = `opponent-row${o.active === false ? ' inactive' : ''}${game.turnPlayer === username ? ' current-turn' : ''}`;
+    row.dataset.username = username;
+    const classes = ['opponent-row'];
+    if (o.active === false) classes.push('inactive');
+    if (o.outOfAuction) classes.push('out-of-auction');
+    if (game.turnPlayer === username) classes.push('current-turn');
+    row.className = classes.join(' ');
+
     const header = document.createElement('div');
     header.className = 'opponent-header';
-    header.innerHTML = `<span class="name">${o.name}${o.active === false ? ' (out)' : ''}</span><span class="pts">Points: ${pts}</span>`;
+    const ptsLabel = revealCards ? `Points: ${computePoints(o.statusCards)}` : `${o.statusCards.length} card${o.statusCards.length === 1 ? '' : 's'}`;
+    header.innerHTML = `<span class="name">${o.name}${o.active === false ? ' (out)' : ''}</span><span class="pts">${ptsLabel}</span>`;
     row.appendChild(header);
+
     const chips = document.createElement('div');
     chips.className = 'chip-row small';
-    o.statusCards.forEach((c) => chips.appendChild(cardEl(c)));
+    o.statusCards.forEach((c) => chips.appendChild(revealCards ? cardEl(c) : cardBackEl()));
     row.appendChild(chips);
+
     container.appendChild(row);
   });
 }
@@ -537,9 +616,23 @@ function renderMoneyChips(values) {
   updateSelectedBidTotal();
 }
 
+// Money committed to an auction stays on the table for its whole duration
+// (BasePlayer.place_bid() adds to current_bid_value across turns, it never
+// replaces it) — so "selected" chips here are cards being ADDED on top of
+// whatever you already committed earlier this same auction, not your new
+// total outright. Surfacing both numbers is what point 3 of the user's
+// feedback asked for: it's otherwise hard to tell how much more you need
+// without digging through the log.
+function updateBidStatus() {
+  $('my-current-bid').textContent = game.myAuctionBid;
+  $('bid-need-more').textContent = game.maxBid > 0 ? `(add more than ${game.maxBid - game.myAuctionBid} to raise)` : '';
+  updateSelectedBidTotal();
+}
+
 function updateSelectedBidTotal() {
-  const total = [...game.selectedBid].reduce((a, b) => a + b, 0);
-  $('selected-bid').textContent = total;
+  const addingTotal = [...game.selectedBid].reduce((a, b) => a + b, 0);
+  $('selected-bid').textContent = addingTotal;
+  $('new-total-bid').textContent = game.myAuctionBid + addingTotal;
 }
 
 function renderPaintingChoices(values) {
@@ -552,7 +645,7 @@ function renderPaintingChoices(values) {
     btn.textContent = value;
     btn.addEventListener('click', () => {
       ws.send(JSON.stringify({ message_type: 'RESPONSE', prompt: String(value) }));
-      $('move-panel').classList.add('hidden');
+      setMovePending();
     });
     row.appendChild(btn);
   });
@@ -564,16 +657,16 @@ function onPlaceBid() {
   const values = [...game.selectedBid];
   if (values.length === 0) { showError($('move-error'), 'Select at least one money card.'); return; }
   ws.send(JSON.stringify({ message_type: 'RESPONSE', prompt: JSON.stringify(values) }));
-  $('move-panel').classList.add('hidden');
+  setMovePending();
 }
 
 function onPass() {
   ws.send(JSON.stringify({ message_type: 'RESPONSE', prompt: 'pass' }));
-  $('move-panel').classList.add('hidden');
+  setMovePending();
 }
 
 function onQuit() {
   if (!confirm('Quit the game? This cannot be undone.')) return;
   ws.send(JSON.stringify({ message_type: 'RESPONSE', prompt: 'quit' }));
-  $('move-panel').classList.add('hidden');
+  setMovePending();
 }

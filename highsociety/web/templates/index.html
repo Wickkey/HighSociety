@@ -68,7 +68,7 @@
           <p>✅ You're in! Waiting for the rest of the table…</p>
         </div>
 
-        <button id="btn-spectate-link" class="secondary">Watch as a spectator instead</button>
+        <button id="btn-spectate-link" class="secondary standalone">Watch as a spectator instead</button>
       </div>
     </section>
 
@@ -80,7 +80,7 @@
         <label>Username <input type="text" id="spectate-username" placeholder="e.g. sam" autocomplete="off"></label>
         <button id="btn-spectate-join" class="primary">Watch</button>
         <p id="spectate-error" class="error hidden"></p>
-        <button id="btn-back-to-join" class="secondary">Back</button>
+        <button id="btn-back-to-join" class="secondary standalone">Back</button>
       </div>
     </section>
 
@@ -99,28 +99,35 @@
             </div>
           </div>
 
-          <div id="move-panel" class="card panel hidden">
-            <div id="bid-controls">
-              <h3>Your move</h3>
-              <div id="my-money-cards" class="chip-row"></div>
-              <div class="bid-readout">Selected: <strong id="selected-bid">0</strong></div>
-              <div class="button-row">
-                <button id="btn-place-bid" class="primary">Place Bid</button>
-                <button id="btn-pass" class="secondary">Pass</button>
-                <button id="btn-quit" class="danger">Quit</button>
+          <div id="move-panel" class="card panel move-panel hidden">
+            <div class="move-panel-inner">
+              <div id="bid-controls">
+                <h3>Your move</h3>
+                <div class="bid-status">
+                  <span>Your bid so far: <strong id="my-current-bid">0</strong></span>
+                  <span id="bid-need-more" class="hint"></span>
+                </div>
+                <div id="my-money-cards" class="chip-row"></div>
+                <div class="bid-readout">Adding: <strong id="selected-bid">0</strong> → new total <strong id="new-total-bid">0</strong></div>
+                <div class="button-row">
+                  <button id="btn-place-bid" class="primary">Place Bid</button>
+                  <button id="btn-pass" class="secondary">Pass</button>
+                  <button id="btn-quit" class="danger">Quit</button>
+                </div>
+                <p id="move-error" class="error hidden"></p>
               </div>
-              <p id="move-error" class="error hidden"></p>
+              <div id="discard-controls" class="hidden">
+                <h3>Faux Pas — discard a painting</h3>
+                <div id="my-paintings" class="chip-row"></div>
+              </div>
             </div>
-            <div id="discard-controls" class="hidden">
-              <h3>Faux Pas — discard a painting</h3>
-              <div id="my-paintings" class="chip-row"></div>
-            </div>
+            <div class="move-panel-overlay">Waiting for other players…</div>
           </div>
 
-          <div class="card panel">
-            <h3>Game log</h3>
+          <details class="card panel log-details">
+            <summary>Game log (advanced)</summary>
             <div id="game-log" class="log"></div>
-          </div>
+          </details>
         </div>
 
         <div class="side-col">
@@ -131,7 +138,13 @@
           </div>
 
           <div class="card panel">
-            <h3>Opponents</h3>
+            <div class="panel-header-row">
+              <h3>Opponents</h3>
+              <label class="reveal-toggle">
+                <input type="checkbox" id="reveal-cards-toggle">
+                Reveal cards
+              </label>
+            </div>
             <div id="opponents-list"></div>
           </div>
         </div>
@@ -153,10 +166,10 @@
             </div>
           </div>
 
-          <div class="card panel">
-            <h3>Game log</h3>
+          <details class="card panel log-details">
+            <summary>Game log (advanced)</summary>
             <div id="spec-game-log" class="log"></div>
-          </div>
+          </details>
 
           <div class="card panel">
             <h3>Chat</h3>
@@ -170,7 +183,13 @@
 
         <div class="side-col">
           <div class="card panel">
-            <h3>Players</h3>
+            <div class="panel-header-row">
+              <h3>Players</h3>
+              <label class="reveal-toggle">
+                <input type="checkbox" id="spec-reveal-cards-toggle">
+                Reveal cards
+              </label>
+            </div>
             <div id="spec-players-list"></div>
           </div>
         </div>
