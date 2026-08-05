@@ -610,6 +610,43 @@ function renderAuctionPanel(isSpectator) {
   cardContainer.innerHTML = '';
   if (game.card) cardContainer.appendChild(cardEl(game.card, true));
   renderOpponents(isSpectator);
+  updateCardInfoButton(isSpectator);
+}
+
+// Bidding-rules text for the ⓘ button next to the auction card, keyed by
+// card.type — Painting/PrestigeCard are normal auctions (highest bidder wins
+// and pays), FauxPas/Passe/Scandale are "disgrace" auctions with the exact
+// opposite dynamic (first player to PASS takes the card; everyone else's
+// raised money is simply lost). This is the single most confusing rule for
+// new players, hence spelling it out per card type rather than assuming it's
+// obvious from the card's face value alone.
+const CARD_INFO_TEXT = {
+  Painting: 'Normal auction. Highest bidder wins and pays their bid. Worth its printed value in points.',
+  PrestigeCard: 'Normal auction. Highest bidder wins and pays their bid. Doubles your entire final score — high stakes!',
+  FauxPas: "Disgrace auction — opposite rules! The FIRST player to pass takes this card, and everyone who raised loses that money for nothing. Taking it means you must immediately discard a Painting you own (or your next one, if you don't have one yet).",
+  Passe: 'Disgrace auction — opposite rules! The FIRST player to pass takes this card, and everyone who raised loses that money for nothing. Costs you 5 points.',
+  Scandale: 'Disgrace auction — opposite rules! The FIRST player to pass takes this card, and everyone who raised loses that money for nothing. Halves your entire final score.',
+};
+
+// Keeps the ⓘ button (and its popover's contents) next to the auction card
+// in sync with whatever's currently up for auction. Hidden entirely when
+// there's no card up (e.g. between auctions) — the popover itself also gets
+// force-closed at that point so it can't be left open showing stale text
+// into the next auction. Reuses describeCard() so the popover's title always
+// matches the label already shown elsewhere for this same card.
+function updateCardInfoButton(isSpectator) {
+  const prefix = isSpectator ? 'spec-' : '';
+  const btn = $(`${prefix}card-info-btn`);
+  const popover = $(`${prefix}card-info-popover`);
+  const text = game.card && CARD_INFO_TEXT[game.card.type];
+  if (!text) {
+    btn.classList.add('hidden');
+    popover.classList.add('hidden');
+    return;
+  }
+  btn.classList.remove('hidden');
+  $(`${prefix}card-info-title`).textContent = describeCard(game.card);
+  $(`${prefix}card-info-text`).textContent = text;
 }
 
 function renderOpponents(isSpectator) {

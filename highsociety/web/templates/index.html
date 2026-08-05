@@ -166,6 +166,16 @@
             <div class="auction-header">
               <span id="round-label" class="muted"></span>
               <span id="turn-label" class="turn-label"></span>
+              <span class="card-info-wrap">
+                <button type="button" id="card-info-btn" class="card-info-btn hidden" aria-label="How does this card's auction work?" onclick="document.getElementById('card-info-popover').classList.toggle('hidden')">ⓘ</button>
+                <div id="card-info-popover" class="card-info-popover hidden">
+                  <div class="card-info-popover-header">
+                    <strong id="card-info-title"></strong>
+                    <button type="button" class="card-info-close" aria-label="Close" onclick="document.getElementById('card-info-popover').classList.add('hidden')">×</button>
+                  </div>
+                  <p id="card-info-text"></p>
+                </div>
+              </span>
             </div>
             <div id="auction-card" class="auction-card-slot"></div>
             <div class="bid-readout">
@@ -233,6 +243,16 @@
             <div class="auction-header">
               <span id="spec-round-label" class="muted"></span>
               <span id="spec-turn-label" class="turn-label"></span>
+              <span class="card-info-wrap">
+                <button type="button" id="spec-card-info-btn" class="card-info-btn hidden" aria-label="How does this card's auction work?" onclick="document.getElementById('spec-card-info-popover').classList.toggle('hidden')">ⓘ</button>
+                <div id="spec-card-info-popover" class="card-info-popover hidden">
+                  <div class="card-info-popover-header">
+                    <strong id="spec-card-info-title"></strong>
+                    <button type="button" class="card-info-close" aria-label="Close" onclick="document.getElementById('spec-card-info-popover').classList.add('hidden')">×</button>
+                  </div>
+                  <p id="spec-card-info-text"></p>
+                </div>
+              </span>
             </div>
             <div id="spec-auction-card" class="auction-card-slot"></div>
             <div class="bid-readout">
