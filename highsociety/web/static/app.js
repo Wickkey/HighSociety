@@ -162,6 +162,14 @@ async function refreshStatus() {
 }
 
 function renderForStatus(status) {
+  // The user is filling in the "watch as spectator" form — they haven't
+  // opened a WebSocket yet (that only happens once they click "Watch"), so
+  // the `ws` guards below don't cover this screen. Without this, a status
+  // poll firing mid-fill (every 1.5s while the room is in "lobby") yanks
+  // them back to the player-join screen before they can finish, making it
+  // look like spectating before the lobby fills is simply impossible.
+  if (!$('screen-spectate-join').classList.contains('hidden')) return;
+
   if (!status.exists) {
     stopPolling();
     showScreen('screen-host-setup');
@@ -212,19 +220,36 @@ function renderFinished(status) {
   showScreen('screen-finished');
   const standings = (status.final_standings || []).slice().sort((a, b) => b.points - a.points);
   const winners = new Set(status.winners || []);
+
+  const trophy = $('finished-trophy');
   if (winners.size === 1) {
-    $('finished-headline').textContent = `🏆 ${[...winners][0]} wins!`;
+    trophy.textContent = '🏆';
+    $('finished-headline').textContent = `${[...winners][0]} wins!`;
   } else if (winners.size > 1) {
-    $('finished-headline').textContent = `🤝 Tie: ${[...winners].join(', ')}`;
+    trophy.textContent = '🤝';
+    $('finished-headline').textContent = `Tie: ${[...winners].join(', ')}`;
   } else {
+    trophy.textContent = '🎲';
     $('finished-headline').textContent = 'Game over';
   }
-  const rows = standings.map((s) => `
-    <div class="standing-row ${winners.has(s.username) ? 'winner' : ''} ${s.active === false ? 'inactive' : ''}">
-      <span class="name">${s.username}${winners.has(s.username) ? ' 🏆' : ''}${s.active === false ? ' (left)' : ''}</span>
+  // Restart the entrance animation even if this exact status was already
+  // rendered once (e.g. a stray poll) — removing and re-adding the class
+  // forces the browser to replay the @keyframes rather than no-op.
+  trophy.classList.remove('enter');
+  void trophy.offsetWidth; // eslint-disable-line no-unused-expressions -- force reflow so the class removal actually takes effect first
+  trophy.classList.add('enter');
+
+  const rows = standings.map((s, i) => {
+    const isWinner = winners.has(s.username);
+    const state = isWinner ? 'winner' : (s.active === false ? 'inactive' : 'lost');
+    const tag = isWinner ? ' 🏆' : (s.active === false ? ' (left the game)' : '');
+    return `
+    <div class="standing-row ${state}" style="animation-delay: ${i * 90}ms">
+      <span class="name">${s.username}${tag}</span>
       <span>Points: ${s.points}</span>
       <span>Money left: ${s.money_left}</span>
-    </div>`).join('');
+    </div>`;
+  }).join('');
   $('standings-table').innerHTML = rows || '<p class="muted">No standings available.</p>';
 }
 
@@ -242,6 +267,9 @@ function wireStaticHandlers() {
   $('btn-quit').addEventListener('click', onQuit);
   $('btn-spec-chat-send').addEventListener('click', onSpecChatSend);
   $('spec-chat-input').addEventListener('keydown', (e) => { if (e.key === 'Enter') onSpecChatSend(); });
+  $('spec-chat-target-toggle').addEventListener('change', (e) => {
+    $('spec-chat-input').placeholder = e.target.checked ? 'Message spectators only…' : 'Message everyone…';
+  });
 
   $('reveal-cards-toggle').checked = revealCards;
   $('spec-reveal-cards-toggle').checked = revealCards;
@@ -384,7 +412,11 @@ function onSpecChatSend() {
   const input = $('spec-chat-input');
   const text = input.value.trim();
   if (!text || !ws) return;
-  ws.send(JSON.stringify({ message_type: 'CHAT', prompt: text }));
+  // See web_server.py's _spectator_chat_listener: "spectators" reaches only
+  // other spectators, anything else (including omitting the field) reaches
+  // everyone — players included.
+  const target = $('spec-chat-target-toggle').checked ? 'spectators' : 'all';
+  ws.send(JSON.stringify({ message_type: 'CHAT', prompt: text, target }));
   input.value = '';
 }
 
@@ -432,12 +464,15 @@ function applyGameMessage(msg, isSpectator) {
     case 'GLOBAL_EVENT': {
       const d = msg.data;
       if (d && d.event === 'faux_pas_discard') {
-        if (d.player !== game.myUsername) {
+        const isOpponent = d.player !== game.myUsername;
+        if (isOpponent) {
           const o = ensureOpponent(d.player);
           o.statusCards = o.statusCards.filter((c) => c.value !== d.discarded_value);
+        }
+        renderOpponents(isSpectator); // rebuild first — see applyAuctionUpdate's comment on why
+        if (isOpponent) {
           showBubble(d.player, revealCards ? `Discarded ${d.discarded_value}` : 'Discarded a painting', 'discard');
         }
-        renderOpponents(isSpectator);
       }
       if (msg.prompt && !isDuplicateOfStructuredEvent(msg.prompt)) logLine(msg.prompt.trim(), isSpectator);
       break;
@@ -476,6 +511,7 @@ function applyAuctionUpdate(msg, isSpectator) {
   game.round = d.round_number;
   game.card = d.card;
   if (typeof d.max_bid === 'number') game.maxBid = d.max_bid;
+  let bubble = null; // {player, text, tone} — deferred until after the re-render below
 
   if (d.kind === 'auction_start') {
     game.maxBid = 0;
@@ -491,21 +527,28 @@ function applyAuctionUpdate(msg, isSpectator) {
       game.myAuctionBid = d.max_bid; // this event's max_bid is the bidder's own new cumulative total
       updateBidStatus();
     } else {
-      showBubble(d.player, `Raised to ${d.max_bid}`, 'bid');
+      bubble = { player: d.player, text: `Raised to ${d.max_bid}`, tone: 'bid' };
     }
     logLine(`💰 ${d.player} raised to ${d.max_bid}`, isSpectator);
   } else if (d.kind === 'pass' || d.kind === 'fold') {
     if (d.player !== game.myUsername) {
-      showBubble(d.player, 'Passed', 'pass');
+      bubble = { player: d.player, text: 'Passed', tone: 'pass' };
       if (game.opponents[d.player]) game.opponents[d.player].outOfAuction = true;
     }
     logLine(`⚪ ${d.player} passed`, isSpectator);
   } else if (d.kind === 'quit') {
-    if (d.player !== game.myUsername) showBubble(d.player, 'Quit', 'quit');
+    if (d.player !== game.myUsername) bubble = { player: d.player, text: 'Quit', tone: 'quit' };
     if (game.opponents[d.player]) { game.opponents[d.player].active = false; game.opponents[d.player].outOfAuction = true; }
     logLine(`❌ ${d.player} quit`, isSpectator);
   }
+
+  // renderAuctionPanel() rebuilds every opponent row from scratch
+  // (container.innerHTML = ''), so a bubble attached beforehand would be
+  // destroyed in the very same tick it was created — that was the actual
+  // bug behind "I never see the raised/passed popup". Render first, then
+  // attach the bubble to the fresh row that will persist until the next one.
   renderAuctionPanel(isSpectator);
+  if (bubble) showBubble(bubble.player, bubble.text, bubble.tone);
 }
 
 function applyAuctionResult(msg, isSpectator) {

@@ -1,41 +1,39 @@
 :root {
-  --felt-1: #0d3b2e;
-  --felt-2: #123f2a;
-  --panel-bg: #fffdf8;
-  --panel-bg-soft: #faf6ec;
-  --panel-border: #e4ddc8;
-  --text: #22201a;
-  --muted: #7a7364;
-  --accent: #c1901f;
-  --accent-strong: #96700f;
-  --accent-soft: rgba(193, 144, 31, 0.14);
+  /* Luxury-casino palette: dark felt green behind cream/parchment panels,
+     muted gold accents, muted (not primary-color-wheel) card hues. Kept as
+     one deliberate look rather than a light/dark adaptive theme — a casino
+     table doesn't re-skin itself for your OS setting. */
+  --felt-1: #114430;
+  --felt-2: #0b3427;
+  --panel-bg: #f2ece2;
+  --panel-bg-soft: #ece4d8;
+  --panel-bg-alt: #f5f0e8;
+  --panel-bg-auction: #f3eee6;
+  --panel-bg-log: #ede5d8;
+  --panel-border: #d7cebf;
+  --text: #342c23;
+  --muted: #766a5b;
+  --accent: #b98a2f;
+  --accent-light: #c8a04d;
+  --accent-highlight: #d9b15f;
+  --accent-strong: #8f6a22;
+  --accent-soft: rgba(185, 138, 47, 0.16);
   --danger: #a3302a;
   --danger-soft: rgba(163, 48, 42, 0.12);
   --chip-money: #1f7a4d;
-  --chip-money-selected: #c1901f;
+  --chip-money-selected: var(--accent);
   --painting: #7a5230;
   --painting-2: #4d3320;
-  --prestige: #5c3d99;
-  --prestige-2: #33215c;
-  --disgrace: #8b2f2f;
-  --disgrace-2: #4d1a1a;
+  --prestige: #8570bf;
+  --prestige-2: #574a82;
+  --disgrace: #a96a68;
+  --disgrace-2: #6e3f3e;
   --green-dot: #2fa84f;
-  --radius: 14px;
-  --radius-sm: 9px;
-  --shadow: 0 10px 30px rgba(0, 0, 0, 0.22);
-  --shadow-sm: 0 3px 10px rgba(0, 0, 0, 0.12);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --panel-bg: #1b2420;
-    --panel-bg-soft: #202b25;
-    --panel-border: #33413a;
-    --text: #f1efe6;
-    --muted: #a3ada4;
-    --accent-soft: rgba(193, 144, 31, 0.18);
-    --danger-soft: rgba(163, 48, 42, 0.22);
-  }
+  --radius: 18px;
+  --radius-card: 14px;
+  --radius-sm: 12px;
+  --shadow: 0 14px 34px rgba(0, 0, 0, 0.24);
+  --shadow-sm: 0 8px 24px rgba(0, 0, 0, 0.1);
 }
 
 * { box-sizing: border-box; }
@@ -45,8 +43,9 @@ body {
   min-height: 100vh;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   background:
-    radial-gradient(1200px 700px at 50% -10%, var(--felt-2), transparent 60%),
-    linear-gradient(160deg, var(--felt-1), #06201a 85%);
+    /* very faint felt weave, purely textural */
+    repeating-linear-gradient(45deg, rgba(255, 255, 255, 0.015) 0 2px, transparent 2px 4px),
+    linear-gradient(180deg, var(--felt-1) 0%, var(--felt-2) 100%);
   background-attachment: fixed;
   color: var(--text);
   -webkit-font-smoothing: antialiased;
@@ -89,7 +88,11 @@ body {
 .screen { width: 100%; }
 
 .panel {
-  background: var(--panel-bg);
+  /* --panel-tint is overridden per context (auction/side-col panels below)
+     so every panel gets a barely-there depth gradient plus a slightly
+     different parchment shade instead of one flat color repeated everywhere. */
+  --panel-tint: var(--panel-bg);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.35), rgba(255, 255, 255, 0) 40%), var(--panel-tint);
   border: 1px solid var(--panel-border);
   border-radius: var(--radius);
   padding: 1.4rem 1.6rem;
@@ -218,7 +221,9 @@ button.secondary.standalone { margin-top: 0.9rem; display: inline-block; }
   .table-layout { grid-template-columns: 1fr; }
 }
 
-.auction-panel { text-align: center; }
+.side-col .panel { --panel-tint: var(--panel-bg-alt); }
+
+.auction-panel { text-align: center; --panel-tint: var(--panel-bg-auction); }
 .auction-header {
   display: flex;
   align-items: center;
@@ -292,6 +297,7 @@ button.secondary.standalone { margin-top: 0.9rem; display: inline-block; }
   white-space: nowrap;
 }
 .reveal-toggle input { width: auto; margin: 0; }
+.chat-target-toggle { display: flex; margin: 0.6rem 0 0; }
 
 .log-details { padding: 1rem 1.4rem; }
 .log-details summary {
@@ -311,9 +317,10 @@ button.secondary.standalone { margin-top: 0.9rem; display: inline-block; }
   overflow-y: auto;
   font-size: 0.83rem;
   line-height: 1.6;
-  background: var(--panel-bg-soft);
+  background: var(--panel-bg-log);
   border-radius: var(--radius-sm);
   padding: 0.7rem 0.9rem;
+  box-shadow: inset 0 1px 4px rgba(0, 0, 0, 0.06);
 }
 .log div { border-bottom: 1px dashed var(--panel-border); padding: 0.15rem 0; }
 .log div:last-child { border-bottom: none; }
@@ -372,7 +379,7 @@ button.secondary.standalone { margin-top: 0.9rem; display: inline-block; }
 .chip-row.small .status-card, .chip-row.small .card-back { width: 40px; height: 56px; font-size: 0.7rem; }
 
 .chip {
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-card);
   border: 2px solid transparent;
   padding: 0.45rem 0.75rem;
   font-weight: 700;
@@ -389,7 +396,7 @@ button.secondary.standalone { margin-top: 0.9rem; display: inline-block; }
   position: relative;
   width: 58px;
   height: 80px;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-card);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -419,7 +426,7 @@ button.secondary.standalone { margin-top: 0.9rem; display: inline-block; }
 .card-back {
   width: 58px;
   height: 80px;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-card);
   background:
     repeating-linear-gradient(45deg, rgba(255, 255, 255, 0.06) 0 6px, transparent 6px 12px),
     linear-gradient(160deg, #1c463a, #0d2a22);
@@ -464,6 +471,22 @@ button.secondary.standalone { margin-top: 0.9rem; display: inline-block; }
 
 /* ---------------- finished screen ---------------- */
 
+.finished-panel { text-align: center; }
+.finished-trophy {
+  font-size: 3.2rem;
+  line-height: 1;
+  margin-bottom: 0.4rem;
+  opacity: 0;
+  transform: scale(0.3) rotate(-15deg);
+}
+.finished-trophy.enter { animation: trophy-pop 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) forwards; }
+@keyframes trophy-pop {
+  0% { opacity: 0; transform: scale(0.3) rotate(-15deg); }
+  60% { opacity: 1; transform: scale(1.15) rotate(6deg); }
+  100% { opacity: 1; transform: scale(1) rotate(0); }
+}
+
+#standings-table { text-align: left; }
 .standing-row {
   display: flex;
   justify-content: space-between;
@@ -471,10 +494,29 @@ button.secondary.standalone { margin-top: 0.9rem; display: inline-block; }
   padding: 0.6rem 0;
   border-top: 1px solid var(--panel-border);
   font-size: 0.95rem;
+  opacity: 0;
+  transform: translateY(8px);
+  animation: standing-row-in 0.35s ease forwards;
+}
+@keyframes standing-row-in {
+  to { opacity: 1; transform: translateY(0); }
 }
 .standing-row:first-child { border-top: none; }
-.standing-row.winner { font-weight: 700; color: var(--accent-strong); }
-.standing-row.inactive { opacity: 0.5; }
+.standing-row.winner {
+  font-weight: 700;
+  color: var(--accent-strong);
+  background: var(--accent-soft);
+  border-radius: var(--radius-sm);
+  padding-left: 0.6rem;
+  padding-right: 0.6rem;
+}
+.standing-row.lost { color: var(--muted); }
+/* filter (not opacity) so this doesn't fight the entrance animation above,
+   which holds its own `opacity: 1` end state on this same property forever
+   via animation-fill-mode: forwards. */
+.standing-row.inactive { filter: opacity(0.5); }
+
+.winner-rule-info { text-align: left; margin-top: 0.6rem; }
 
 #spec-chat-input {
   flex: 1;
