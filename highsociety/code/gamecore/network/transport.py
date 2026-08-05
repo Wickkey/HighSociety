@@ -17,6 +17,16 @@ from typing import Optional
 from highsociety.code.common.utils.network_utility import send_json
 from highsociety.code.common.logger_module.logger.logging_manager import LoggingManager
 
+try:
+    # Only needed by WebSocketTransport (web_server.py's browser path) —
+    # CLI/socket play (main.py, network_server.py) never imports this module's
+    # WebSocketTransport class, so keep it optional here rather than making
+    # flask-sock/simple-websocket a hard dependency for every player.
+    from simple_websocket import ConnectionClosed
+except ImportError:
+    class ConnectionClosed(Exception):
+        pass
+
 
 class Transport(ABC):
     @abstractmethod
@@ -152,5 +162,59 @@ class SocketTransport(Transport):
         self.stop()
         try:
             self._conn.close()
+        except Exception:
+            pass
+
+
+class WebSocketTransport(Transport):
+    """
+    Transport implementation over a browser WebSocket connection, via
+    flask-sock/simple_websocket (see web_server.py). The seam the "Architecture:
+    adding a new frontend" section of README.md predicted — NetworkPlayer,
+    network/protocol.py, and the entire game engine are unchanged; this is the
+    only new piece a browser client needed.
+
+    Unlike SocketTransport, this owns no receiver thread of its own:
+    simple_websocket.Server already runs its own background thread that reads
+    the underlying socket and buffers incoming frames the moment it's
+    constructed, so calling ws.receive(timeout=...) directly from whichever
+    thread wants the next message already blocks/wakes correctly with no
+    extra queue needed. It also has native WebSocket ping/pong (configured via
+    ping_interval where web_server.py constructs the Server), so — unlike
+    SocketTransport — there's no PING-message convention or explicit
+    heartbeat tracking here; a dead connection surfaces as `is_connected`
+    turning False / `receive()` raising ConnectionClosed.
+    """
+
+    def __init__(self, ws, label: str = "ws-transport"):
+        self._ws = ws
+        self._label = label
+
+    def start(self) -> None:
+        pass  # simple_websocket.Server already started its own reader thread at construction
+
+    def send(self, payload: dict) -> None:
+        self._ws.send(json.dumps(payload))
+
+    def receive(self, timeout: Optional[float] = None) -> Optional[dict]:
+        try:
+            raw = self._ws.receive(timeout=timeout)
+        except ConnectionClosed:
+            return None
+        if raw is None:
+            return None
+        try:
+            return json.loads(raw)
+        except (TypeError, ValueError):
+            LoggingManager.error(f"Malformed JSON from {self._label}: {raw!r}")
+            return None
+
+    @property
+    def is_connected(self) -> bool:
+        return self._ws.connected
+
+    def close(self) -> None:
+        try:
+            self._ws.close()
         except Exception:
             pass

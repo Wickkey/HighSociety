@@ -30,7 +30,7 @@ class ScriptedPlayer(CLIPlayer):
             return self._actions.pop(0)
         return self._default_action
 
-    def send_message(self, message, message_type=None, created_at=None):
+    def send_message(self, message, message_type=None, created_at=None, **kwargs):
         self.messages.append(message)
 
     def choose_painting_to_discard(self):

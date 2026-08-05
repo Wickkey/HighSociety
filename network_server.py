@@ -13,11 +13,9 @@ from socket import error as SocketError
 import sys
 from tabnanny import check
 import time
-import uuid
-import base64
 from highsociety.code.gamecore.player.networkplayer import NetworkPlayer
 from highsociety.code.gamecore.game_manager.gameplay import PlayGame
-from highsociety.code.common.utils.utility import get_all_configurations, validate_player_count
+from highsociety.code.common.utils.utility import get_all_configurations, validate_player_count, generate_game_id
 from highsociety.code.common.logger_module.logger.logging_manager import LoggingManager, LogType
 from highsociety.code.common.utils.network_utility import send_json, receive_json
 from highsociety.code.gamecore.player.networkspectator import NetworkSpectator
@@ -25,10 +23,6 @@ from highsociety.code.gamecore.player.player import BasePlayer
 from highsociety.code.gamecore.network.transport import SocketTransport
 from highsociety.code.gamecore.recording.session_recorder import SessionRecorder
 from highsociety.code.gamecore.recording.recording_player import RecordingPlayer
-
-def generate_game_id() -> str:
-    raw = uuid.uuid4().bytes
-    return base64.urlsafe_b64encode(raw).decode().rstrip("=")
 
 def _is_valid_identify_ack(data: dict, game_id: str) -> bool:
     """

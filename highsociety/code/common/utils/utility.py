@@ -1,6 +1,8 @@
+import base64
 import json
 import os
 import logging
+import uuid
 from pathlib import Path
 from highsociety.code.common.logger_module.logger.logging_manager import LoggingManager
 
@@ -84,3 +86,15 @@ def validate_player_count(num_players: int, rules: dict = None) -> str:
     if max_players is not None and num_players > max_players:
         return f"At most {max_players} players are allowed."
     return None
+
+
+def generate_game_id() -> str:
+    """
+    A short, URL/filename-safe random id for one game session — used as the
+    `game_id` every player/spectator message carries (see network/protocol.py)
+    so a stale or misdirected message can be told apart from this game's own.
+    Shared by network_server.py and web_server.py so both entry points mint
+    ids the same way.
+    """
+    raw = uuid.uuid4().bytes
+    return base64.urlsafe_b64encode(raw).decode().rstrip("=")
