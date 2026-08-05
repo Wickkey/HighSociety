@@ -20,6 +20,43 @@
         <h2>Host a new game</h2>
         <p class="muted">Set this up once — everyone else just opens this page and types their name.</p>
 
+        <details class="advanced how-to-play">
+          <summary>New to High Society? How to play</summary>
+          <div class="how-to-play-body">
+            <p>
+              <strong>Goal:</strong> end the game with the most points — but there's a catch.
+              When the game ends, whoever has the <strong>least money left</strong> is eliminated
+              from winning entirely (unless there's a tie for least, or only one player is left).
+              Only then, among whoever remains, does the highest score win. Ties are possible.
+              So hoarding money matters just as much as winning cards.
+            </p>
+
+            <p>Each round, one card is revealed and auctioned off. There are two opposite kinds of auction — this is the single most important thing to understand:</p>
+
+            <dl class="auction-types">
+              <dt>Normal auction <span class="hint">— Paintings, the Prestige Card</span></dt>
+              <dd>Players take turns raising the bid using their money cards (you can combine several into one bid). Whoever won't raise further passes and is out. The last player still in wins the card — and actually pays their bid.</dd>
+
+              <dt>Disgrace auction <span class="hint">— Faux Pas, Passe, Scandale</span></dt>
+              <dd>Same turn-based bidding, but the <strong>first player to pass is the one stuck taking the card</strong>. Everyone else who raised trying to avoid it forfeits that money anyway, for nothing. So here you actually want to bail out early — but bailing out is what makes you take the bad card.</dd>
+            </dl>
+
+            <p class="hint">Money cards are locked in once committed to a bid — you can add more on a later turn to raise, but can't take any back until the auction resolves (unspent bids are returned if you don't win).</p>
+
+            <table class="card-types-table">
+              <thead><tr><th>Card</th><th>Effect</th></tr></thead>
+              <tbody>
+                <tr><td>Painting</td><td>Worth its printed value (1–10) in points.</td></tr>
+                <tr><td>Prestige Card <span class="green-dot-label" title="Green card"></span></td><td>Doubles your entire final score.</td></tr>
+                <tr><td>Faux Pas</td><td>You must discard one Painting you own (or your next Painting won, if you don't have one yet).</td></tr>
+                <tr><td>Passe</td><td>&minus;5 points off your final total.</td></tr>
+                <tr><td>Scandale <span class="green-dot-label" title="Green card"></span></td><td>Halves your entire final score.</td></tr>
+              </tbody>
+            </table>
+            <p class="hint">Green cards can end the game early: once the 4th green card is revealed, the game stops right there, even if cards remain.</p>
+          </div>
+        </details>
+
         <label>Total seats
           <input type="number" id="host-seats" min="2" max="5" value="3">
         </label>
@@ -54,6 +91,43 @@
       <div class="card panel">
         <h2>Join this game</h2>
         <p class="muted">Share this page's link with friends on your LAN — they join the same way.</p>
+
+        <details class="advanced how-to-play">
+          <summary>New to High Society? How to play</summary>
+          <div class="how-to-play-body">
+            <p>
+              <strong>Goal:</strong> end the game with the most points — but there's a catch.
+              When the game ends, whoever has the <strong>least money left</strong> is eliminated
+              from winning entirely (unless there's a tie for least, or only one player is left).
+              Only then, among whoever remains, does the highest score win. Ties are possible.
+              So hoarding money matters just as much as winning cards.
+            </p>
+
+            <p>Each round, one card is revealed and auctioned off. There are two opposite kinds of auction — this is the single most important thing to understand:</p>
+
+            <dl class="auction-types">
+              <dt>Normal auction <span class="hint">— Paintings, the Prestige Card</span></dt>
+              <dd>Players take turns raising the bid using their money cards (you can combine several into one bid). Whoever won't raise further passes and is out. The last player still in wins the card — and actually pays their bid.</dd>
+
+              <dt>Disgrace auction <span class="hint">— Faux Pas, Passe, Scandale</span></dt>
+              <dd>Same turn-based bidding, but the <strong>first player to pass is the one stuck taking the card</strong>. Everyone else who raised trying to avoid it forfeits that money anyway, for nothing. So here you actually want to bail out early — but bailing out is what makes you take the bad card.</dd>
+            </dl>
+
+            <p class="hint">Money cards are locked in once committed to a bid — you can add more on a later turn to raise, but can't take any back until the auction resolves (unspent bids are returned if you don't win).</p>
+
+            <table class="card-types-table">
+              <thead><tr><th>Card</th><th>Effect</th></tr></thead>
+              <tbody>
+                <tr><td>Painting</td><td>Worth its printed value (1–10) in points.</td></tr>
+                <tr><td>Prestige Card <span class="green-dot-label" title="Green card"></span></td><td>Doubles your entire final score.</td></tr>
+                <tr><td>Faux Pas</td><td>You must discard one Painting you own (or your next Painting won, if you don't have one yet).</td></tr>
+                <tr><td>Passe</td><td>&minus;5 points off your final total.</td></tr>
+                <tr><td>Scandale <span class="green-dot-label" title="Green card"></span></td><td>Halves your entire final score.</td></tr>
+              </tbody>
+            </table>
+            <p class="hint">Green cards can end the game early: once the 4th green card is revealed, the game stops right there, even if cards remain.</p>
+          </div>
+        </details>
 
         <div id="lobby-status" class="lobby-status"></div>
 

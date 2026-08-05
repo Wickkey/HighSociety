@@ -526,3 +526,63 @@ button.secondary.standalone { margin-top: 0.9rem; display: inline-block; }
   background: var(--panel-bg-soft);
   color: var(--text);
 }
+
+/* ---------------- how to play ---------------- */
+
+.how-to-play-body {
+  font-size: 0.88rem;
+  line-height: 1.55;
+}
+.how-to-play-body p { margin: 0 0 0.8rem; }
+.how-to-play-body p:last-child { margin-bottom: 0; }
+
+.auction-types {
+  margin: 0 0 0.9rem;
+  padding: 0.2rem 0.9rem;
+  background: var(--panel-bg-soft);
+  border-radius: var(--radius-sm);
+}
+.auction-types dt {
+  font-weight: 700;
+  margin-top: 0.8rem;
+}
+.auction-types dt:first-child { margin-top: 0.8rem; }
+.auction-types dd {
+  margin: 0.25rem 0 0.8rem;
+  color: var(--text);
+}
+
+.card-types-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0 0 0.9rem;
+  font-size: 0.85rem;
+}
+.card-types-table th,
+.card-types-table td {
+  text-align: left;
+  padding: 0.4rem 0.5rem;
+  border-top: 1px solid var(--panel-border);
+  vertical-align: top;
+}
+.card-types-table th {
+  color: var(--muted);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  border-top: none;
+}
+.card-types-table td:first-child {
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+.green-dot-label {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--green-dot);
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.3);
+  vertical-align: middle;
+}
