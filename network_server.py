@@ -17,7 +17,7 @@ from highsociety.code.gamecore.player.networkplayer import NetworkPlayer
 from highsociety.code.gamecore.game_manager.gameplay import PlayGame
 from highsociety.code.common.utils.utility import get_all_configurations, validate_player_count, generate_game_id
 from highsociety.code.common.logger_module.logger.logging_manager import LoggingManager, LogType
-from highsociety.code.common.utils.network_utility import send_json, receive_json
+from highsociety.code.common.utils.network_utility import send_json, receive_json, get_local_ip
 from highsociety.code.gamecore.player.networkspectator import NetworkSpectator
 from highsociety.code.gamecore.player.player import BasePlayer
 from highsociety.code.gamecore.network.transport import SocketTransport
@@ -37,19 +37,6 @@ def _is_valid_identify_ack(data: dict, game_id: str) -> bool:
     if incoming_game_id is not None and incoming_game_id != game_id:
         return False
     return True
-
-def get_local_ip():
-    """Get the local IP address of this machine."""
-    try:
-        # Connect to a remote address to determine local IP
-        s = socket.socket(family=socket.AF_INET, type=socket.SOCK_DGRAM)
-        s.connect(("8.8.8.8", 80))
-        ip = s.getsockname()[0]
-        s.close()
-        return ip
-    except Exception:
-        return "127.0.0.1"  # Fallback to localhost
-
 
 def set_keepalive(sock, after_idle_sec=60, interval_sec=30, max_fails=3):
     """

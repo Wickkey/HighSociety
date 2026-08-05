@@ -4,7 +4,14 @@ A Python implementation of the High Society card game backend.
 
 ## Requirements
 
-Python 3.9+, no third-party packages needed to play. For running tests:
+Python 3.9+. No third-party packages needed for CLI or socket play. Playing in a browser needs
+`flask`/`flask-sock`:
+
+```
+pip install -r requirements.txt
+```
+
+For running tests:
 
 ```
 pip install -r tests/requirements.txt
@@ -13,8 +20,8 @@ pip install -r tests/requirements.txt
 ## Playing
 
 See [PLAYING.md](PLAYING.md) for full instructions: local hot-seat CLI, networked multiplayer
-(server + per-player clients + spectators), and how to record/replay a session (works
-identically whether the recording came from CLI or networked play).
+(server + per-player clients + spectators), a browser-based lobby + web client, and how to
+record/replay a session (works identically regardless of which mode produced the recording).
 
 Quick start:
 
@@ -22,6 +29,7 @@ Quick start:
 python3 main.py                              # local, one terminal, hot-seat
 python3 network_server.py --players 2        # networked: host
 python3 network_client.py --host <ip> --port 8888   # networked: each player
+python3 web_server.py                        # browser: host, then everyone (including you) opens a page
 ```
 
 For planning specific test scenarios ahead of time (rather than recording a real session), see
@@ -87,11 +95,11 @@ field-by-field description.
 
 ## Status
 
-CLI and networked play are both functional, covered by the test suite under
-`tests/` (including a real-socket end-to-end game in
-`tests/network/test_end_to_end_socket.py`).
+CLI, networked, and browser play are all functional, covered by the test suite under `tests/`
+(including a real-socket end-to-end game in `tests/network/test_end_to_end_socket.py` and a
+real-WebSocket one in `tests/network/test_web_server.py`).
 
-## Architecture: adding a new frontend (e.g. a web client)
+## Architecture: how the web client was added without touching the engine
 
 `PlayGame` (`highsociety/code/gamecore/game_manager/gameplay.py`) never knows or cares whether a
 player is local or remote — it only calls `get_bid()` / `choose_painting_to_discard()` /
@@ -102,14 +110,18 @@ Remote play is itself layered so a new transport doesn't require touching player
 engine:
 
 - **`highsociety/code/gamecore/network/transport.py`** — `Transport`, an ABC for "send one JSON
-  message" / "receive the next one". `SocketTransport` is the only implementation today (raw TCP).
+  message" / "receive the next one". `SocketTransport` (raw TCP, used by `network_server.py`) and
+  `WebSocketTransport` (a browser WebSocket via flask-sock/simple-websocket, used by
+  `web_server.py`) are its two implementations.
 - **`highsociety/code/gamecore/network/protocol.py`** — the JSON message *shapes* (`PLAYER_MOVE`,
-  `PLAYER_INFO`, etc.), independent of how those bytes move.
+  `PLAYER_INFO`, `AUCTION_UPDATE`, etc.), independent of how those bytes move.
 - **`NetworkPlayer` / `NetworkSpectator`** — thin adapters gluing a `Transport` + the protocol
   builders into the `BasePlayer`-shaped interface `PlayGame` expects. No socket/threading code of
-  their own.
+  their own, and no idea whether they're backed by a raw socket or a browser tab.
 
-A browser-based client means adding a `WebSocketTransport` (or similar) implementing the same
-`Transport` interface — `NetworkPlayer`, `network/protocol.py`, and the entire game engine stay
-unchanged. `network_server.py` would just construct that transport instead of `SocketTransport`
-when accepting a web connection.
+`web_server.py` is the proof this layering works: it's a Flask app with an in-browser lobby
+(`GameRoom`) on top, but the only genuinely new engine-adjacent code is `WebSocketTransport` — 
+`NetworkPlayer`, `network/protocol.py`, and `PlayGame` itself are used completely unchanged from
+`network_server.py`'s socket-based path. The same seam is what a future multi-room/hosted-website
+version would extend (a dict of `GameRoom`s instead of the current single global one), not a
+rewrite.

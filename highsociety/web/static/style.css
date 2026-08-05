@@ -1,0 +1,264 @@
+:root {
+  --felt: #0b3d2e;
+  --felt-light: #145c43;
+  --panel-bg: #ffffff;
+  --panel-border: #d8d3c4;
+  --text: #1c1c1c;
+  --muted: #6b6b6b;
+  --accent: #b8860b;
+  --accent-strong: #8a6508;
+  --danger: #a3302a;
+  --chip-money: #1f7a4d;
+  --chip-money-selected: #b8860b;
+  --painting: #7a5230;
+  --prestige: #5c3d99;
+  --disgrace: #8b2f2f;
+  --green-dot: #2fa84f;
+  --radius: 10px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --panel-bg: #1e2622;
+    --panel-border: #34403a;
+    --text: #f0efe9;
+    --muted: #a8b0ab;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  background: radial-gradient(ellipse at top, var(--felt-light), var(--felt) 70%);
+  color: var(--text);
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.9rem 1.5rem;
+  color: #f5f1e6;
+}
+.topbar h1 {
+  font-size: 1.25rem;
+  margin: 0;
+  letter-spacing: 0.03em;
+}
+.badge {
+  font-size: 0.75rem;
+  padding: 0.2rem 0.6rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.15);
+}
+.hidden { display: none !important; }
+
+#app {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 0 1rem 3rem;
+}
+
+.screen { width: 100%; }
+
+.panel {
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius);
+  padding: 1.25rem 1.5rem;
+  margin-bottom: 1rem;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.15);
+}
+
+#screen-host-setup .panel,
+#screen-join .panel,
+#screen-spectate-join .panel,
+#screen-finished .panel {
+  max-width: 480px;
+  margin: 2rem auto;
+}
+
+h2 { margin-top: 0; }
+.muted { color: var(--muted); font-size: 0.9rem; }
+.error {
+  color: #fff;
+  background: var(--danger);
+  padding: 0.5rem 0.75rem;
+  border-radius: 6px;
+  font-size: 0.9rem;
+  margin-top: 0.5rem;
+}
+.hint { color: var(--muted); font-size: 0.8rem; margin: 0.25rem 0 0; }
+
+label {
+  display: block;
+  margin-bottom: 0.75rem;
+  font-size: 0.9rem;
+}
+label input, label select {
+  display: block;
+  width: 100%;
+  margin-top: 0.25rem;
+  padding: 0.45rem 0.6rem;
+  border-radius: 6px;
+  border: 1px solid var(--panel-border);
+  background: transparent;
+  color: var(--text);
+  font-size: 1rem;
+}
+
+fieldset.bot-mix {
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  margin-bottom: 0.75rem;
+}
+.bot-row {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+.bot-row label { flex: 1 1 100px; }
+
+details.advanced { margin-bottom: 1rem; }
+details.advanced summary { cursor: pointer; color: var(--muted); margin-bottom: 0.5rem; }
+
+button {
+  font-size: 0.95rem;
+  padding: 0.55rem 1.1rem;
+  border-radius: 8px;
+  border: none;
+  cursor: pointer;
+  font-weight: 600;
+}
+button.primary { background: var(--accent); color: #fff; }
+button.primary:hover { background: var(--accent-strong); }
+button.secondary { background: transparent; border: 1px solid var(--panel-border); color: var(--text); margin-top: 0.75rem; }
+button.danger { background: var(--danger); color: #fff; }
+.button-row { display: flex; gap: 0.6rem; flex-wrap: wrap; align-items: center; margin-top: 0.5rem; }
+
+.lobby-status {
+  background: rgba(0, 0, 0, 0.04);
+  border-radius: 8px;
+  padding: 0.6rem 0.8rem;
+  margin-bottom: 1rem;
+  font-size: 0.9rem;
+}
+
+/* ---------------- game table layout ---------------- */
+
+.table-layout {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 1rem;
+  align-items: start;
+}
+@media (max-width: 800px) {
+  .table-layout { grid-template-columns: 1fr; }
+}
+
+.auction-header {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 0.75rem;
+  font-size: 0.9rem;
+}
+.turn-label { font-weight: 700; color: var(--accent-strong); }
+.bid-readout { margin-top: 0.75rem; font-size: 1rem; }
+
+.log {
+  max-height: 220px;
+  overflow-y: auto;
+  font-size: 0.85rem;
+  line-height: 1.5;
+  background: rgba(0, 0, 0, 0.04);
+  border-radius: 8px;
+  padding: 0.6rem 0.8rem;
+}
+.log div { border-bottom: 1px dashed var(--panel-border); padding: 0.15rem 0; }
+.log div:last-child { border-bottom: none; }
+
+.opponent-row {
+  border-top: 1px solid var(--panel-border);
+  padding: 0.5rem 0;
+}
+.opponent-row:first-child { border-top: none; }
+.opponent-row.current-turn { background: rgba(184, 134, 11, 0.12); border-radius: 6px; }
+.opponent-row.inactive { opacity: 0.5; }
+.opponent-header { display: flex; justify-content: space-between; font-size: 0.9rem; margin-bottom: 0.3rem; }
+
+.chip-row { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.5rem; }
+.chip-row.small .status-card { width: 40px; height: 56px; font-size: 0.75rem; }
+
+.chip {
+  border-radius: 8px;
+  border: 2px solid transparent;
+  padding: 0.4rem 0.7rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+.chip.money { background: var(--chip-money); color: #fff; }
+.chip.money.selected { background: var(--chip-money-selected); border-color: #fff; }
+.chip.painting { background: var(--painting); color: #fff; }
+
+/* status card visuals: money is a chip above, these are won status cards */
+.status-card {
+  position: relative;
+  width: 56px;
+  height: 78px;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-weight: 700;
+  font-size: 0.95rem;
+  text-align: center;
+  padding: 0.2rem;
+}
+.status-card.big { width: 90px; height: 126px; font-size: 1.3rem; margin: 0 auto; }
+.status-card.painting { background: linear-gradient(160deg, var(--painting), #4d3320); }
+.status-card.prestige { background: linear-gradient(160deg, var(--prestige), #33215c); }
+.status-card.disgrace { background: linear-gradient(160deg, var(--disgrace), #4d1a1a); }
+.status-card:not(.painting):not(.prestige):not(.disgrace) { background: #555; }
+.status-card .green-dot {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--green-dot);
+}
+
+#auction-card, #spec-auction-card { display: flex; justify-content: center; margin: 0.5rem 0; }
+#auction-card:empty::after, #spec-auction-card:empty::after {
+  content: "Waiting for the next auction…";
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+#move-panel { border: 1px solid var(--accent); }
+
+.standing-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.5rem 0;
+  border-top: 1px solid var(--panel-border);
+  font-size: 0.95rem;
+}
+.standing-row:first-child { border-top: none; }
+.standing-row.winner { font-weight: 700; color: var(--accent-strong); }
+.standing-row.inactive { opacity: 0.5; }
+
+#spec-chat-input {
+  flex: 1;
+  padding: 0.45rem 0.6rem;
+  border-radius: 6px;
+  border: 1px solid var(--panel-border);
+  background: transparent;
+  color: var(--text);
+}

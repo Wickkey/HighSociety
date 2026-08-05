@@ -183,7 +183,7 @@ class WebSocketTransport(Transport):
     ping_interval where web_server.py constructs the Server), so — unlike
     SocketTransport — there's no PING-message convention or explicit
     heartbeat tracking here; a dead connection surfaces as `is_connected`
-    turning False / `receive()` raising ConnectionClosed.
+    turning False and `receive()` returning None (see below).
     """
 
     def __init__(self, ws, label: str = "ws-transport"):
@@ -194,7 +194,16 @@ class WebSocketTransport(Transport):
         pass  # simple_websocket.Server already started its own reader thread at construction
 
     def send(self, payload: dict) -> None:
-        self._ws.send(json.dumps(payload))
+        try:
+            self._ws.send(json.dumps(payload))
+        except ConnectionClosed:
+            # NetworkPlayer.send_message() catches BrokenPipeError/
+            # ConnectionResetError/socket.error to mark a player inactive on
+            # a failed send — it has no reason to know this transport is a
+            # WebSocket, so translate simple_websocket's own disconnect
+            # exception into one it already understands instead of adding a
+            # websocket-specific except clause there.
+            raise BrokenPipeError(f"WebSocket for {self._label} is closed")
 
     def receive(self, timeout: Optional[float] = None) -> Optional[dict]:
         try:
