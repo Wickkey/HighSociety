@@ -357,7 +357,13 @@ def _spectator_chat_listener(spectator: NetworkSpectator, room: GameRoom) -> Non
         if not text:
             continue
         target = "spectators" if msg.get("target") == "spectators" else "all"
-        formatted = f"💬 {spectator.username}: {text}"
+        # The message's own JSON carries `to_user(s)` structurally (see
+        # protocol.py's _chat_payload), but no client renders that field —
+        # they just print `prompt` — so a spectators-only message needs its
+        # own tag baked into the text itself, or a receiving spectator has no
+        # way to tell it apart from a message that also reached the players.
+        tag = " (spectators only)" if target == "spectators" else ""
+        formatted = f"💬 {spectator.username}{tag}: {text}"
         for other in list(room.spectators):
             if other is spectator or not other.active:
                 continue
