@@ -26,6 +26,14 @@ function setBadge(text) {
 
 // ---------------------------------------------------------------- cards --
 
+// "You" instead of your own username in event toasts — reads more naturally
+// when it's your own action being announced back to you. Spectators have no
+// game.myUsername (it's null), so this is a no-op for them; they always see
+// real names, which is correct since they aren't a player at the table.
+function actorLabel(username) {
+  return game && username === game.myUsername ? 'You' : username;
+}
+
 function describeCard(card) {
   const names = { Painting: `Painting (${card.value})`, PrestigeCard: 'Prestige Card (×2)',
     FauxPas: 'Faux Pas', Passe: 'Passe (−5)', Scandale: 'Scandale (½×, green)' };
@@ -66,13 +74,13 @@ function cardBackEl() {
 // changes — no queueing, no big animations, it's just "what's true right
 // now". Server events (RAISE/PASS/BUY/START_AUCTION/END_AUCTION/
 // REVEAL_GREEN/DISGRACE_ASSIGNED) are a separate, transient concept: each is
-// a brief (300-800ms) announcement in a single toast slot centered over the
-// auction card, queued one at a time so a burst of events (e.g. several
-// bots acting quickly) never overlaps into an unreadable pile-up. The state
-// itself is never gated on this queue — it always updates immediately.
+// a brief announcement in a single toast slot centered over the auction
+// card, queued one at a time so a burst of events (e.g. several bots acting
+// quickly) never overlaps into an unreadable pile-up. The state itself is
+// never gated on this queue — it always updates immediately.
 const eventQueue = { game: [], spec: [] };
 const eventQueueBusy = { game: false, spec: false };
-const TOAST_DURATION_MS = 700; // within the requested 300-800ms window
+const TOAST_DURATION_MS = 1500; // long enough to actually read before it clears
 
 function enqueueEvent(isSpectator, text, tone) {
   const key = isSpectator ? 'spec' : 'game';
@@ -93,7 +101,7 @@ function pumpEventQueue(key) {
     setTimeout(() => {
       eventQueueBusy[key] = false;
       pumpEventQueue(key);
-    }, 180); // let the fade-out clear before the next toast claims the slot
+    }, 250); // let the fade-out clear before the next toast claims the slot
   }, TOAST_DURATION_MS);
 }
 
@@ -572,15 +580,15 @@ function applyAuctionUpdate(msg, isSpectator) {
       game.myAuctionBid = d.max_bid; // this event's max_bid is the bidder's own new cumulative total
       updateBidStatus();
     }
-    enqueueEvent(isSpectator, `${d.player} raised to ${d.max_bid}`, 'bid');
+    enqueueEvent(isSpectator, `${actorLabel(d.player)} raised to ${d.max_bid}`, 'bid');
     logLine(`💰 ${d.player} raised to ${d.max_bid}`, isSpectator);
   } else if (d.kind === 'pass' || d.kind === 'fold') {
     if (game.opponents[d.player]) game.opponents[d.player].outOfAuction = true;
-    enqueueEvent(isSpectator, `${d.player} passed`, 'pass');
+    enqueueEvent(isSpectator, `${actorLabel(d.player)} passed`, 'pass');
     logLine(`⚪ ${d.player} passed`, isSpectator);
   } else if (d.kind === 'quit') {
     if (game.opponents[d.player]) { game.opponents[d.player].active = false; game.opponents[d.player].outOfAuction = true; }
-    enqueueEvent(isSpectator, `${d.player} quit`, 'quit');
+    enqueueEvent(isSpectator, `${actorLabel(d.player)} quit`, 'quit');
     logLine(`❌ ${d.player} quit`, isSpectator);
   }
 
@@ -597,10 +605,11 @@ function applyAuctionResult(msg, isSpectator) {
     if (d.auction_type === 'disgrace') {
       // DISGRACE_ASSIGNED: recipient here is whoever passed first and got
       // stuck with the card, not someone who "bought" anything.
-      enqueueEvent(isSpectator, `${d.recipient} is stuck with ${describeCard(d.card)}!`, 'disgrace');
+      const isMe = d.recipient === game.myUsername;
+      enqueueEvent(isSpectator, `${actorLabel(d.recipient)} ${isMe ? 'are' : 'is'} stuck with ${describeCard(d.card)}!`, 'disgrace');
     } else {
       // BUY
-      enqueueEvent(isSpectator, `${d.recipient} bought ${describeCard(d.card)} for ${spent}`, 'buy');
+      enqueueEvent(isSpectator, `${actorLabel(d.recipient)} bought ${describeCard(d.card)} for ${spent}`, 'buy');
     }
     logLine(`🏆 ${d.recipient} won ${describeCard(d.card)} for ${spent}`, isSpectator);
   } else {
