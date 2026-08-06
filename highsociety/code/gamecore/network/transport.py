@@ -174,24 +174,74 @@ class WebSocketTransport(Transport):
     network/protocol.py, and the entire game engine are unchanged; this is the
     only new piece a browser client needed.
 
-    Unlike SocketTransport, this owns no receiver thread of its own:
-    simple_websocket.Server already runs its own background thread that reads
-    the underlying socket and buffers incoming frames the moment it's
-    constructed, so calling ws.receive(timeout=...) directly from whichever
-    thread wants the next message already blocks/wakes correctly with no
-    extra queue needed. It also has native WebSocket ping/pong (configured via
-    ping_interval where web_server.py constructs the Server), so — unlike
-    SocketTransport — there's no PING-message convention or explicit
-    heartbeat tracking here; a dead connection surfaces as `is_connected`
-    turning False and `receive()` returning None (see below).
+    Unlike SocketTransport, this owns no receiver thread of its own by
+    default: simple_websocket.Server already runs its own background thread
+    that reads the underlying socket and buffers incoming frames the moment
+    it's constructed, so calling ws.receive(timeout=...) directly from
+    whichever thread wants the next message already blocks/wakes correctly
+    with no extra queue needed. It also has native WebSocket ping/pong
+    (configured via ping_interval where web_server.py constructs the Server),
+    so — unlike SocketTransport — there's no PING-message convention or
+    explicit heartbeat tracking here; a dead connection surfaces as
+    `is_connected` turning False and `receive()` returning None.
+
+    Optional `on_chat` filtering (mirrors SocketTransport's PING filtering):
+    a player's transport is read *synchronously* by NetworkPlayer.get_bid()/
+    choose_painting_to_discard() only when the engine is actually asking that
+    player for a decision — there's no separate always-on reader the way
+    spectators get (see web_server.py's _spectator_chat_listener). Giving
+    players a background chat listener the same way would mean two threads
+    both calling ws.receive() concurrently, racing to pop from the same
+    underlying buffer — whichever thread loses could see a real bid response
+    silently vanish (simple_websocket.Server.receive() has no way to hand a
+    "wrong" caller's message back). Passing `on_chat` here instead makes
+    *this* transport the sole reader (a background thread, same shape as
+    SocketTransport's), which relays CHAT messages the instant they arrive —
+    live, not just whenever the player's next turn happens to come up — and
+    queues everything else for receive() to pop, so NetworkPlayer never even
+    sees a CHAT message compete with a real move response.
     """
 
-    def __init__(self, ws, label: str = "ws-transport"):
+    def __init__(self, ws, label: str = "ws-transport", on_chat=None):
         self._ws = ws
         self._label = label
+        self._on_chat = on_chat
+        self._queue = queue.Queue()
+        self._reader_thread = None
+        self._reader_running = False
 
     def start(self) -> None:
-        pass  # simple_websocket.Server already started its own reader thread at construction
+        if self._on_chat is None:
+            return  # no filtering needed; receive() talks to ws directly
+        if self._reader_thread is not None:
+            return  # already running
+        self._reader_running = True
+        self._reader_thread = threading.Thread(
+            target=self._reader_loop, daemon=True, name=f"ChatFilter-{self._label}"
+        )
+        self._reader_thread.start()
+
+    def _reader_loop(self) -> None:
+        while self._reader_running:
+            try:
+                raw = self._ws.receive(timeout=1.0)
+            except ConnectionClosed:
+                break
+            if raw is None:
+                continue  # just the 1s poll timeout; keep waiting
+            try:
+                msg = json.loads(raw)
+            except (TypeError, ValueError):
+                LoggingManager.error(f"Malformed JSON from {self._label}: {raw!r}")
+                continue
+            if msg.get("message_type") == "CHAT":
+                self._on_chat(msg)
+                continue
+            self._queue.put(msg)
+        try:
+            self._queue.put(None)  # signal receive() the reader has stopped
+        except Exception:
+            pass
 
     def send(self, payload: dict) -> None:
         try:
@@ -206,6 +256,11 @@ class WebSocketTransport(Transport):
             raise BrokenPipeError(f"WebSocket for {self._label} is closed")
 
     def receive(self, timeout: Optional[float] = None) -> Optional[dict]:
+        if self._on_chat is not None:
+            try:
+                return self._queue.get(timeout=timeout)
+            except queue.Empty:
+                return None
         try:
             raw = self._ws.receive(timeout=timeout)
         except ConnectionClosed:
@@ -223,6 +278,9 @@ class WebSocketTransport(Transport):
         return self._ws.connected
 
     def close(self) -> None:
+        self._reader_running = False
+        if self._reader_thread is not None:
+            self._reader_thread.join(timeout=2.0)
         try:
             self._ws.close()
         except Exception:

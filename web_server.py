@@ -265,6 +265,30 @@ def api_status():
     return jsonify(_status_payload(_get_room()))
 
 
+def _relay_player_chat(username: str, room: GameRoom, msg: dict) -> None:
+    """
+    WebSocketTransport's on_chat callback for a player connection (see its
+    docstring for why this can't just be a background listener thread like
+    spectators get) — reaches every other active human player plus every
+    spectator. Players don't get a "target" selector the way spectators do
+    (spectators-only chat doesn't make sense from a player's seat); this
+    always reaches everyone at the table.
+    """
+    incoming_game_id = msg.get("game_id")
+    if incoming_game_id is not None and incoming_game_id != room.game_id:
+        return
+    text = msg.get("prompt", "")
+    if not text:
+        return
+    formatted = f"💬 {username}: {text}"
+    for p in list(room.players):
+        if isinstance(p, NetworkPlayer) and p.username != username and p.active:
+            p.send_message(formatted, message_type="CHAT", from_user=username)
+    for s in list(room.spectators):
+        if s.active:
+            s.send_message(formatted, message_type="CHAT", from_user=username)
+
+
 @sock.route("/ws")
 def ws_player(ws):
     room = _get_room()
@@ -289,7 +313,11 @@ def ws_player(ws):
             _send(ws, game_id, "IDENTIFY_ERROR", "That username is already taken in this game.")
             return
 
-        transport = WebSocketTransport(ws, label=f"{username}@web")
+        transport = WebSocketTransport(
+            ws, label=f"{username}@web",
+            on_chat=lambda msg: _relay_player_chat(username, room, msg),
+        )
+        transport.start()
         player = NetworkPlayer(name=name, username=username, transport=transport, game_id=game_id)
         room.players.append(player)
 
@@ -303,8 +331,13 @@ def ws_player(ws):
     # thread once it's this player's turn; this thread's only job is to let
     # flask-sock know when the socket has actually gone away (dead
     # connection detection is ping/pong-based — see SOCK_SERVER_OPTIONS).
+    # threading.Event().wait() here, not time.sleep(): the test suite's
+    # autouse fixture monkeypatches time.sleep to a no-op (see
+    # tests/network/test_transport.py's note on this exact gotcha), which
+    # would turn this into a real busy-spin — one per connection, for its
+    # entire lifetime — instead of an idle wait.
     while player.active and transport.is_connected:
-        time.sleep(0.5)
+        threading.Event().wait(0.5)
     player.active = False
 
 
@@ -360,7 +393,7 @@ def ws_spectate(ws):
     chat_thread.start()
 
     while spectator.active and transport.is_connected:
-        time.sleep(0.5)
+        threading.Event().wait(0.5)
     spectator.active = False
 
 

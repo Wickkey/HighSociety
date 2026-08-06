@@ -212,6 +212,80 @@ def test_spectator_sees_the_game_live(running_web_server):
     spectator.close()
 
 
+def test_players_can_chat_live_without_it_being_mistaken_for_a_bid(running_web_server):
+    """
+    Players can chat with each other (and spectators) mid-game. This has to
+    be delivered the instant it's sent, not just whenever the sender's next
+    turn happens to come up — and it must never be handed to
+    NetworkPlayer.get_bid()/choose_painting_to_discard() as if it were the
+    real move response. See WebSocketTransport's on_chat filtering (a
+    background reader thread that intercepts CHAT before it ever reaches the
+    queue those methods read from) and web_server.py's _relay_player_chat.
+    """
+    port = running_web_server
+    web_server.app.test_client().post(
+        "/api/create_game", json={"seats": 2, "bot_mix": [], "seed": 11, "bot_think_time": 0}
+    )
+
+    alice = ScriptedWSClient(_ws_url(port, "/ws"), "alice")
+    bob = ScriptedWSClient(_ws_url(port, "/ws"), "bob")
+    alice.handshake()
+    bob.handshake()
+
+    spectator = Client(_ws_url(port, "/ws_spectate"))
+    spectator.receive(timeout=5)  # "Enter your name"
+    spectator.send(json.dumps({"message_type": "IDENTIFY_ACK", "prompt": "watcher"}))
+    spectator.receive(timeout=5)  # "Enter your username"
+    spectator.send(json.dumps({"message_type": "IDENTIFY_ACK", "prompt": "watcher-user"}))
+    spectator.receive(timeout=5)  # IDENTIFY_SUCCESS
+
+    alice.start()
+    bob.start()
+
+    # Sent immediately, before either player has taken a single game action —
+    # delivery must not wait for alice's own next turn.
+    alice._send({"message_type": "CHAT", "prompt": "gl everyone!"})
+
+    deadline = time.time() + 10
+    bob_saw_it = False
+    while time.time() < deadline and not bob_saw_it:
+        bob_saw_it = any(
+            m.get("prompt") == "💬 alice: gl everyone!" for m in bob.messages_of_type("CHAT")
+        )
+        threading.Event().wait(0.1)
+    assert bob_saw_it, "bob never received alice's chat message"
+
+    spec_saw_it = False
+    spec_deadline = time.time() + 5
+    while time.time() < spec_deadline and not spec_saw_it:
+        raw = spectator.receive(timeout=0.5)
+        if raw is None:
+            continue
+        msg = json.loads(raw)
+        if msg.get("message_type") == "CHAT" and msg.get("prompt") == "💬 alice: gl everyone!":
+            spec_saw_it = True
+    assert spec_saw_it, "spectator never received the player's chat message"
+
+    # The chat message must not have been consumed as alice's bid/pass —
+    # play the game out normally afterward and confirm it completes cleanly.
+    deadline = time.time() + 15
+    while time.time() < deadline and web_server._room.state != "finished":
+        threading.Event().wait(0.2)
+    assert web_server._room.state == "finished"
+
+    alice.close()
+    bob.close()
+    # By now the game has finished and GameRoom.run_game()'s own cleanup
+    # (see web_server.py) has already closed every spectator's connection
+    # server-side — closing it again here is redundant, and
+    # simple_websocket.Client.close() raises ConnectionClosed on an
+    # already-closed connection rather than being a harmless no-op.
+    try:
+        spectator.close()
+    except ConnectionClosed:
+        pass
+
+
 def test_sending_to_a_dead_websocket_marks_the_player_inactive_instead_of_crashing(running_web_server):
     """
     Regression test for a crash found by manually driving a real browser

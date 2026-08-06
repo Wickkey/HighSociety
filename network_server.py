@@ -89,7 +89,13 @@ def players_heartbeat_monitor_thread(players: list[NetworkPlayer], timeout_secon
                 except:
                     pass
 
-        time.sleep(check_interval)
+        # threading.Event().wait() here, not time.sleep(): the test suite's
+        # autouse fixture monkeypatches time.sleep to a no-op (see
+        # tests/network/test_transport.py's note on this exact gotcha), which
+        # would turn this otherwise-infinite loop into a genuine unconditional
+        # busy-spin for the rest of the test session — one per start_server()
+        # call, since this loop has no exit condition of its own.
+        threading.Event().wait(check_interval)
 
 def accept_players(server_socket: socket.socket, expected_players: int, game_id: str, players: list = None):
     """
