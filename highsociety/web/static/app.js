@@ -59,26 +59,42 @@ function cardBackEl() {
   return div;
 }
 
-// Transient floating label on an opponent's tile (e.g. "Raised to 8",
-// "Passed") so their action reads at a glance instead of needing the
-// (collapsed-by-default) game log. Also flashes the whole tile briefly so
-// the eye actually catches it happening, not just the label itself.
-function showBubble(username, text, tone) {
-  const row = document.querySelector(`.opponent-row[data-username="${CSS.escape(username)}"]`);
-  if (!row) return;
-  const bubble = document.createElement('div');
-  bubble.className = `bubble ${tone || ''}`;
-  bubble.textContent = text;
-  row.appendChild(bubble);
-  requestAnimationFrame(() => bubble.classList.add('show'));
+// ------------------------------------------------- transient event queue --
+//
+// Persistent game state (auction card, current bid, whose turn, player
+// cards) lives in the `game` object and is re-rendered in place whenever it
+// changes — no queueing, no big animations, it's just "what's true right
+// now". Server events (RAISE/PASS/BUY/START_AUCTION/END_AUCTION/
+// REVEAL_GREEN/DISGRACE_ASSIGNED) are a separate, transient concept: each is
+// a brief (300-800ms) announcement in a single toast slot centered over the
+// auction card, queued one at a time so a burst of events (e.g. several
+// bots acting quickly) never overlaps into an unreadable pile-up. The state
+// itself is never gated on this queue — it always updates immediately.
+const eventQueue = { game: [], spec: [] };
+const eventQueueBusy = { game: false, spec: false };
+const TOAST_DURATION_MS = 700; // within the requested 300-800ms window
 
-  row.classList.add('flash');
-  setTimeout(() => row.classList.remove('flash'), 500);
+function enqueueEvent(isSpectator, text, tone) {
+  const key = isSpectator ? 'spec' : 'game';
+  eventQueue[key].push({ text, tone });
+  pumpEventQueue(key);
+}
 
+function pumpEventQueue(key) {
+  if (eventQueueBusy[key] || eventQueue[key].length === 0) return;
+  eventQueueBusy[key] = true;
+  const { text, tone } = eventQueue[key].shift();
+  const toast = $(key === 'spec' ? 'spec-event-toast' : 'event-toast');
+  toast.textContent = text;
+  toast.className = `event-toast tone-${tone}`;
+  requestAnimationFrame(() => toast.classList.add('show'));
   setTimeout(() => {
-    bubble.classList.remove('show');
-    setTimeout(() => bubble.remove(), 250);
-  }, 2400);
+    toast.classList.remove('show');
+    setTimeout(() => {
+      eventQueueBusy[key] = false;
+      pumpEventQueue(key);
+    }, 180); // let the fade-out clear before the next toast claims the slot
+  }, TOAST_DURATION_MS);
 }
 
 // Points formula mirrors BasePlayer.__calculate_points(): sum of values,
@@ -497,11 +513,14 @@ function applyGameMessage(msg, isSpectator) {
         if (isOpponent) {
           const o = ensureOpponent(d.player);
           o.statusCards = o.statusCards.filter((c) => c.value !== d.discarded_value);
+          renderOpponents(isSpectator);
+          enqueueEvent(isSpectator, revealCards
+            ? `${d.player} discarded ${d.discarded_value}`
+            : `${d.player} discarded a painting`, 'disgrace');
         }
-        renderOpponents(isSpectator); // rebuild first — see applyAuctionUpdate's comment on why
-        if (isOpponent) {
-          showBubble(d.player, revealCards ? `Discarded ${d.discarded_value}` : 'Discarded a painting', 'discard');
-        }
+      } else if (d && d.event === 'green_card_revealed') {
+        // REVEAL_GREEN
+        enqueueEvent(isSpectator, `🟢 Green card revealed (${d.count})`, 'green');
       }
       if (msg.prompt && !isDuplicateOfStructuredEvent(msg.prompt)) logLine(msg.prompt.trim(), isSpectator);
       break;
@@ -531,10 +550,12 @@ function applyGameMessage(msg, isSpectator) {
 
 function applyAuctionUpdate(msg, isSpectator) {
   const d = msg.data;
+  // Persistent state updates immediately and unconditionally — it must
+  // never lag behind or wait on the transient toast queue below, since it's
+  // the actual shared game state, not decoration.
   game.round = d.round_number;
   game.card = d.card;
   if (typeof d.max_bid === 'number') game.maxBid = d.max_bid;
-  let bubble = null; // {player, text, tone} — deferred until after the re-render below
 
   if (d.kind === 'auction_start') {
     game.maxBid = 0;
@@ -542,6 +563,7 @@ function applyAuctionUpdate(msg, isSpectator) {
     game.turnPlayer = d.starting_player;
     // Everyone's back in for the new auction — clear last round's greyed-out state.
     Object.values(game.opponents).forEach((o) => { o.outOfAuction = false; });
+    enqueueEvent(isSpectator, `New auction: ${describeCard(d.card)}`, 'start');
     logLine(`🃏 Auction #${d.round_number}: ${describeCard(d.card)}`, isSpectator);
   } else if (d.kind === 'turn_start') {
     game.turnPlayer = d.player;
@@ -549,29 +571,20 @@ function applyAuctionUpdate(msg, isSpectator) {
     if (d.player === game.myUsername) {
       game.myAuctionBid = d.max_bid; // this event's max_bid is the bidder's own new cumulative total
       updateBidStatus();
-    } else {
-      bubble = { player: d.player, text: `Raised to ${d.max_bid}`, tone: 'bid' };
     }
+    enqueueEvent(isSpectator, `${d.player} raised to ${d.max_bid}`, 'bid');
     logLine(`💰 ${d.player} raised to ${d.max_bid}`, isSpectator);
   } else if (d.kind === 'pass' || d.kind === 'fold') {
-    if (d.player !== game.myUsername) {
-      bubble = { player: d.player, text: 'Passed', tone: 'pass' };
-      if (game.opponents[d.player]) game.opponents[d.player].outOfAuction = true;
-    }
+    if (game.opponents[d.player]) game.opponents[d.player].outOfAuction = true;
+    enqueueEvent(isSpectator, `${d.player} passed`, 'pass');
     logLine(`⚪ ${d.player} passed`, isSpectator);
   } else if (d.kind === 'quit') {
-    if (d.player !== game.myUsername) bubble = { player: d.player, text: 'Quit', tone: 'quit' };
     if (game.opponents[d.player]) { game.opponents[d.player].active = false; game.opponents[d.player].outOfAuction = true; }
+    enqueueEvent(isSpectator, `${d.player} quit`, 'quit');
     logLine(`❌ ${d.player} quit`, isSpectator);
   }
 
-  // renderAuctionPanel() rebuilds every opponent row from scratch
-  // (container.innerHTML = ''), so a bubble attached beforehand would be
-  // destroyed in the very same tick it was created — that was the actual
-  // bug behind "I never see the raised/passed popup". Render first, then
-  // attach the bubble to the fresh row that will persist until the next one.
   renderAuctionPanel(isSpectator);
-  if (bubble) showBubble(bubble.player, bubble.text, bubble.tone);
 }
 
 function applyAuctionResult(msg, isSpectator) {
@@ -581,8 +594,17 @@ function applyAuctionResult(msg, isSpectator) {
       ensureOpponent(d.recipient).statusCards.push(d.card);
     }
     const spent = (d.money_spent && d.money_spent[d.recipient]) || 0;
+    if (d.auction_type === 'disgrace') {
+      // DISGRACE_ASSIGNED: recipient here is whoever passed first and got
+      // stuck with the card, not someone who "bought" anything.
+      enqueueEvent(isSpectator, `${d.recipient} is stuck with ${describeCard(d.card)}!`, 'disgrace');
+    } else {
+      // BUY
+      enqueueEvent(isSpectator, `${d.recipient} bought ${describeCard(d.card)} for ${spent}`, 'buy');
+    }
     logLine(`🏆 ${d.recipient} won ${describeCard(d.card)} for ${spent}`, isSpectator);
   } else {
+    enqueueEvent(isSpectator, `Nobody wanted ${describeCard(d.card)}`, 'pass');
     logLine(`⚠️ Nobody took ${describeCard(d.card)}`, isSpectator);
   }
   renderOpponents(isSpectator);
@@ -625,10 +647,23 @@ function setMovePending() {
 function renderAuctionPanel(isSpectator) {
   const prefix = isSpectator ? 'spec-' : '';
   $(`${prefix}round-label`).innerHTML = game.round ? `<span class="suit-icon">🂠</span> Auction <strong>#${game.round}</strong>` : '';
+  // No separate "whose turn" treatment here beyond this label — it already
+  // has its own pulsing dot, and the auction panel otherwise represents
+  // shared state (card, bid) that stays fully legible regardless of whose
+  // turn it is, not something that dims/greys based on turn.
   $(`${prefix}turn-label`).innerHTML = game.turnPlayer
     ? `<span class="turn-dot"></span>${game.turnPlayer}'s turn`
     : '';
-  $(`${prefix}max-bid`).textContent = game.maxBid || 0;
+
+  const bidEl = $(`${prefix}max-bid`);
+  const newBid = game.maxBid || 0;
+  if (Number(bidEl.textContent) !== newBid) {
+    bidEl.textContent = newBid;
+    bidEl.classList.remove('bump');
+    void bidEl.offsetWidth; // restart the animation even if it's already mid-play
+    bidEl.classList.add('bump');
+  }
+
   const cardContainer = $(`${prefix}auction-card`);
   cardContainer.innerHTML = '';
   if (game.card) cardContainer.appendChild(cardEl(game.card, true));
@@ -672,13 +707,28 @@ function updateCardInfoButton(isSpectator) {
   $(`${prefix}card-info-text`).textContent = text;
 }
 
+// Updates existing row elements in place (keyed by data-username) instead of
+// wiping and rebuilding the whole list every render. That's what lets the
+// current-turn pulsing glow and the background/box-shadow transition on
+// .opponent-row actually animate when the active player changes — a freshly
+// recreated element has no "previous state" for a CSS transition to animate
+// from, it just appears with its final style already applied.
 function renderOpponents(isSpectator) {
   if (!game) return;
   const container = $(isSpectator ? 'spec-players-list' : 'opponents-list');
-  container.innerHTML = '';
+  const seenUsernames = new Set();
+
   Object.entries(game.opponents).forEach(([username, o]) => {
-    const row = document.createElement('div');
-    row.dataset.username = username;
+    seenUsernames.add(username);
+    let row = container.querySelector(`.opponent-row[data-username="${CSS.escape(username)}"]`);
+    if (!row) {
+      row = document.createElement('div');
+      row.dataset.username = username;
+      row.innerHTML = '<div class="opponent-header"><span class="name"></span><span class="pts"></span></div>'
+        + '<div class="chip-row small"></div>';
+      container.appendChild(row);
+    }
+
     const isCurrentTurn = game.turnPlayer === username;
     const classes = ['opponent-row'];
     if (o.active === false) classes.push('inactive');
@@ -687,18 +737,17 @@ function renderOpponents(isSpectator) {
     if (isCurrentTurn) classes.push('current-turn');
     row.className = classes.join(' ');
 
-    const header = document.createElement('div');
-    header.className = 'opponent-header';
     const ptsLabel = revealCards ? `Points: ${computePoints(o.statusCards)}` : `${o.statusCards.length} card${o.statusCards.length === 1 ? '' : 's'}`;
-    header.innerHTML = `<span class="name">${o.name}${o.active === false ? ' (out)' : ''}</span><span class="pts">${ptsLabel}</span>`;
-    row.appendChild(header);
+    row.querySelector('.name').textContent = `${o.name}${o.active === false ? ' (out)' : ''}`;
+    row.querySelector('.pts').textContent = ptsLabel;
 
-    const chips = document.createElement('div');
-    chips.className = 'chip-row small';
+    const chips = row.querySelector('.chip-row');
+    chips.innerHTML = '';
     o.statusCards.forEach((c) => chips.appendChild(revealCards ? cardEl(c) : cardBackEl()));
-    row.appendChild(chips);
+  });
 
-    container.appendChild(row);
+  container.querySelectorAll('.opponent-row').forEach((row) => {
+    if (!seenUsernames.has(row.dataset.username)) row.remove();
   });
 }
 
