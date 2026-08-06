@@ -157,8 +157,19 @@ fieldset.bot-mix legend { padding: 0 0.4rem; font-weight: 600; font-size: 0.9rem
   display: flex;
   gap: 0.75rem;
   flex-wrap: wrap;
+  align-items: stretch;
 }
-.bot-row label { flex: 1 1 100px; }
+/* "Capped-greedy bot" wraps to two lines while "Pass bot"/"Greedy bot" fit
+   on one — without this, the inputs end up at different heights even
+   though the labels are the same overall (stretched) box height. Making
+   each label a column with the input pinned to the bottom keeps every
+   input aligned on the same row regardless of how much the caption wraps. */
+.bot-row label {
+  flex: 1 1 100px;
+  display: flex;
+  flex-direction: column;
+}
+.bot-row label input { margin-top: auto; }
 
 details.advanced { margin-bottom: 1.1rem; }
 details.advanced summary {
@@ -634,24 +645,33 @@ button.secondary.standalone { margin-top: 0.9rem; display: inline-block; }
 .card-info-wrap { position: relative; display: inline-flex; align-items: center; }
 
 .card-info-btn {
-  width: 22px;
-  height: 22px;
+  width: 28px;
+  height: 28px;
   margin: 0;
   padding: 0;
   border-radius: 50%;
-  border: 1px solid var(--panel-border);
-  background: var(--panel-bg-soft);
-  color: var(--accent-strong);
-  font-size: 0.8rem;
+  border: none;
+  background: var(--accent);
+  color: #fff;
+  font-size: 0.95rem;
   font-weight: 700;
   line-height: 1;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: filter 0.15s ease, background 0.15s ease;
+  transition: filter 0.15s ease, transform 0.1s ease;
+  /* A continuous, gentle "notice me" pulse — this got lost in the header
+     next to the round/turn labels at its old small, muted styling, and a
+     rules explainer is exactly the kind of thing you want to actually see
+     mid-game, not just be technically present. */
+  animation: card-info-pulse 2.2s ease-in-out infinite;
 }
-.card-info-btn:hover { filter: brightness(1.08); background: var(--accent-soft); }
+.card-info-btn:hover { filter: brightness(1.1); transform: scale(1.08); }
+@keyframes card-info-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(185, 138, 47, 0.55); }
+  50% { box-shadow: 0 0 0 7px rgba(185, 138, 47, 0); }
+}
 
 .card-info-popover {
   position: absolute;
