@@ -1,2 +1,8 @@
 flask
 flask-sock
+# Production WSGI server for hosting web_server.py (see Procfile) — Flask's
+# own dev server (app.run(...)) explicitly warns it isn't for production use.
+# eventlet is the worker class simple_websocket/flask-sock support for
+# WebSocket traffic under gunicorn.
+gunicorn
+eventlet

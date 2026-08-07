@@ -13,6 +13,16 @@ function showScreen(id) {
 function hide(el) { el.classList.add('hidden'); }
 function showError(el, text) { el.textContent = text; el.classList.remove('hidden'); }
 
+// Usernames are entirely user-supplied and end up interpolated into a couple
+// of innerHTML strings (final standings, the turn indicator) — escape them
+// first so a username like "<img src=x onerror=...>" renders as inert text
+// instead of executing in every other connected browser.
+const _escapeHtmlEl = document.createElement('div');
+function escapeHtml(text) {
+  _escapeHtmlEl.textContent = text;
+  return _escapeHtmlEl.innerHTML;
+}
+
 function wsUrl(path) {
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
   return `${proto}//${location.host}${path}`;
@@ -125,6 +135,15 @@ let pendingSpectate = null;
 let pendingIdentifyError = null;
 let game = null;
 
+// Which room this browser tab is currently looking at — null means "no room
+// yet, show the home screen" (public rooms list + host-a-game form). Set
+// either from the `?room=` URL param on load (a shared link), by creating a
+// game, or by picking/entering a room from the home screen. Kept in the URL
+// (via history.replaceState) so a refresh or a shared link lands back in the
+// same room instead of the home screen.
+let currentRoomCode = null;
+let roomsPollTimer = null;
+
 // Whether to show opponents' actual won cards/points, or keep them hidden
 // behind card-backs — off by default (per user preference: keeping
 // opponents' progress hidden makes the game more interesting), persisted
@@ -164,7 +183,14 @@ function ensureOpponent(username) {
 
 document.addEventListener('DOMContentLoaded', () => {
   wireStaticHandlers();
-  refreshStatus();
+  currentRoomCode = new URLSearchParams(location.search).get('room');
+  if (currentRoomCode) {
+    refreshStatus();
+    startPolling();
+  } else {
+    showScreen('screen-host-setup');
+    startRoomsPolling();
+  }
 });
 
 async function fetchJSON(url, opts) {
@@ -174,10 +200,87 @@ async function fetchJSON(url, opts) {
   return body;
 }
 
-async function refreshStatus() {
+// Puts `room` in both the URL (so a refresh/shared link returns to the same
+// room) and the module-level currentRoomCode every subsequent API/WS call
+// reads from. Validates the code first (rather than just switching screens
+// and letting the generic !status.exists path bounce back) so a mistyped
+// room code gets a clear error right on the home screen instead of silently
+// doing nothing.
+async function enterRoom(roomCode) {
   let status;
   try {
-    status = await fetchJSON('/api/status');
+    status = await fetchJSON(`/api/status?room=${encodeURIComponent(roomCode)}`);
+  } catch (e) {
+    showError($('host-error'), 'Could not reach the server. Try again.');
+    return;
+  }
+  if (!status.exists) {
+    showError($('host-error'), `No game found with room code "${roomCode}".`);
+    return;
+  }
+  currentRoomCode = roomCode;
+  history.replaceState(null, '', `?room=${encodeURIComponent(roomCode)}`);
+  stopRoomsPolling();
+  lastStatus = status;
+  renderForStatus(status);
+  startPolling();
+}
+
+function leaveToHome() {
+  currentRoomCode = null;
+  history.replaceState(null, '', location.pathname);
+  stopPolling();
+  showScreen('screen-host-setup');
+  startRoomsPolling();
+}
+
+function startRoomsPolling() {
+  if (roomsPollTimer) return;
+  refreshRoomsList();
+  roomsPollTimer = setInterval(refreshRoomsList, 2000);
+}
+function stopRoomsPolling() {
+  if (roomsPollTimer) { clearInterval(roomsPollTimer); roomsPollTimer = null; }
+}
+
+async function refreshRoomsList() {
+  let data;
+  try {
+    data = await fetchJSON('/api/rooms');
+  } catch (e) {
+    return; // transient network hiccup — next poll retries
+  }
+  renderRoomsList(data.rooms || []);
+}
+
+function renderRoomsList(rooms) {
+  const container = $('public-rooms-list');
+  if (!rooms.length) {
+    container.innerHTML = '<p class="muted">No public games open right now — host one below!</p>';
+    return;
+  }
+  container.innerHTML = '';
+  rooms.forEach((r) => {
+    const row = document.createElement('div');
+    row.className = 'room-row';
+    const label = document.createElement('span');
+    label.textContent = `Room ${r.room_code} — ${r.joined}/${r.seats} seats filled`;
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'secondary';
+    btn.textContent = 'Join';
+    btn.addEventListener('click', () => enterRoom(r.room_code));
+    row.appendChild(label);
+    row.appendChild(btn);
+    container.appendChild(row);
+  });
+}
+
+async function refreshStatus() {
+  if (!currentRoomCode) return;
+  let status;
+  try {
+    status = await fetchJSON(`/api/status?room=${encodeURIComponent(currentRoomCode)}`);
   } catch (e) {
     return; // transient network hiccup — next poll (or manual reload) retries
   }
@@ -195,8 +298,10 @@ function renderForStatus(status) {
   if (!$('screen-spectate-join').classList.contains('hidden')) return;
 
   if (!status.exists) {
-    stopPolling();
-    showScreen('screen-host-setup');
+    // The room we were looking at is gone — either a bad/stale room code, or
+    // the background reaper cleaned it up (see web_server.py's
+    // _reap_stale_rooms). Nothing left to show for it; back to the home screen.
+    leaveToHome();
     return;
   }
   if (status.state === 'finished') {
@@ -232,6 +337,8 @@ function renderLobby(status) {
   showScreen('screen-join');
   $('join-form').classList.remove('hidden');
   $('join-waiting').classList.add('hidden');
+  const visibilityNote = status.visibility === 'private' ? ' (private — share this code with friends)' : ' (public)';
+  $('room-code-display').textContent = `Room code: ${status.room_code}${visibilityNote}`;
   const names = status.joined.map((p) => `${p.name}${p.is_bot ? ' 🤖' : ''}`).join(', ') || 'nobody yet';
   $('lobby-status').textContent = `Seats filled: ${status.joined.length}/${status.seats} — ${names}`;
   if (pendingIdentifyError) {
@@ -269,7 +376,7 @@ function renderFinished(status) {
     const tag = isWinner ? ' 🏆' : (s.active === false ? ' (left the game)' : '');
     return `
     <div class="standing-row ${state}" style="animation-delay: ${i * 90}ms">
-      <span class="name">${s.username}${tag}</span>
+      <span class="name">${escapeHtml(s.username)}${tag}</span>
       <span>Points: ${s.points}</span>
       <span>Money left: ${s.money_left}</span>
     </div>`;
@@ -281,11 +388,12 @@ function renderFinished(status) {
 
 function wireStaticHandlers() {
   $('btn-create-game').addEventListener('click', onCreateGame);
+  $('btn-join-by-code').addEventListener('click', onJoinByCode);
   $('btn-join').addEventListener('click', onJoin);
   $('btn-spectate-link').addEventListener('click', () => showScreen('screen-spectate-join'));
   $('btn-back-to-join').addEventListener('click', () => { showScreen('screen-join'); refreshStatus(); });
   $('btn-spectate-join').addEventListener('click', onSpectateJoin);
-  $('btn-new-game').addEventListener('click', () => showScreen('screen-host-setup'));
+  $('btn-new-game').addEventListener('click', leaveToHome);
   $('btn-place-bid').addEventListener('click', onPlaceBid);
   $('btn-pass').addEventListener('click', onPass);
   $('btn-quit').addEventListener('click', onQuit);
@@ -334,6 +442,7 @@ async function onCreateGame() {
     bot_mix: botMix,
     seed: seedRaw ? parseInt(seedRaw, 10) : null,
     bot_think_time: parseFloat($('host-think-time').value || '1'),
+    visibility: $('host-visibility-private').checked ? 'private' : 'public',
   };
   try {
     const status = await fetchJSON('/api/create_game', {
@@ -341,12 +450,22 @@ async function onCreateGame() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
+    stopRoomsPolling();
+    currentRoomCode = status.room_code;
+    history.replaceState(null, '', `?room=${encodeURIComponent(status.room_code)}`);
     lastStatus = status;
     renderLobby(status);
     startPolling();
   } catch (e) {
     showError($('host-error'), e.message);
   }
+}
+
+function onJoinByCode() {
+  hide($('host-error'));
+  const code = $('join-room-code').value.trim().toUpperCase();
+  if (!code) { showError($('host-error'), 'Enter a room code.'); return; }
+  enterRoom(code);
 }
 
 // ------------------------------------------------------------- join flow --
@@ -370,7 +489,7 @@ function onJoin() {
 }
 
 function connectPlayerSocket() {
-  ws = new WebSocket(wsUrl('/ws'));
+  ws = new WebSocket(wsUrl(`/ws?room=${encodeURIComponent(currentRoomCode)}`));
   ws.onmessage = (evt) => handlePlayerMessage(JSON.parse(evt.data));
   ws.onclose = () => { ws = null; refreshStatus(); };
   setBadge('connecting…');
@@ -405,12 +524,13 @@ function onSpectateJoin() {
   pendingSpectate = { username, name };
   stopPolling();
   resetGameState(null);
-  fetchJSON('/api/status').then((status) => seedOpponents(status, null)).catch(() => {});
+  fetchJSON(`/api/status?room=${encodeURIComponent(currentRoomCode)}`)
+    .then((status) => seedOpponents(status, null)).catch(() => {});
   connectSpectatorSocket();
 }
 
 function connectSpectatorSocket() {
-  ws = new WebSocket(wsUrl('/ws_spectate'));
+  ws = new WebSocket(wsUrl(`/ws_spectate?room=${encodeURIComponent(currentRoomCode)}`));
   ws.onmessage = (evt) => handleSpectatorMessage(JSON.parse(evt.data));
   ws.onclose = () => { ws = null; };
   showScreen('screen-spectate');
@@ -661,7 +781,7 @@ function renderAuctionPanel(isSpectator) {
   // shared state (card, bid) that stays fully legible regardless of whose
   // turn it is, not something that dims/greys based on turn.
   $(`${prefix}turn-label`).innerHTML = game.turnPlayer
-    ? `<span class="turn-dot"></span>${game.turnPlayer}'s turn`
+    ? `<span class="turn-dot"></span>${escapeHtml(game.turnPlayer)}'s turn`
     : '';
 
   const bidEl = $(`${prefix}max-bid`);

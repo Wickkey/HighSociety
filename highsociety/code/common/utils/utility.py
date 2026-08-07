@@ -19,12 +19,22 @@ if not _bootstrap_logger.handlers:
 _REPO_ROOT = Path(__file__).resolve().parents[4]
 
 def get_base_path():
+    """
+    Returns HSConfig.json's configured abs_root_dir if it exists on this
+    machine, otherwise falls back to the repo root computed from this file's
+    own location. The configured value is typically someone's personal
+    dev-machine path (see HSConfig.json), which would otherwise break on any
+    other machine — another developer's checkout, or a hosting provider's
+    container.
+    """
     all_config_details = get_all_configurations()
     try:
-        return all_config_details.get("base_path").get("abs_root_dir")
+        configured = all_config_details.get("base_path").get("abs_root_dir")
+        if configured and os.path.isdir(configured):
+            return configured
     except Exception as e:
         _bootstrap_logger.error(f"Error getting base path: {e}")
-        return None
+    return str(_REPO_ROOT)
 
 
 def get_all_configurations() -> dict:

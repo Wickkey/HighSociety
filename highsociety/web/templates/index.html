@@ -17,6 +17,18 @@
     <!-- ===================== HOST SETUP ===================== -->
     <section id="screen-host-setup" class="screen hidden">
       <div class="card panel">
+        <h2>Join a game</h2>
+        <p class="muted">Public games anyone can join, or enter a room code a friend shared with you.</p>
+        <div id="public-rooms-list" class="rooms-list">
+          <p class="muted">Loading public games…</p>
+        </div>
+        <label>Room code
+          <input type="text" id="join-room-code" placeholder="e.g. AB3D9" autocomplete="off" maxlength="10">
+        </label>
+        <button id="btn-join-by-code" class="secondary">Join by Code</button>
+      </div>
+
+      <div class="card panel">
         <h2>Host a new game</h2>
         <p class="muted">Set this up once — everyone else just opens this page and types their name.</p>
 
@@ -60,6 +72,14 @@
         <label>Total seats
           <input type="number" id="host-seats" min="2" max="5" value="3">
         </label>
+
+        <fieldset class="bot-mix">
+          <legend>Who can join?</legend>
+          <div class="bot-row">
+            <label class="radio-label"><input type="radio" name="host-visibility" id="host-visibility-public" value="public" checked> Public — listed for anyone to join</label>
+            <label class="radio-label"><input type="radio" name="host-visibility" id="host-visibility-private" value="private"> Private — only joinable with the room code</label>
+          </div>
+        </fieldset>
 
         <fieldset class="bot-mix">
           <legend>Fill seats with bots (optional)</legend>
@@ -129,6 +149,7 @@
           </div>
         </details>
 
+        <div id="room-code-display" class="room-code-display"></div>
         <div id="lobby-status" class="lobby-status"></div>
 
         <div id="join-form">

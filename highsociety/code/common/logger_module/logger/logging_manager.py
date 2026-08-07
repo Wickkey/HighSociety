@@ -2,8 +2,12 @@ import logging
 import threading
 import traceback
 from enum import Enum
+from pathlib import Path
 from highsociety.code.common.logger_module.logger.concurrent_log_handler import ConcurrentLogHandler
 import os
+
+# .../<repo_root>/highsociety/code/common/logger_module/logger/logging_manager.py -> <repo_root>
+_REPO_ROOT = Path(__file__).resolve().parents[5]
 
 
 class LogType(Enum):
@@ -29,7 +33,18 @@ class LoggingManager:
 
     @classmethod
     def _initialize(cls, config: dict[str, any]):
-        base_path = config.get("base_path").get("abs_root_dir")
+        # HSConfig.json's abs_root_dir is only honored when it actually exists
+        # on this machine — it's typically someone's personal dev-machine
+        # path, which breaks the instant this runs anywhere else (another
+        # developer's checkout, a hosting provider's container). Falling back
+        # to the repo root computed from this file's own location keeps the
+        # config value usable for whoever wants to redirect logs elsewhere,
+        # without it being a hard requirement everywhere else.
+        configured_base_path = config.get("base_path").get("abs_root_dir")
+        if configured_base_path and os.path.isdir(configured_base_path):
+            base_path = configured_base_path
+        else:
+            base_path = str(_REPO_ROOT)
         log_dir = config.get("logging").get("log_dir")
         generic_log_file = config.get("logging").get("generic_log_file")
         security_log_file = config.get("logging").get("security_log_file")

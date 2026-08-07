@@ -58,19 +58,22 @@ sock = Sock(app)
 
 class GameRoom:
     """
-    All the state for the one game this process is hosting. Deliberately a
-    single instance (see _room/_room_lock below) rather than a dict keyed by
-    id — real multi-room hosting (the "later extend it by hosting on a
-    website" goal) is a mechanical change to those two module-level names
-    later, not a rewrite of this class.
+    All the state for one hosted game. Many of these can exist at once, kept
+    in the module-level `_rooms` dict below, keyed by `room_code` — this is
+    what makes real multi-room website hosting possible (public/private rooms
+    users create and join themselves, per the room-based-matchmaking design)
+    instead of the one-game-per-process limit this class used to encode.
     """
 
-    def __init__(self, seats: int, bot_mix: list[str], seed: Optional[int], bot_think_time: float):
+    def __init__(self, room_code: str, seats: int, bot_mix: list[str], seed: Optional[int],
+                 bot_think_time: float, visibility: str):
+        self.room_code = room_code
         self.game_id = generate_game_id()
         self.seats = seats
         self.bot_mix = bot_mix
         self.seed = seed if seed is not None else random.randint(0, 2 ** 31 - 1)
         self.bot_think_time = bot_think_time
+        self.visibility = visibility  # "public" | "private"
 
         self.players = create_bot_players(bot_mix, bot_think_time) if bot_mix else []
         self.human_seats = seats - len(self.players)
@@ -79,6 +82,13 @@ class GameRoom:
         self.state = "lobby"  # lobby -> starting -> in_progress -> finished
         self.game: Optional[PlayGame] = None
         self.lock = threading.Lock()
+        self.last_active_at = time.time()
+
+    def touch(self) -> None:
+        """Marks the room as recently active, so the reaper thread's idle
+        timeout (see _reap_stale_rooms) doesn't count time spent actually
+        being used against it."""
+        self.last_active_at = time.time()
 
     def joined_summary(self) -> list[dict]:
         return [
@@ -109,6 +119,7 @@ class GameRoom:
             self.state = "in_progress"
             game.play_game()
             self.state = "finished"
+            self.touch()  # start the reaper's finished-room retention window from now
             for p in self.players:
                 if isinstance(p, NetworkPlayer):
                     p.close()
@@ -118,13 +129,74 @@ class GameRoom:
         threading.Thread(target=_run, daemon=True, name=f"Game-{self.game_id}").start()
 
 
-_room: Optional[GameRoom] = None
-_room_lock = threading.Lock()
+# Excludes 0/O and 1/I — a room code is meant to be read aloud or typed by a
+# friend, and those pairs are the ones people actually misread/mistype.
+_ROOM_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+_ROOM_CODE_LENGTH = 5
+
+# How long an idle/finished room is kept around before the reaper drops it.
+# Generous on purpose — this is memory hygiene for abandoned rooms, not a
+# tight resource limit; a real player should never be able to "run out the
+# clock" on a room they're actively using (every join/start/finish calls
+# GameRoom.touch()).
+_ROOM_LOBBY_IDLE_TIMEOUT_SECONDS = 30 * 60
+_ROOM_FINISHED_RETENTION_SECONDS = 10 * 60
+_ROOM_REAPER_INTERVAL_SECONDS = 60
+
+_rooms: dict[str, GameRoom] = {}
+_rooms_lock = threading.Lock()
 
 
-def _get_room() -> Optional[GameRoom]:
-    with _room_lock:
-        return _room
+def _generate_room_code() -> str:
+    return "".join(random.choices(_ROOM_CODE_ALPHABET, k=_ROOM_CODE_LENGTH))
+
+
+def _create_room(seats: int, bot_mix: list[str], seed: Optional[int], bot_think_time: float,
+                  visibility: str) -> GameRoom:
+    with _rooms_lock:
+        for _ in range(20):
+            code = _generate_room_code()
+            if code not in _rooms:
+                break
+        else:
+            # Astronomically unlikely at this scale of concurrent rooms, but
+            # a longer code guarantees termination rather than looping forever.
+            code = "".join(random.choices(_ROOM_CODE_ALPHABET, k=_ROOM_CODE_LENGTH * 2))
+        room = GameRoom(room_code=code, seats=seats, bot_mix=bot_mix, seed=seed,
+                         bot_think_time=bot_think_time, visibility=visibility)
+        _rooms[code] = room
+        return room
+
+
+def _get_room(room_code: Optional[str]) -> Optional[GameRoom]:
+    if not room_code:
+        return None
+    with _rooms_lock:
+        return _rooms.get(room_code)
+
+
+def _reap_stale_rooms() -> None:
+    """
+    Background hygiene for rooms nobody's using anymore: a lobby that never
+    filled up, or a finished game nobody's still looking at its standings
+    for. Without this, `_rooms` only ever grows for the lifetime of the
+    process. Runs forever as a daemon thread — see its start call near the
+    bottom of this module.
+    """
+    while True:
+        threading.Event().wait(_ROOM_REAPER_INTERVAL_SECONDS)
+        now = time.time()
+        with _rooms_lock:
+            stale = [
+                code for code, room in _rooms.items()
+                if (room.state == "lobby" and now - room.last_active_at > _ROOM_LOBBY_IDLE_TIMEOUT_SECONDS)
+                or (room.state == "finished" and now - room.last_active_at > _ROOM_FINISHED_RETENTION_SECONDS)
+            ]
+            for code in stale:
+                del _rooms[code]
+
+
+threading.Thread(target=_reap_stale_rooms, daemon=True, name="RoomReaper").start()
 
 
 def _is_valid_identify_ack(data: dict, game_id: str) -> bool:
@@ -197,7 +269,6 @@ def api_config():
 
 @app.route("/api/create_game", methods=["POST"])
 def api_create_game():
-    global _room
     body = request.get_json(silent=True) or {}
 
     try:
@@ -230,13 +301,13 @@ def api_create_game():
     except (TypeError, ValueError):
         return jsonify({"error": "bot_think_time must be a number"}), 400
 
-    with _room_lock:
-        if _room is not None and _room.state in ("lobby", "starting", "in_progress"):
-            return jsonify({"error": "A game is already in progress or being set up."}), 409
-        _room = GameRoom(seats=seats, bot_mix=bot_mix, seed=seed, bot_think_time=bot_think_time)
-        new_room = _room
+    visibility = body.get("visibility", "public")
+    if visibility not in ("public", "private"):
+        return jsonify({"error": "visibility must be 'public' or 'private'"}), 400
 
-    return jsonify(_status_payload(new_room))
+    room = _create_room(seats=seats, bot_mix=bot_mix, seed=seed, bot_think_time=bot_think_time,
+                         visibility=visibility)
+    return jsonify(_status_payload(room))
 
 
 def _status_payload(room: Optional[GameRoom]) -> dict:
@@ -244,6 +315,8 @@ def _status_payload(room: Optional[GameRoom]) -> dict:
         return {"exists": False}
     payload = {
         "exists": True,
+        "room_code": room.room_code,
+        "visibility": room.visibility,
         "state": room.state,
         "game_id": room.game_id,
         "seats": room.seats,
@@ -262,7 +335,29 @@ def _status_payload(room: Optional[GameRoom]) -> dict:
 
 @app.route("/api/status")
 def api_status():
-    return jsonify(_status_payload(_get_room()))
+    return jsonify(_status_payload(_get_room(request.args.get("room"))))
+
+
+@app.route("/api/rooms")
+def api_rooms():
+    """Public lobby listing — rooms anyone can browse and join without
+    knowing a code, as opposed to private rooms (reachable only by sharing
+    the room code out of band). Only rooms still accepting players are worth
+    showing here; an in-progress/finished room has nothing to join."""
+    with _rooms_lock:
+        rooms = [
+            {
+                "room_code": room.room_code,
+                "seats": room.seats,
+                "human_seats": room.human_seats,
+                "joined": len(room.players),
+                "bot_mix": room.bot_mix,
+            }
+            for room in _rooms.values()
+            if room.visibility == "public" and room.state == "lobby"
+        ]
+    rooms.sort(key=lambda r: r["room_code"])
+    return jsonify({"rooms": rooms})
 
 
 def _relay_player_chat(username: str, room: GameRoom, msg: dict) -> None:
@@ -291,7 +386,7 @@ def _relay_player_chat(username: str, room: GameRoom, msg: dict) -> None:
 
 @sock.route("/ws")
 def ws_player(ws):
-    room = _get_room()
+    room = _get_room(request.args.get("room"))
     if room is None or room.state != "lobby":
         _send(ws, "", "IDENTIFY_ERROR", "No game is accepting players right now.")
         return
@@ -320,6 +415,7 @@ def ws_player(ws):
         transport.start()
         player = NetworkPlayer(name=name, username=username, transport=transport, game_id=game_id)
         room.players.append(player)
+        room.touch()
 
     _send(ws, game_id, "IDENTIFY_SUCCESS", f"Welcome {username}! Waiting for other players...")
 
@@ -376,7 +472,7 @@ def _spectator_chat_listener(spectator: NetworkSpectator, room: GameRoom) -> Non
 
 @sock.route("/ws_spectate")
 def ws_spectate(ws):
-    room = _get_room()
+    room = _get_room(request.args.get("room"))
     if room is None:
         _send(ws, "", "IDENTIFY_ERROR", "No game exists yet.")
         return
@@ -407,8 +503,11 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="HighSociety Web Server")
     parser.add_argument("--host", type=str, default="0.0.0.0",
                         help="Host address to bind to (default: 0.0.0.0 for all interfaces)")
-    parser.add_argument("--port", type=int, default=8000,
-                        help="Port number to listen on (default: 8000)")
+    # Hosting platforms (Render/Railway/Fly.io-style) assign a port at deploy
+    # time via the $PORT env var and expect the app to listen on it — the
+    # --port flag stays the default for local/LAN use.
+    parser.add_argument("--port", type=int, default=int(os.environ.get("PORT", 8000)),
+                        help="Port number to listen on (default: $PORT env var, or 8000)")
     args = parser.parse_args()
 
     config = get_all_configurations()

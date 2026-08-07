@@ -103,7 +103,7 @@ class ScriptedWSClient:
 
 @pytest.fixture
 def running_web_server():
-    web_server._room = None  # each test starts from a clean slate
+    web_server._rooms.clear()  # each test starts from a clean slate
     port = next(_port_counter)
     thread = threading.Thread(
         target=web_server.app.run,
@@ -113,7 +113,7 @@ def running_web_server():
     thread.start()
     threading.Event().wait(0.3)  # let the dev server actually start listening
     yield port
-    web_server._room = None
+    web_server._rooms.clear()
 
 
 def _ws_url(port, path):
@@ -124,7 +124,9 @@ def test_create_status_and_config_endpoints(running_web_server):
     port = running_web_server
     client = web_server.app.test_client()
 
+    # No room param (or an unknown one) means "no such room" — not a crash.
     assert client.get("/api/status").get_json() == {"exists": False}
+    assert client.get("/api/status?room=NOPE").get_json() == {"exists": False}
 
     config = client.get("/api/config").get_json()
     assert config["min_players"] == 2
@@ -133,18 +135,49 @@ def test_create_status_and_config_endpoints(running_web_server):
     assert resp.status_code == 200
     body = resp.get_json()
     assert body["state"] == "lobby"
+    assert body["visibility"] == "public"  # default
     assert body["human_seats"] == 1
     assert body["joined"] == [{"username": "pass1", "name": "Pass1", "is_bot": True}]
+    room_code = body["room_code"]
+    assert room_code
 
-    # Can't reconfigure a room that's already accepting players.
-    conflict = client.post("/api/create_game", json={"seats": 2, "bot_mix": ["pass"]})
-    assert conflict.status_code == 409
+    # Fetching that room's status by code returns the same room.
+    status = client.get(f"/api/status?room={room_code}").get_json()
+    assert status["room_code"] == room_code
+
+    # Multiple rooms can exist at once now — creating another game doesn't
+    # conflict with the first, and each gets its own room code.
+    second = client.post("/api/create_game", json={"seats": 2, "bot_mix": ["pass"]})
+    assert second.status_code == 200
+    second_code = second.get_json()["room_code"]
+    assert second_code != room_code
 
     bad = client.post("/api/create_game", json={"seats": 2, "bot_mix": ["not-a-bot"]})
     assert bad.status_code == 400
 
     too_many_bots = client.post("/api/create_game", json={"seats": 2, "bot_mix": ["pass", "greedy"]})
     assert too_many_bots.status_code == 400
+
+    bad_visibility = client.post(
+        "/api/create_game", json={"seats": 2, "bot_mix": ["pass"], "visibility": "hidden"}
+    )
+    assert bad_visibility.status_code == 400
+
+
+def test_rooms_listing_shows_only_open_public_rooms(running_web_server):
+    client = web_server.app.test_client()
+
+    public_room = client.post(
+        "/api/create_game", json={"seats": 2, "bot_mix": ["pass"], "visibility": "public"}
+    ).get_json()
+    private_room = client.post(
+        "/api/create_game", json={"seats": 2, "bot_mix": ["pass"], "visibility": "private"}
+    ).get_json()
+
+    rooms = client.get("/api/rooms").get_json()["rooms"]
+    codes = {r["room_code"] for r in rooms}
+    assert public_room["room_code"] in codes
+    assert private_room["room_code"] not in codes  # private rooms aren't listed
 
 
 def test_full_game_over_websockets_against_a_bot(running_web_server):
@@ -153,8 +186,9 @@ def test_full_game_over_websockets_against_a_bot(running_web_server):
         "/api/create_game", json={"seats": 2, "bot_mix": ["pass"], "seed": 42, "bot_think_time": 0}
     )
     assert resp.status_code == 200
+    room_code = resp.get_json()["room_code"]
 
-    player = ScriptedWSClient(_ws_url(port, "/ws"), "alice")
+    player = ScriptedWSClient(_ws_url(port, f"/ws?room={room_code}"), "alice")
     player.handshake()
     player.start()
 
@@ -170,7 +204,7 @@ def test_full_game_over_websockets_against_a_bot(running_web_server):
     assert player.messages_of_type("PLAYER_STATE")
 
     # The room's own status should now reflect a finished game with standings.
-    status = web_server.app.test_client().get("/api/status").get_json()
+    status = web_server.app.test_client().get(f"/api/status?room={room_code}").get_json()
     assert status["state"] == "finished"
     assert status["winners"] is not None
     assert len(status["final_standings"]) == 2
@@ -180,11 +214,11 @@ def test_full_game_over_websockets_against_a_bot(running_web_server):
 
 def test_spectator_sees_the_game_live(running_web_server):
     port = running_web_server
-    web_server.app.test_client().post(
+    room_code = web_server.app.test_client().post(
         "/api/create_game", json={"seats": 2, "bot_mix": ["pass"], "seed": 7, "bot_think_time": 0}
-    )
+    ).get_json()["room_code"]
 
-    spectator = Client(_ws_url(port, "/ws_spectate"))
+    spectator = Client(_ws_url(port, f"/ws_spectate?room={room_code}"))
     spectator.receive(timeout=5)  # "Enter your name"
     spectator.send(json.dumps({"message_type": "IDENTIFY_ACK", "prompt": "watcher"}))
     spectator.receive(timeout=5)  # "Enter your username"
@@ -192,7 +226,7 @@ def test_spectator_sees_the_game_live(running_web_server):
     welcome = json.loads(spectator.receive(timeout=5))
     assert welcome["message_type"] == "IDENTIFY_SUCCESS"
 
-    player = ScriptedWSClient(_ws_url(port, "/ws"), "bob")
+    player = ScriptedWSClient(_ws_url(port, f"/ws?room={room_code}"), "bob")
     player.handshake()
     player.start()
 
@@ -223,16 +257,16 @@ def test_players_can_chat_live_without_it_being_mistaken_for_a_bid(running_web_s
     queue those methods read from) and web_server.py's _relay_player_chat.
     """
     port = running_web_server
-    web_server.app.test_client().post(
+    room_code = web_server.app.test_client().post(
         "/api/create_game", json={"seats": 2, "bot_mix": [], "seed": 11, "bot_think_time": 0}
-    )
+    ).get_json()["room_code"]
 
-    alice = ScriptedWSClient(_ws_url(port, "/ws"), "alice")
-    bob = ScriptedWSClient(_ws_url(port, "/ws"), "bob")
+    alice = ScriptedWSClient(_ws_url(port, f"/ws?room={room_code}"), "alice")
+    bob = ScriptedWSClient(_ws_url(port, f"/ws?room={room_code}"), "bob")
     alice.handshake()
     bob.handshake()
 
-    spectator = Client(_ws_url(port, "/ws_spectate"))
+    spectator = Client(_ws_url(port, f"/ws_spectate?room={room_code}"))
     spectator.receive(timeout=5)  # "Enter your name"
     spectator.send(json.dumps({"message_type": "IDENTIFY_ACK", "prompt": "watcher"}))
     spectator.receive(timeout=5)  # "Enter your username"
@@ -268,10 +302,11 @@ def test_players_can_chat_live_without_it_being_mistaken_for_a_bid(running_web_s
 
     # The chat message must not have been consumed as alice's bid/pass —
     # play the game out normally afterward and confirm it completes cleanly.
+    room = web_server._rooms[room_code]
     deadline = time.time() + 15
-    while time.time() < deadline and web_server._room.state != "finished":
+    while time.time() < deadline and room.state != "finished":
         threading.Event().wait(0.2)
-    assert web_server._room.state == "finished"
+    assert room.state == "finished"
 
     alice.close()
     bob.close()
@@ -308,14 +343,14 @@ def test_sending_to_a_dead_websocket_marks_the_player_inactive_instead_of_crashi
     is what actually pins the fix regardless of scheduling.
     """
     port = running_web_server
-    web_server.app.test_client().post(
+    room_code = web_server.app.test_client().post(
         "/api/create_game", json={"seats": 2, "bot_mix": [], "seed": 1, "bot_think_time": 0}
-    )
-    bob = ScriptedWSClient(_ws_url(port, "/ws"), "bob")
+    ).get_json()["room_code"]
+    bob = ScriptedWSClient(_ws_url(port, f"/ws?room={room_code}"), "bob")
     bob.handshake()
     bob.client.close()
 
-    bob_player = next(p for p in web_server._room.players if p.username == "bob")
+    bob_player = next(p for p in web_server._rooms[room_code].players if p.username == "bob")
     deadline = time.time() + 10
     while time.time() < deadline and bob_player.transport.is_connected:
         threading.Event().wait(0.1)

@@ -74,24 +74,34 @@ Prints the host's LAN IP and port.
 - `http://localhost:8000` on the host's own machine, or
 - `http://<ip-from-server-output>:8000` from any other device on the same LAN.
 
-The first person to load the page sees a "Host a new game" form: total seats, how many of those
-seats to fill with bots (`pass`/`greedy`/`capped` — see "Playing against bots" below), and an
-optional seed for a reproducible game. Submitting it opens the game to everyone else, who see a
-"Join this game" form (username + display name) and a live "seats filled" count. The game starts
-automatically the moment the last human seat fills — no separate "start" step.
+The page opens on a "Join a game" screen listing every open public game (room code and seats
+filled) plus a room-code box for joining a private one, and a "Host a new game" form below it:
+total seats, how many of those seats to fill with bots (`pass`/`greedy`/`capped` — see "Playing
+against bots" below), an optional seed for a reproducible game, and whether the room is **public**
+(listed for anyone to join) or **private** (joinable only by sharing its room code). Submitting the
+host form opens that specific room to everyone else — either they pick it from the public list, or
+the host shares the room code directly for a private one. Everyone joining sees a "Join this game"
+form (username + display name), the room code, and a live "seats filled" count. The game starts
+automatically the moment that room's last human seat fills — no separate "start" step. Any number
+of rooms can run at once on one server process; each is entirely independent.
 
 **Solo play against bots**: host with, say, 3 seats and 2 bots — you fill the one remaining human
 seat yourself from the same machine at `http://localhost:8000`.
 
-**Spectating**: anyone can click "Watch as a spectator instead" on the join screen to get a
-read-only view of the table (auction history, running log, and a chat box), the same
-`NetworkSpectator` support networked play already has.
+**Spectating**: anyone can click "Watch as a spectator instead" on the join screen (or open
+`http://<host>:8000/?room=<code>` directly) to get a read-only view of the table (auction history,
+running log, and a chat box), the same `NetworkSpectator` support networked play already has.
 
-**Limitations**: one game per running `web_server.py` process (host it again to play another —
-the finished screen has a "Host a New Game" button), and no reconnection — closing or refreshing
-the tab mid-game drops you, same as a `NetworkPlayer` losing its connection anywhere else in this
-project. Recording/replay and `--bots` bot-mix think-time tuning are CLI-only for now; see
-`web_server.py --help` for what it does take.
+**Limitations**: no reconnection — closing or refreshing the tab mid-game drops you, same as a
+`NetworkPlayer` losing its connection anywhere else in this project. Recording/replay and `--bots`
+bot-mix think-time tuning are CLI-only for now; see `web_server.py --help` for what it does take.
+
+**Hosting it as a real website** (not just LAN play): `web_server.py` is deployable behind a
+production WSGI server — see the repo-root `Procfile` (`gunicorn -k eventlet -w 1 web_server:app`),
+built for managed hosting platforms (Render/Railway/Fly.io-style) that run it directly. Set the
+`PORT` env var (most such platforms do this automatically) instead of `--port`. Kept to a single
+worker/process since room state lives in memory, not a database — fine at the scale a room-based
+(not auto-matchmaking) game expects.
 
 ## 4. Record and replay a session
 

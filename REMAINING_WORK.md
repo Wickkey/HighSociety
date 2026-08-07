@@ -45,9 +45,15 @@ replay system, and Transport/protocol modularity refactor.
 
 - **No reconnection support.** Once a `NetworkPlayer`'s transport disconnects (`active` flips to
   `False`), there's no path back in — same effect as quitting. If a player's WiFi blips mid-game,
-  they're permanently out, not just paused.
-- **One game per server process.** `start_server()` runs exactly one `PlayGame` and exits. There's
-  no lobby/matchmaking layer for hosting multiple concurrent games from one running server.
+  they're permanently out, not just paused. This matters more once `web_server.py` is
+  publicly hosted (open WiFi/mobile connections drop far more often than a LAN) than it did for
+  `network_server.py`'s original trusted-LAN use case.
+- **One game per server process — `network_server.py` only.** `start_server()` runs exactly one
+  `PlayGame` and exits; there's no lobby/matchmaking layer for hosting multiple concurrent games
+  from one running `network_server.py` process. `web_server.py` no longer has this limitation: it
+  keeps a `_rooms` dict keyed by room code (public or private, listed via `/api/rooms` or joined by
+  code), each running its own independent `PlayGame`, with a background reaper thread dropping idle
+  lobbies and old finished games. See `web_server.py`'s `GameRoom`/`_create_room`/`_reap_stale_rooms`.
 
 ## Bigger unbuilt capabilities
 
@@ -61,9 +67,12 @@ replay system, and Transport/protocol modularity refactor.
 - ~~**No web client / `WebSocketTransport`.**~~ **Built.** `web_server.py` + `WebSocketTransport`
   (`network/transport.py`) — an in-browser lobby (host configures seats/bots in the page, no CLI
   flags) on top of the exact same `NetworkPlayer`/`NetworkSpectator`/`PlayGame` the socket path
-  uses. See README.md's architecture section and `PLAYING.md`'s "Play in a browser". Still one
-  game per process (see the gap above) and no reconnection (see the gap below) — those limitations
-  are shared with `network_server.py`, not new ones this introduced.
+  uses, now with public/private multi-room support (see the gap above) so many games can run at
+  once instead of one per process. See README.md's architecture section and `PLAYING.md`'s "Play in
+  a browser". Still no reconnection (see the gap above) — that limitation is shared with
+  `network_server.py`, not new here. Deployable to a managed hosting service (Render/Railway/
+  Fly.io-style) via the `Procfile` (`gunicorn -k eventlet -w 1 web_server:app`); still a single
+  process/worker since room state lives in memory, not a database.
 - **No authentication.** Anyone who can reach the port can connect and claim any username; no
   reconnection tokens, no spoofing protection. Fine for a trusted LAN/friends game, not fine for
   anything more exposed.
