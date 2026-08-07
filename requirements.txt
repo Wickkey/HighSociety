@@ -2,7 +2,11 @@ flask
 flask-sock
 # Production WSGI server for hosting web_server.py (see Procfile) — Flask's
 # own dev server (app.run(...)) explicitly warns it isn't for production use.
-# eventlet is the worker class simple_websocket/flask-sock support for
-# WebSocket traffic under gunicorn.
+# Uses gunicorn's built-in "gthread" worker (see Procfile) rather than an
+# eventlet/gevent worker — one real OS thread per connection, which is what
+# simple_websocket/flask-sock need for WebSocket traffic, without pulling in
+# eventlet's own greenlet-based monkey-patching or its separate
+# Python-version compatibility (it lagged behind new Python releases in
+# practice — see the hosting platform's own gunicorn error if this ever
+# regresses).
 gunicorn
-eventlet
