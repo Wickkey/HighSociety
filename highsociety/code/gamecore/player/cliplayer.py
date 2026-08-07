@@ -23,7 +23,14 @@ class CLIPlayer(BasePlayer):
         self.active = True
         self._awaiting_input = False
 
-    def send_message(self, message: str, message_type: str = None, created_at: float = None):
+    def send_message(self, message: str, message_type: str = None, created_at: float = None, **kwargs):
+        """
+        **kwargs (e.g. `data`) exists so gameplay.py can pass the same
+        network-facing extras it sends NetworkPlayer/bots (see
+        BotInterface.send_message) without CLIPlayer needing to care — a
+        terminal has nothing to do with structured `data`, so it's just
+        accepted and ignored here.
+        """
         styles = _MESSAGE_TYPE_STYLES.get(message_type)
         print(colorize(message, *styles) if styles else message)
 

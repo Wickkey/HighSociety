@@ -10,11 +10,11 @@ class CLIHost:
         self.players = players
 
     def send_message(self, message: str, message_type: str = "GLOBAL_EVENT", data: dict = None):
-        if message_type == "AUCTION_RESULT":
-            # Structured, bot-facing data only (network mode broadcasts it to
-            # remote clients) — CLI already narrated the human-readable
-            # win/loss outcome via a separate send_message call, so skip the
-            # redundant/empty-looking line here.
+        if message_type in ("AUCTION_RESULT", "AUCTION_UPDATE"):
+            # Structured, bot/UI-facing data only (network mode broadcasts it
+            # to remote clients/browsers) — CLI already narrated the
+            # human-readable version of the same event via a separate
+            # send_message call, so skip the redundant line here.
             return
         print(style_game_event(message))
 

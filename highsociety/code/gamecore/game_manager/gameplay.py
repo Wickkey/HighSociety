@@ -40,6 +40,12 @@ class PlayGame():
         self.game_state = "initialized"
         self.auction_rounds = []
         self.current_auction = None
+        # Populated by determine_winner() — lets a caller holding this
+        # PlayGame (e.g. web_server.py's game-runner thread) read the
+        # authoritative outcome after play_game() returns, instead of
+        # re-deriving the tie/elimination logic itself.
+        self.winners = None
+        self.final_standings = []
         self.status_card_manager = StatusCardManager()
         self.disgrace_settlement = disgrace_settlement or ForfeitSettlement()
 
@@ -121,6 +127,44 @@ class PlayGame():
         summary = f"[auction_result] {record.card['type']} → {recipient_desc} for {spent}"
         self.host.send_message(summary, message_type="AUCTION_RESULT", data=record.to_dict())
 
+    def _broadcast_auction_update(self, kind: str, status_card: StatusCard, **extra) -> None:
+        """
+        Structured, UI/bot-facing companion to the human-readable narration
+        sent alongside it (see network/protocol.py's AUCTION_UPDATE) — lets an
+        observer (a web frontend, or any other structured client) track the
+        *live* state of an in-progress auction (whose turn, current bid)
+        without waiting for it to conclude (that's what AUCTION_RESULT is
+        for) or regex-parsing prompt text. CLIHost skips printing this
+        message type (see host.py) since it duplicates the plain-text line
+        already sent right next to each call.
+        """
+        payload = {
+            "round_number": len(self.auction_rounds) + 1,
+            "kind": kind,
+            "card": summarize_card(status_card),
+        }
+        payload.update(extra)
+        self.host.send_message(f"[auction_update] {kind}", message_type="AUCTION_UPDATE", data=payload)
+
+    def _send_player_state(self, player: BasePlayer) -> None:
+        """
+        Pushes a fresh snapshot of one player's own hand/points/status cards
+        directly to them (not broadcast) — lets a browser client's own-state
+        panel update immediately after winning/losing a card or discarding a
+        painting, instead of waiting for their next PLAYER_MOVE (whose
+        `constraints` only covers money cards/paintings, not points).
+        """
+        player.send_message(
+            "",
+            message_type="PLAYER_STATE",
+            data={
+                "money_cards": [c.value for c in player.money_cards],
+                "status_cards": [summarize_card(c) for c in player.status_cards],
+                "points": player.points,
+                "current_bid": [c.value for c in player.current_money_card_bids],
+            },
+        )
+
     def _finalize_auction(self, winner_id: int, status_card: StatusCard, max_bid: int):
         if winner_id != -1:
             winner = self.players[winner_id]
@@ -129,6 +173,7 @@ class PlayGame():
             else:
                 self.host.send_message(f"\n🏆 {winner.username} wins the auction for '{status_card}' with a bid of {max_bid}!")
             winner.add_status_card(status_card)
+            self._send_player_state(winner)
         else:
             self.host.send_message("⚠️ Auction ended. No active bidders left.")
 
@@ -169,6 +214,7 @@ class PlayGame():
             s.send_message(f"{player.username}'s turn. Player is playing..", message_type = "GLOBAL_MOVE_INFO",
             created_at = created_at)
 
+        self._broadcast_auction_update("turn_start", status_card, player=player.username, max_bid=max_bid)
 
         # "Auctioning: X" is broadcast once via self.host.send_message() at the
         # start of normal_card_auction/disgrace_card_auction, but CLIHost
@@ -226,6 +272,10 @@ class PlayGame():
 
     def normal_card_auction(self, status_card: StatusCard, starting_player_id: int) -> int:
         self.host.send_message(f"\nAuctioning: {status_card}: {status_card.description}")
+        self._broadcast_auction_update(
+            "auction_start", status_card, auction_type="normal",
+            starting_player=self.players[starting_player_id].username,
+        )
         record = AuctionRecord(
             round_number=len(self.auction_rounds) + 1,
             auction_type="normal",
@@ -251,18 +301,22 @@ class PlayGame():
                     num_players_in_auction -= 1
                     record.add_event(player.username, action_result)
                     self.host.send_message(f"⚪ {player.username} passed.\n")
+                    self._broadcast_auction_update(action_result, status_card, player=player.username, max_bid=max_bid)
 
                 elif action_result == "quit":
                     player.active = False
                     num_players_in_auction -= 1
                     record.add_event(player.username, "quit")
                     self.host.send_message(f"❌ {player.username} quit the game.\n")
+                    self._broadcast_auction_update("quit", status_card, player=player.username, max_bid=max_bid)
 
                 elif isinstance(action_result, int) and action_result > max_bid:
                     max_bid = action_result
                     record.add_event(player.username, "bid", max_bid,
                                       cards=[c.value for c in player.current_money_card_bids])
                     self.host.send_message(f"💰 {player.username} raised to {max_bid}.\n")
+                    self._broadcast_auction_update("bid", status_card, player=player.username, max_bid=max_bid,
+                                                    cards=[c.value for c in player.current_money_card_bids])
 
                 else:
                     # Invalid / repeated bid
@@ -325,6 +379,10 @@ class PlayGame():
 
         self.host.send_message(f"\n💀 Disgrace Auction started for: {status_card}: {status_card.description}")
         self.host.send_message("Each turn, you must bid higher than the previous bid. First to pass takes the disgrace card.")
+        self._broadcast_auction_update(
+            "auction_start", status_card, auction_type="disgrace",
+            starting_player=self.players[current_player_id].username,
+        )
 
         # loop until someone passes (they lose)
         while True:
@@ -346,6 +404,7 @@ class PlayGame():
                     loser_id = current_player_id
                     record.add_event(player.username, cmd)
                     self.host.send_message(f"💢 {player.username} passed and takes the disgrace card!")
+                    self._broadcast_auction_update(cmd, status_card, player=player.username, max_bid=max_bid)
                     break
                 elif cmd == "quit":
                     # quitting also makes them lose the disgrace card (treated same as pass)
@@ -353,6 +412,7 @@ class PlayGame():
                     loser_id = current_player_id
                     record.add_event(player.username, "quit")
                     self.host.send_message(f"❌ {player.username} quit.")
+                    self._broadcast_auction_update("quit", status_card, player=player.username, max_bid=max_bid)
                     break
                 else:
                     # unexpected string (shouldn't happen) — ask again in next loop
@@ -366,6 +426,8 @@ class PlayGame():
                 record.add_event(player.username, "bid", max_bid,
                                   cards=[c.value for c in player.current_money_card_bids])
                 self.host.send_message(f"💰 {player.username} bid now {max_bid}.")
+                self._broadcast_auction_update("bid", status_card, player=player.username, max_bid=max_bid,
+                                                cards=[c.value for c in player.current_money_card_bids])
                 # move to next player
                 current_player_id = self.get_next_player_id(current_player_id)
                 continue
@@ -439,7 +501,11 @@ class PlayGame():
                 # Player disconnected or otherwise failed to choose; retry on the next opportunity.
                 return False
             player.discard_painting_card(chosen.value)
-            self.host.send_message(f"🎨 {player.username} discarded a painting due to Faux Pas.")
+            self.host.send_message(
+                f"🎨 {player.username} discarded a painting due to Faux Pas.",
+                data={"event": "faux_pas_discard", "player": player.username, "discarded_value": chosen.value},
+            )
+            self._send_player_state(player)
             return True
 
         return False
@@ -469,6 +535,11 @@ class PlayGame():
         if not active_indices:
             self.host.send_message("⚠️ No active players remain.")
             self.host.send_message("No Winners for this game.")
+            self.winners = []
+            self.final_standings = [
+                {"username": p.username, "points": player_points[i], "money_left": player_money_left[i], "active": p.active}
+                for i, p in enumerate(self.players)
+            ]
             return None
 
         # Step 2: Eliminate the active player with the least money, unless
@@ -492,7 +563,12 @@ class PlayGame():
                 if winner_candidates[i] and pts == max_points]
 
         # Step 5: Announce results
-        self.host.send_message("\n🏁 Final Standings:")
+        self.final_standings = [
+            {"username": p.username, "points": player_points[idx], "money_left": player_money_left[idx], "active": p.active}
+            for idx, p in enumerate(self.players)
+        ]
+        self.winners = winners
+        self.host.send_message("\n🏁 Final Standings:", data={"event": "final_standings", "standings": self.final_standings})
         for idx, player in enumerate(self.players):
             if player.active:
                 self.host.send_message(f" - {player.username}: Points={player_points[idx]}, Money Left={player_money_left[idx]}")
@@ -500,12 +576,15 @@ class PlayGame():
                 self.host.send_message(f" - {player.username}: Inactive : (Points={player_points[idx]}, Money Left={player_money_left[idx]})")
 
         if len(winners) == 1:
-            self.host.send_message(f"\n🏆 Winner: {winners[0].username} with {max_points} points!")
+            self.host.send_message(f"\n🏆 Winner: {winners[0].username} with {max_points} points!",
+                                    data={"event": "winner", "winners": [winners[0].username], "points": max_points})
         elif len(winners) > 1:
             tied_names = ", ".join(w.username for w in winners)
-            self.host.send_message(f"\n🤝 It's a tie between {tied_names} with {max_points} points each!")
+            self.host.send_message(f"\n🤝 It's a tie between {tied_names} with {max_points} points each!",
+                                    data={"event": "winner", "winners": [w.username for w in winners], "points": max_points})
         else:
-            self.host.send_message("\n😬 No winner could be determined.")
+            self.host.send_message("\n😬 No winner could be determined.",
+                                    data={"event": "winner", "winners": [], "points": None})
 
         return winners
 
@@ -538,7 +617,10 @@ class PlayGame():
             if status_card.is_green:
                 num_green_cards += 1
                 if num_green_cards <=3:
-                    self.host.send_message(f"{num_green_cards} green card(s) revealed ..")
+                    self.host.send_message(
+                        f"{num_green_cards} green card(s) revealed ..",
+                        data={"event": "green_card_revealed", "count": num_green_cards},
+                    )
 
             if self._should_end_game(num_players_in_auction, num_green_cards):
                 break

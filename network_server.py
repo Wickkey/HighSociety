@@ -13,22 +13,16 @@ from socket import error as SocketError
 import sys
 from tabnanny import check
 import time
-import uuid
-import base64
 from highsociety.code.gamecore.player.networkplayer import NetworkPlayer
 from highsociety.code.gamecore.game_manager.gameplay import PlayGame
-from highsociety.code.common.utils.utility import get_all_configurations, validate_player_count
+from highsociety.code.common.utils.utility import get_all_configurations, validate_player_count, generate_game_id
 from highsociety.code.common.logger_module.logger.logging_manager import LoggingManager, LogType
-from highsociety.code.common.utils.network_utility import send_json, receive_json
+from highsociety.code.common.utils.network_utility import send_json, receive_json, get_local_ip
 from highsociety.code.gamecore.player.networkspectator import NetworkSpectator
 from highsociety.code.gamecore.player.player import BasePlayer
 from highsociety.code.gamecore.network.transport import SocketTransport
 from highsociety.code.gamecore.recording.session_recorder import SessionRecorder
 from highsociety.code.gamecore.recording.recording_player import RecordingPlayer
-
-def generate_game_id() -> str:
-    raw = uuid.uuid4().bytes
-    return base64.urlsafe_b64encode(raw).decode().rstrip("=")
 
 def _is_valid_identify_ack(data: dict, game_id: str) -> bool:
     """
@@ -43,19 +37,6 @@ def _is_valid_identify_ack(data: dict, game_id: str) -> bool:
     if incoming_game_id is not None and incoming_game_id != game_id:
         return False
     return True
-
-def get_local_ip():
-    """Get the local IP address of this machine."""
-    try:
-        # Connect to a remote address to determine local IP
-        s = socket.socket(family=socket.AF_INET, type=socket.SOCK_DGRAM)
-        s.connect(("8.8.8.8", 80))
-        ip = s.getsockname()[0]
-        s.close()
-        return ip
-    except Exception:
-        return "127.0.0.1"  # Fallback to localhost
-
 
 def set_keepalive(sock, after_idle_sec=60, interval_sec=30, max_fails=3):
     """
@@ -108,7 +89,13 @@ def players_heartbeat_monitor_thread(players: list[NetworkPlayer], timeout_secon
                 except:
                     pass
 
-        time.sleep(check_interval)
+        # threading.Event().wait() here, not time.sleep(): the test suite's
+        # autouse fixture monkeypatches time.sleep to a no-op (see
+        # tests/network/test_transport.py's note on this exact gotcha), which
+        # would turn this otherwise-infinite loop into a genuine unconditional
+        # busy-spin for the rest of the test session — one per start_server()
+        # call, since this loop has no exit condition of its own.
+        threading.Event().wait(check_interval)
 
 def accept_players(server_socket: socket.socket, expected_players: int, game_id: str, players: list = None):
     """
@@ -261,7 +248,13 @@ def _spectator_chat_listener(spectator: NetworkSpectator, players: list, spectat
             continue
 
         target = "spectators" if msg.get("target") == "spectators" else "all"
-        formatted = f"💬 {spectator.username}: {text}"
+        # The message's own JSON carries `to_user(s)` structurally (see
+        # protocol.py's _chat_payload), but network_spectator_client.py just
+        # prints `prompt` verbatim — so a spectators-only message needs its
+        # own tag baked into the text, or a receiving spectator has no way to
+        # tell it apart from a message that also reached the players.
+        tag = " (spectators only)" if target == "spectators" else ""
+        formatted = f"💬 {spectator.username}{tag}: {text}"
 
         for other in list(spectators):
             if other is spectator or not other.active:

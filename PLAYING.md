@@ -1,6 +1,6 @@
 # Playing HighSociety
 
-Three ways to play, plus how to capture and replay a session.
+Four ways to play, plus how to capture and replay a session.
 
 ## 1. Multiplayer CLI (one terminal, hot-seat)
 
@@ -55,7 +55,45 @@ Same bid syntax as CLI mode (numbers, lists, `pass`/`fold`/`quit`).
 
 Optional: `python3 network_server.py --seed N` for a reproducible game, same as the CLI.
 
-## 3. Record and replay a session
+## 3. Play in a browser
+
+One machine hosts the server; everyone else — including the host — just opens a page in their
+browser. No terminal use needed except to start the server itself, and nothing is configured on
+the command line: the first browser to open the page sets up the game.
+
+**Requires** `flask` and `flask-sock` (`pip install -r requirements.txt`) — CLI and socket play
+above need no third-party packages, only this path does.
+
+**Host**, in one terminal:
+```bash
+python3 web_server.py
+```
+Prints the host's LAN IP and port.
+
+**Everyone** (the host included) opens a browser to:
+- `http://localhost:8000` on the host's own machine, or
+- `http://<ip-from-server-output>:8000` from any other device on the same LAN.
+
+The first person to load the page sees a "Host a new game" form: total seats, how many of those
+seats to fill with bots (`pass`/`greedy`/`capped` — see "Playing against bots" below), and an
+optional seed for a reproducible game. Submitting it opens the game to everyone else, who see a
+"Join this game" form (username + display name) and a live "seats filled" count. The game starts
+automatically the moment the last human seat fills — no separate "start" step.
+
+**Solo play against bots**: host with, say, 3 seats and 2 bots — you fill the one remaining human
+seat yourself from the same machine at `http://localhost:8000`.
+
+**Spectating**: anyone can click "Watch as a spectator instead" on the join screen to get a
+read-only view of the table (auction history, running log, and a chat box), the same
+`NetworkSpectator` support networked play already has.
+
+**Limitations**: one game per running `web_server.py` process (host it again to play another —
+the finished screen has a "Host a New Game" button), and no reconnection — closing or refreshing
+the tab mid-game drops you, same as a `NetworkPlayer` losing its connection anywhere else in this
+project. Recording/replay and `--bots` bot-mix think-time tuning are CLI-only for now; see
+`web_server.py --help` for what it does take.
+
+## 4. Record and replay a session
 
 Every game — CLI or networked — can be recorded and replayed exactly, decision for decision,
 with no input needed the second time.

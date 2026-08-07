@@ -58,9 +58,12 @@ replay system, and Transport/protocol modularity refactor.
 - **No mid-crash resume.** Record/replay reproduces a game from scratch, decision by decision — it
   doesn't snapshot in-progress state, so a server crash mid-game loses that game permanently (the
   recording file, if `--record` was on, only has *decisions made so far*, not a resumable state).
-- **No web client / `WebSocketTransport`.** Per the earlier architecture discussion, this is the
-  one new component a browser frontend needs — deliberately not built, since the whole point of
-  the `Transport` abstraction was to defer this until it's actually wanted.
+- ~~**No web client / `WebSocketTransport`.**~~ **Built.** `web_server.py` + `WebSocketTransport`
+  (`network/transport.py`) — an in-browser lobby (host configures seats/bots in the page, no CLI
+  flags) on top of the exact same `NetworkPlayer`/`NetworkSpectator`/`PlayGame` the socket path
+  uses. See README.md's architecture section and `PLAYING.md`'s "Play in a browser". Still one
+  game per process (see the gap above) and no reconnection (see the gap below) — those limitations
+  are shared with `network_server.py`, not new ones this introduced.
 - **No authentication.** Anyone who can reach the port can connect and claim any username; no
   reconnection tokens, no spoofing protection. Fine for a trusted LAN/friends game, not fine for
   anything more exposed.

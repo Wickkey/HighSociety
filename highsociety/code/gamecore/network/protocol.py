@@ -19,9 +19,21 @@ PLAYER_MESSAGE_TYPES = {
     "GLOBAL_MOVE_INFO",
     "CHAT",
     "AUCTION_RESULT",
+    # Structured, machine-parseable companions to the plain-text broadcasts
+    # above, added for the web frontend (see gameplay.py) so a UI doesn't have
+    # to regex-parse human-readable strings. Purely additive: CLI/existing
+    # socket clients that don't look for these fields are unaffected.
+    "AUCTION_UPDATE",  # live in-auction narration (turn start/bid/pass/fold/quit) — GLOBAL_EVENT-shaped
+    "PLAYER_STATE",  # a snapshot of one player's own hand/points/status cards — PLAYER_INFO-shaped
 }
 
-SPECTATOR_MESSAGE_TYPES = {"GLOBAL_EVENT", "GLOBAL_MOVE_INFO", "CHAT", "AUCTION_RESULT"}
+SPECTATOR_MESSAGE_TYPES = {
+    "GLOBAL_EVENT",
+    "GLOBAL_MOVE_INFO",
+    "CHAT",
+    "AUCTION_RESULT",
+    "AUCTION_UPDATE",
+}
 
 
 def _chat_payload(*, game_id, prompt, created_at, from_user, to_users) -> dict:
@@ -72,7 +84,7 @@ def build_player_payload(
 
     if message_type == "CHAT":
         payload = _chat_payload(game_id=game_id, prompt=prompt, created_at=created_at, from_user=from_user, to_users=to_users)
-    elif message_type in ("GLOBAL_EVENT", "AUCTION_RESULT"):
+    elif message_type in ("GLOBAL_EVENT", "AUCTION_RESULT", "AUCTION_UPDATE"):
         payload = {
             "game_id": game_id,
             "message_type": message_type,

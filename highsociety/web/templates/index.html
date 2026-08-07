@@ -1,0 +1,341 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>High Society</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <header class="topbar">
+    <h1>High&nbsp;Society</h1>
+    <span id="connection-badge" class="badge hidden"></span>
+  </header>
+
+  <main id="app">
+
+    <!-- ===================== HOST SETUP ===================== -->
+    <section id="screen-host-setup" class="screen hidden">
+      <div class="card panel">
+        <h2>Host a new game</h2>
+        <p class="muted">Set this up once — everyone else just opens this page and types their name.</p>
+
+        <details class="advanced how-to-play">
+          <summary>New to High Society? How to play</summary>
+          <div class="how-to-play-body">
+            <p>
+              <strong>Goal:</strong> end the game with the most points — but there's a catch.
+              When the game ends, whoever has the <strong>least money left</strong> is eliminated
+              from winning entirely (unless there's a tie for least, or only one player is left).
+              Only then, among whoever remains, does the highest score win. Ties are possible.
+              So hoarding money matters just as much as winning cards.
+            </p>
+
+            <p>Each round, one card is revealed and auctioned off. There are two opposite kinds of auction — this is the single most important thing to understand:</p>
+
+            <dl class="auction-types">
+              <dt>Normal auction <span class="hint">— Paintings, the Prestige Card</span></dt>
+              <dd>Players take turns raising the bid using their money cards (you can combine several into one bid). Whoever won't raise further passes and is out. The last player still in wins the card — and actually pays their bid.</dd>
+
+              <dt>Disgrace auction <span class="hint">— Faux Pas, Passe, Scandale</span></dt>
+              <dd>Same turn-based bidding, but the <strong>first player to pass is the one stuck taking the card</strong>. Everyone else who raised trying to avoid it forfeits that money anyway, for nothing. So here you actually want to bail out early — but bailing out is what makes you take the bad card.</dd>
+            </dl>
+
+            <p class="hint">Money cards are locked in once committed to a bid — you can add more on a later turn to raise, but can't take any back until the auction resolves (unspent bids are returned if you don't win).</p>
+
+            <table class="card-types-table">
+              <thead><tr><th>Card</th><th>Effect</th></tr></thead>
+              <tbody>
+                <tr><td>Painting</td><td>Worth its printed value (1–10) in points.</td></tr>
+                <tr><td>Prestige Card <span class="green-dot-label" title="Green card"></span></td><td>Doubles your entire final score.</td></tr>
+                <tr><td>Faux Pas</td><td>You must discard one Painting you own (or your next Painting won, if you don't have one yet).</td></tr>
+                <tr><td>Passe</td><td>&minus;5 points off your final total.</td></tr>
+                <tr><td>Scandale <span class="green-dot-label" title="Green card"></span></td><td>Halves your entire final score.</td></tr>
+              </tbody>
+            </table>
+            <p class="hint">Green cards can end the game early: once the 4th green card is revealed, the game stops right there, even if cards remain.</p>
+          </div>
+        </details>
+
+        <label>Total seats
+          <input type="number" id="host-seats" min="2" max="5" value="3">
+        </label>
+
+        <fieldset class="bot-mix">
+          <legend>Fill seats with bots (optional)</legend>
+          <div class="bot-row">
+            <label>Pass bot <input type="number" id="bot-pass" min="0" max="4" value="0"></label>
+            <label>Greedy bot <input type="number" id="bot-greedy" min="0" max="4" value="1"></label>
+            <label>Capped-greedy bot <input type="number" id="bot-capped" min="0" max="4" value="0"></label>
+          </div>
+          <p class="hint">At least one seat must be left for a human (you).</p>
+        </fieldset>
+
+        <details class="advanced">
+          <summary>Advanced</summary>
+          <label>Seed (optional, for a reproducible game)
+            <input type="number" id="host-seed" placeholder="random">
+          </label>
+          <label>Bot think time (seconds)
+            <input type="number" id="host-think-time" min="0" step="0.1" value="1">
+          </label>
+        </details>
+
+        <button id="btn-create-game" class="primary">Host Game</button>
+        <p id="host-error" class="error hidden"></p>
+      </div>
+    </section>
+
+    <!-- ===================== JOIN / LOBBY ===================== -->
+    <section id="screen-join" class="screen hidden">
+      <div class="card panel">
+        <h2>Join this game</h2>
+        <p class="muted">Share this page's link with friends on your LAN — they join the same way.</p>
+
+        <details class="advanced how-to-play">
+          <summary>New to High Society? How to play</summary>
+          <div class="how-to-play-body">
+            <p>
+              <strong>Goal:</strong> end the game with the most points — but there's a catch.
+              When the game ends, whoever has the <strong>least money left</strong> is eliminated
+              from winning entirely (unless there's a tie for least, or only one player is left).
+              Only then, among whoever remains, does the highest score win. Ties are possible.
+              So hoarding money matters just as much as winning cards.
+            </p>
+
+            <p>Each round, one card is revealed and auctioned off. There are two opposite kinds of auction — this is the single most important thing to understand:</p>
+
+            <dl class="auction-types">
+              <dt>Normal auction <span class="hint">— Paintings, the Prestige Card</span></dt>
+              <dd>Players take turns raising the bid using their money cards (you can combine several into one bid). Whoever won't raise further passes and is out. The last player still in wins the card — and actually pays their bid.</dd>
+
+              <dt>Disgrace auction <span class="hint">— Faux Pas, Passe, Scandale</span></dt>
+              <dd>Same turn-based bidding, but the <strong>first player to pass is the one stuck taking the card</strong>. Everyone else who raised trying to avoid it forfeits that money anyway, for nothing. So here you actually want to bail out early — but bailing out is what makes you take the bad card.</dd>
+            </dl>
+
+            <p class="hint">Money cards are locked in once committed to a bid — you can add more on a later turn to raise, but can't take any back until the auction resolves (unspent bids are returned if you don't win).</p>
+
+            <table class="card-types-table">
+              <thead><tr><th>Card</th><th>Effect</th></tr></thead>
+              <tbody>
+                <tr><td>Painting</td><td>Worth its printed value (1–10) in points.</td></tr>
+                <tr><td>Prestige Card <span class="green-dot-label" title="Green card"></span></td><td>Doubles your entire final score.</td></tr>
+                <tr><td>Faux Pas</td><td>You must discard one Painting you own (or your next Painting won, if you don't have one yet).</td></tr>
+                <tr><td>Passe</td><td>&minus;5 points off your final total.</td></tr>
+                <tr><td>Scandale <span class="green-dot-label" title="Green card"></span></td><td>Halves your entire final score.</td></tr>
+              </tbody>
+            </table>
+            <p class="hint">Green cards can end the game early: once the 4th green card is revealed, the game stops right there, even if cards remain.</p>
+          </div>
+        </details>
+
+        <div id="lobby-status" class="lobby-status"></div>
+
+        <div id="join-form">
+          <label>Username <input type="text" id="join-username" placeholder="e.g. alex" autocomplete="off"></label>
+          <label>Display name <input type="text" id="join-name" placeholder="e.g. Alex" autocomplete="off"></label>
+          <button id="btn-join" class="primary">Join Game</button>
+          <p id="join-error" class="error hidden"></p>
+        </div>
+
+        <div id="join-waiting" class="hidden">
+          <p>✅ You're in! Waiting for the rest of the table…</p>
+        </div>
+
+        <button id="btn-spectate-link" class="secondary standalone">Watch as a spectator instead</button>
+      </div>
+    </section>
+
+    <!-- ===================== SPECTATE JOIN ===================== -->
+    <section id="screen-spectate-join" class="screen hidden">
+      <div class="card panel">
+        <h2>Watch this game</h2>
+        <label>Your name <input type="text" id="spectate-name" placeholder="e.g. Sam" autocomplete="off"></label>
+        <label>Username <input type="text" id="spectate-username" placeholder="e.g. sam" autocomplete="off"></label>
+        <button id="btn-spectate-join" class="primary">Watch</button>
+        <p id="spectate-error" class="error hidden"></p>
+        <button id="btn-back-to-join" class="secondary standalone">Back</button>
+      </div>
+    </section>
+
+    <!-- ===================== GAME TABLE ===================== -->
+    <section id="screen-game" class="screen hidden">
+      <div class="table-layout">
+        <div class="center-col">
+          <div class="card panel auction-panel">
+            <div class="auction-header">
+              <span id="round-label" class="muted"></span>
+              <span id="turn-label" class="turn-label"></span>
+              <span class="card-info-wrap">
+                <button type="button" id="card-info-btn" class="card-info-btn hidden" aria-label="How does this card's auction work?" onclick="document.getElementById('card-info-popover').classList.toggle('hidden')">ⓘ</button>
+                <div id="card-info-popover" class="card-info-popover hidden">
+                  <div class="card-info-popover-header">
+                    <strong id="card-info-title"></strong>
+                    <button type="button" class="card-info-close" aria-label="Close" onclick="document.getElementById('card-info-popover').classList.add('hidden')">×</button>
+                  </div>
+                  <p id="card-info-text"></p>
+                </div>
+              </span>
+            </div>
+            <div class="auction-stage">
+              <div id="auction-card" class="auction-card-slot"></div>
+              <div id="event-toast" class="event-toast"></div>
+            </div>
+            <div class="bid-block">
+              <span class="bid-label">Current Highest Bid</span>
+              <span id="max-bid" class="bid-value">0</span>
+            </div>
+          </div>
+
+          <div id="move-panel" class="card panel move-panel hidden">
+            <div class="move-panel-inner">
+              <div id="bid-controls">
+                <h3>Your move</h3>
+                <div class="bid-status">
+                  <span>Your bid so far: <strong id="my-current-bid">0</strong></span>
+                  <span id="bid-need-more" class="hint"></span>
+                </div>
+                <div id="my-money-cards" class="chip-row"></div>
+                <div class="bid-readout">Adding: <strong id="selected-bid">0</strong> → new total <strong id="new-total-bid">0</strong></div>
+                <div class="button-row">
+                  <button id="btn-place-bid" class="primary">Place Bid</button>
+                  <button id="btn-pass" class="secondary">Pass</button>
+                  <button id="btn-quit" class="danger">Quit</button>
+                </div>
+                <p id="move-error" class="error hidden"></p>
+              </div>
+              <div id="discard-controls" class="hidden">
+                <h3>Faux Pas — discard a painting</h3>
+                <div id="my-paintings" class="chip-row"></div>
+              </div>
+            </div>
+            <div class="move-panel-overlay">Waiting for other players…</div>
+          </div>
+
+          <details class="card panel log-details">
+            <summary>Game log (advanced)</summary>
+            <div id="game-log" class="log"></div>
+          </details>
+
+          <div class="card panel">
+            <h3>Table Chat</h3>
+            <div id="player-chat-log" class="log"></div>
+            <div class="button-row">
+              <input type="text" id="player-chat-input" placeholder="Say something…" maxlength="300">
+              <button id="btn-player-chat-send" class="secondary">Send</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="side-col">
+          <div class="card panel">
+            <h3>You — <span id="my-username-label"></span></h3>
+            <div>Points: <strong id="my-points">0</strong></div>
+            <div id="my-status-cards" class="chip-row small"></div>
+          </div>
+
+          <div class="card panel">
+            <div class="panel-header-row">
+              <h3>Opponents</h3>
+              <label class="reveal-toggle">
+                <input type="checkbox" id="reveal-cards-toggle">
+                Reveal cards
+              </label>
+            </div>
+            <div id="opponents-list"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== SPECTATOR VIEW ===================== -->
+    <section id="screen-spectate" class="screen hidden">
+      <div class="table-layout">
+        <div class="center-col">
+          <div class="card panel auction-panel">
+            <div class="auction-header">
+              <span id="spec-round-label" class="muted"></span>
+              <span id="spec-turn-label" class="turn-label"></span>
+              <span class="card-info-wrap">
+                <button type="button" id="spec-card-info-btn" class="card-info-btn hidden" aria-label="How does this card's auction work?" onclick="document.getElementById('spec-card-info-popover').classList.toggle('hidden')">ⓘ</button>
+                <div id="spec-card-info-popover" class="card-info-popover hidden">
+                  <div class="card-info-popover-header">
+                    <strong id="spec-card-info-title"></strong>
+                    <button type="button" class="card-info-close" aria-label="Close" onclick="document.getElementById('spec-card-info-popover').classList.add('hidden')">×</button>
+                  </div>
+                  <p id="spec-card-info-text"></p>
+                </div>
+              </span>
+            </div>
+            <div class="auction-stage">
+              <div id="spec-auction-card" class="auction-card-slot"></div>
+              <div id="spec-event-toast" class="event-toast"></div>
+            </div>
+            <div class="bid-block">
+              <span class="bid-label">Current Highest Bid</span>
+              <span id="spec-max-bid" class="bid-value">0</span>
+            </div>
+          </div>
+
+          <details class="card panel log-details">
+            <summary>Game log (advanced)</summary>
+            <div id="spec-game-log" class="log"></div>
+          </details>
+
+          <div class="card panel">
+            <h3>Chat</h3>
+            <div id="spec-chat-log" class="log"></div>
+            <label class="reveal-toggle chat-target-toggle">
+              <input type="checkbox" id="spec-chat-target-toggle">
+              Spectators only (hide from players)
+            </label>
+            <div class="button-row">
+              <input type="text" id="spec-chat-input" placeholder="Message everyone…">
+              <button id="btn-spec-chat-send" class="secondary">Send</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="side-col">
+          <div class="card panel">
+            <div class="panel-header-row">
+              <h3>Players</h3>
+              <label class="reveal-toggle">
+                <input type="checkbox" id="spec-reveal-cards-toggle">
+                Reveal cards
+              </label>
+            </div>
+            <div id="spec-players-list"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== FINISHED ===================== -->
+    <section id="screen-finished" class="screen hidden">
+      <div class="card panel finished-panel">
+        <div id="finished-trophy" class="finished-trophy">🏆</div>
+        <h2 id="finished-headline">Game over</h2>
+        <div id="standings-table"></div>
+        <details class="advanced winner-rule-info">
+          <summary>How is the winner decided?</summary>
+          <p class="hint">
+            First, anyone with the least money left is eliminated from winning — unless there's a
+            tie for least, or only one player is left standing. Among whoever remains, the highest
+            total points wins (a painting's value, plus a Passe's −5, all multiplied together by
+            any Prestige/Scandale cards held). Ties are possible and are left as ties.
+          </p>
+        </details>
+        <button id="btn-new-game" class="primary">Host a New Game</button>
+      </div>
+    </section>
+
+    <section id="screen-loading" class="screen">
+      <p class="muted">Loading…</p>
+    </section>
+
+  </main>
+
+  <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>
