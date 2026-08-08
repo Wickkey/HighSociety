@@ -137,7 +137,11 @@ def test_create_status_and_config_endpoints(running_web_server):
     assert body["state"] == "lobby"
     assert body["visibility"] == "public"  # default
     assert body["human_seats"] == 1
-    assert body["joined"] == [{"username": "pass1", "name": "Pass1", "is_bot": True}]
+    # Bot names are randomly assigned (see highsociety/code/ai/bot_names.py),
+    # not a fixed "pass1" pattern — just check the shape.
+    assert len(body["joined"]) == 1
+    assert body["joined"][0]["is_bot"] is True
+    assert body["joined"][0]["name"].lower() == body["joined"][0]["username"]
     room_code = body["room_code"]
     assert room_code
 
@@ -192,6 +196,47 @@ def test_create_game_validates_and_normalizes_turn_time_limit(running_web_server
         "/api/create_game", json={"seats": 2, "bot_mix": ["pass"]}
     ).get_json()
     assert no_limit_specified["turn_time_limit"] is None
+
+
+def test_add_bot_fills_an_empty_seat_and_can_start_the_game(running_web_server):
+    client = web_server.app.test_client()
+
+    room = client.post("/api/create_game", json={"seats": 2, "bot_mix": []}).get_json()
+    room_code = room["room_code"]
+    assert room["human_seats"] == 2
+    assert room["joined"] == []
+
+    resp = client.post("/api/add_bot", json={"room": room_code, "bot_type": "greedy"})
+    assert resp.status_code == 200
+    body = resp.get_json()
+    assert body["human_seats"] == 1  # one seat converted from human to bot
+    assert len(body["joined"]) == 1
+    assert body["joined"][0]["is_bot"] is True
+    # Bot names are randomly assigned, not hardcoded — just check the shape.
+    assert body["joined"][0]["name"].lower() == body["joined"][0]["username"]
+    assert web_server._rooms[room_code].state == "lobby"  # still one seat open
+
+    # An unknown bot type is rejected.
+    bad = client.post("/api/add_bot", json={"room": room_code, "bot_type": "nope"})
+    assert bad.status_code == 400
+
+    # A bad room code is rejected.
+    missing = client.post("/api/add_bot", json={"room": "NOPE", "bot_type": "greedy"})
+    assert missing.status_code == 404
+
+    # Filling the last seat with a bot starts the game immediately, same as
+    # a human filling it would.
+    resp2 = client.post("/api/add_bot", json={"room": room_code, "bot_type": "pass"})
+    assert resp2.status_code == 200
+    deadline = time.time() + 10
+    room_obj = web_server._rooms[room_code]
+    while time.time() < deadline and room_obj.state == "lobby":
+        threading.Event().wait(0.1)
+    assert room_obj.state in ("starting", "in_progress", "finished")
+
+    # No seats left — the next add_bot attempt is rejected.
+    full = client.post("/api/add_bot", json={"room": room_code, "bot_type": "greedy"})
+    assert full.status_code == 409
 
     # 0/blank means "no limit", not "instant timeout" — the lobby form's
     # placeholder is "no limit" for an empty field, which the frontend sends

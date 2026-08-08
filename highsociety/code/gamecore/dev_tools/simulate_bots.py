@@ -15,20 +15,9 @@ Usage:
 import argparse
 
 from highsociety.code.gamecore.game_manager.gameplay import PlayGame
-from highsociety.code.ai import BOT_TYPES
+from highsociety.code.ai import BOT_TYPES, create_bot_players
 
 DEFAULT_BOT_MIX = ["greedy", "capped", "pass", "capped", "capped"]
-
-
-def build_players(bot_mix: list, think_time: float) -> list:
-    players = []
-    counts = {}
-    for bot_type in bot_mix:
-        counts[bot_type] = counts.get(bot_type, 0) + 1
-        username = f"{bot_type}{counts[bot_type]}"
-        cls = BOT_TYPES[bot_type]
-        players.append(cls(name=username.capitalize(), username=username, think_time=think_time))
-    return players
 
 
 def main():
@@ -46,7 +35,7 @@ def main():
     if unknown:
         parser.error(f"Unknown bot type(s) {sorted(unknown)}; choose from {list(BOT_TYPES)}")
 
-    players = build_players(bot_mix, args.think_time)
+    players = create_bot_players(bot_mix, think_time=args.think_time)
     game = PlayGame(players=players, mode="cli", seed=args.seed)
     game.play_game()
 

@@ -149,13 +149,13 @@ let game = null;
 let currentRoomCode = null;
 let roomsPollTimer = null;
 
-// Whether to show opponents' actual won cards/points, or keep them hidden
-// behind card-backs — off by default (per user preference: keeping
-// opponents' progress hidden makes the game more interesting), persisted
-// per-browser so it doesn't reset every game.
-let revealCards = localStorage.getItem('hs_reveal_cards') === '1';
-
-function resetGameState(myUsername) {
+// Whether opponents' actual won cards/points are shown, or kept hidden
+// behind card-backs, and whether the game-log panel is shown at all — both
+// are host-time settings (see host-reveal-cards/host-show-logs in the
+// lobby form), fixed for the whole table once the game starts rather than
+// a per-player runtime toggle. `status` is whatever /api/status last said
+// about this room; defaults to "on" if not known yet.
+function resetGameState(myUsername, status) {
   game = {
     round: 0,
     card: null,
@@ -167,7 +167,21 @@ function resetGameState(myUsername) {
     myStatusCards: [],
     selectedBid: new Set(),
     opponents: {}, // username -> {name, statusCards: [], active: true, outOfAuction: false}
+    revealCards: status ? status.reveal_cards !== false : true,
+    showLogs: status ? status.show_logs !== false : true,
   };
+  applyRoomDisplaySettings();
+}
+
+// Reflects the room's fixed reveal-cards/show-logs settings in the UI: a
+// read-only status label (there's no toggle anymore — see resetGameState)
+// and hiding the log panel entirely when the host turned it off.
+function applyRoomDisplaySettings() {
+  const label = game.revealCards ? 'Cards revealed' : 'Cards hidden';
+  $('reveal-cards-status').textContent = label;
+  $('spec-reveal-cards-status').textContent = label;
+  $('game-log').closest('details').classList.toggle('hidden', !game.showLogs);
+  $('spec-game-log').closest('details').classList.toggle('hidden', !game.showLogs);
 }
 
 function seedOpponents(status, myUsername) {
@@ -338,6 +352,54 @@ function stopPolling() {
   if (statusPollTimer) { clearInterval(statusPollTimer); statusPollTimer = null; }
 }
 
+// Separate from the main status poll (which onJoin() stops the moment you
+// connect — see connectPlayerSocket) because "waiting in the lobby after
+// joining" is a distinct phase: nothing about the shared game/opponents
+// state has started yet, but you still want to see the seat count update
+// live as other people join, and to know when there's still an empty seat
+// worth filling with a bot (see onAddBot). Self-cancels once the room
+// leaves "lobby" (game started), so it never runs for the rest of the game.
+let waitingRoomPollTimer = null;
+
+function startWaitingRoomPolling() {
+  if (waitingRoomPollTimer) return;
+  waitingRoomPollTimer = setInterval(async () => {
+    let status;
+    try {
+      status = await fetchJSON(`/api/status?room=${encodeURIComponent(currentRoomCode)}`);
+    } catch (e) {
+      return;
+    }
+    if (!status.exists || status.state !== 'lobby') {
+      stopWaitingRoomPolling();
+      return;
+    }
+    const names = status.joined.map((p) => `${p.name}${p.is_bot ? ' 🤖' : ''}`).join(', ') || 'nobody yet';
+    $('lobby-status').textContent = `Seats filled: ${status.joined.length}/${status.seats} — ${names}`;
+  }, 1500);
+}
+function stopWaitingRoomPolling() {
+  if (waitingRoomPollTimer) { clearInterval(waitingRoomPollTimer); waitingRoomPollTimer = null; }
+}
+
+async function onAddBot() {
+  hide($('add-bot-error'));
+  const botType = $('waiting-bot-type').value;
+  try {
+    await fetchJSON('/api/add_bot', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ room: currentRoomCode, bot_type: botType }),
+    });
+    // The waiting-room poll (already running — see startWaitingRoomPolling)
+    // picks up the new seat count on its own next tick; if this bot filled
+    // the last seat, the game itself starts server-side and this player's
+    // already-open WebSocket starts receiving real game messages naturally.
+  } catch (e) {
+    showError($('add-bot-error'), e.message);
+  }
+}
+
 function renderLobby(status) {
   showScreen('screen-join');
   $('join-form').classList.remove('hidden');
@@ -354,7 +416,14 @@ function renderLobby(status) {
 
 function renderFinished(status) {
   showScreen('screen-finished');
-  const standings = (status.final_standings || []).slice().sort((a, b) => b.points - a.points);
+  // The money-eliminated player (see gameplay.py's determine_winner —
+  // distinct from simply "didn't have the highest score") was never in
+  // contention at all, so they're sorted to the very bottom regardless of
+  // points; everyone else sorts by points as before.
+  const standings = (status.final_standings || []).slice().sort((a, b) => {
+    if (!!a.eliminated !== !!b.eliminated) return a.eliminated ? 1 : -1;
+    return b.points - a.points;
+  });
   const winners = new Set(status.winners || []);
 
   const trophy = $('finished-trophy');
@@ -377,8 +446,10 @@ function renderFinished(status) {
 
   const rows = standings.map((s, i) => {
     const isWinner = winners.has(s.username);
-    const state = isWinner ? 'winner' : (s.active === false ? 'inactive' : 'lost');
-    const tag = isWinner ? ' 🏆' : (s.active === false ? ' (left the game)' : '');
+    const state = isWinner ? 'winner' : s.eliminated ? 'eliminated' : (s.active === false ? 'inactive' : 'lost');
+    const tag = isWinner ? ' 🏆'
+      : s.eliminated ? ' (least money — out of contention)'
+      : (s.active === false ? ' (left the game)' : '');
     return `
     <div class="standing-row ${state}" style="animation-delay: ${i * 90}ms">
       <span class="name">${escapeHtml(s.username)}${tag}</span>
@@ -394,6 +465,7 @@ function renderFinished(status) {
 function wireStaticHandlers() {
   $('btn-create-game').addEventListener('click', onCreateGame);
   $('btn-join-by-code').addEventListener('click', onJoinByCode);
+  $('btn-add-bot').addEventListener('click', onAddBot);
   $('btn-join').addEventListener('click', onJoin);
   $('btn-spectate-link').addEventListener('click', () => showScreen('screen-spectate-join'));
   $('btn-back-to-join').addEventListener('click', () => { showScreen('screen-join'); refreshStatus(); });
@@ -409,18 +481,6 @@ function wireStaticHandlers() {
   });
   $('btn-player-chat-send').addEventListener('click', onPlayerChatSend);
   $('player-chat-input').addEventListener('keydown', (e) => { if (e.key === 'Enter') onPlayerChatSend(); });
-
-  $('reveal-cards-toggle').checked = revealCards;
-  $('spec-reveal-cards-toggle').checked = revealCards;
-  const onRevealToggle = (e) => {
-    revealCards = e.target.checked;
-    localStorage.setItem('hs_reveal_cards', revealCards ? '1' : '0');
-    $('reveal-cards-toggle').checked = revealCards;
-    $('spec-reveal-cards-toggle').checked = revealCards;
-    if (game) { renderOpponents(false); renderOpponents(true); }
-  };
-  $('reveal-cards-toggle').addEventListener('change', onRevealToggle);
-  $('spec-reveal-cards-toggle').addEventListener('change', onRevealToggle);
 
   window.addEventListener('beforeunload', (e) => {
     if (ws && ws.readyState === WebSocket.OPEN && game && game.round > 0) {
@@ -450,6 +510,8 @@ async function onCreateGame() {
     bot_think_time: parseFloat($('host-think-time').value || '1'),
     visibility: $('host-visibility-private').checked ? 'private' : 'public',
     turn_time_limit: turnTimeRaw ? parseFloat(turnTimeRaw) : null,
+    reveal_cards: $('host-reveal-cards').checked,
+    show_logs: $('host-show-logs').checked,
   };
   try {
     const status = await fetchJSON('/api/create_game', {
@@ -490,7 +552,7 @@ function onJoin() {
   if (!username) { showError($('join-error'), 'Username is required.'); return; }
   pendingJoin = { username, name };
   stopPolling();
-  resetGameState(username);
+  resetGameState(username, lastStatus);
   if (lastStatus) seedOpponents(lastStatus, username);
   connectPlayerSocket();
 }
@@ -515,6 +577,7 @@ function handlePlayerMessage(msg) {
       $('join-form').classList.add('hidden');
       $('join-waiting').classList.remove('hidden');
       setBadge(`playing as ${game.myUsername}`);
+      startWaitingRoomPolling();
       break;
     default:
       applyGameMessage(msg, false);
@@ -530,16 +593,27 @@ function onSpectateJoin() {
   if (!name || !username) { showError($('spectate-error'), 'Both fields are required.'); return; }
   pendingSpectate = { username, name };
   stopPolling();
-  resetGameState(null);
+  resetGameState(null, lastStatus);
   fetchJSON(`/api/status?room=${encodeURIComponent(currentRoomCode)}`)
-    .then((status) => seedOpponents(status, null)).catch(() => {});
+    .then((status) => {
+      seedOpponents(status, null);
+      game.revealCards = status.reveal_cards !== false;
+      game.showLogs = status.show_logs !== false;
+      applyRoomDisplaySettings();
+    }).catch(() => {});
   connectSpectatorSocket();
 }
 
 function connectSpectatorSocket() {
   ws = new WebSocket(wsUrl(`/ws_spectate?room=${encodeURIComponent(currentRoomCode)}`));
   ws.onmessage = (evt) => handleSpectatorMessage(JSON.parse(evt.data));
-  ws.onclose = () => { ws = null; };
+  // The server closes every spectator's connection right after the game
+  // ends (see GameRoom.run_game in web_server.py) — same signal the player
+  // side already uses (onJoin's connectPlayerSocket) to notice the game
+  // finished and switch to the results screen. This was previously a no-op
+  // here, so a spectator's browser just sat on the live table forever after
+  // the game actually ended, never showing results at all.
+  ws.onclose = () => { ws = null; refreshStatus(); };
   showScreen('screen-spectate');
   setBadge('spectating');
 }
@@ -649,7 +723,7 @@ function applyGameMessage(msg, isSpectator) {
           const o = ensureOpponent(d.player);
           o.statusCards = o.statusCards.filter((c) => c.value !== d.discarded_value);
           renderOpponents(isSpectator);
-          enqueueEvent(isSpectator, revealCards
+          enqueueEvent(isSpectator, game.revealCards
             ? `${d.player} discarded ${d.discarded_value}`
             : `${d.player} discarded a painting`, 'disgrace');
         }
@@ -941,13 +1015,13 @@ function renderOpponents(isSpectator) {
     if (isCurrentTurn) classes.push('current-turn');
     row.className = classes.join(' ');
 
-    const ptsLabel = revealCards ? `Points: ${computePoints(o.statusCards)}` : `${o.statusCards.length} card${o.statusCards.length === 1 ? '' : 's'}`;
+    const ptsLabel = game.revealCards ? `Points: ${computePoints(o.statusCards)}` : `${o.statusCards.length} card${o.statusCards.length === 1 ? '' : 's'}`;
     row.querySelector('.name').textContent = `${o.name}${o.active === false ? ' (out)' : ''}`;
     row.querySelector('.pts').textContent = ptsLabel;
 
     const chips = row.querySelector('.chip-row');
     chips.innerHTML = '';
-    o.statusCards.forEach((c) => chips.appendChild(revealCards ? cardEl(c) : cardBackEl()));
+    o.statusCards.forEach((c) => chips.appendChild(game.revealCards ? cardEl(c) : cardBackEl()));
   });
 
   container.querySelectorAll('.opponent-row').forEach((row) => {

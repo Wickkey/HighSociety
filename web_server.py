@@ -28,7 +28,7 @@ from typing import Optional
 from flask import Flask, jsonify, render_template, request
 from flask_sock import Sock
 
-from highsociety.code.ai import BOT_TYPES
+from highsociety.code.ai import BOT_TYPES, create_bot_players
 from highsociety.code.common.logger_module.logger.logging_manager import LoggingManager, LogType
 from highsociety.code.common.utils.network_utility import get_local_ip
 from highsociety.code.common.utils.utility import (
@@ -41,7 +41,6 @@ from highsociety.code.gamecore.game_manager.gameplay import PlayGame
 from highsociety.code.gamecore.network.transport import WebSocketTransport
 from highsociety.code.gamecore.player.networkplayer import NetworkPlayer
 from highsociety.code.gamecore.player.networkspectator import NetworkSpectator
-from main import create_bot_players
 
 WEB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "highsociety", "web")
 
@@ -66,7 +65,8 @@ class GameRoom:
     """
 
     def __init__(self, room_code: str, seats: int, bot_mix: list[str], seed: Optional[int],
-                 bot_think_time: float, visibility: str, turn_time_limit: Optional[float] = None):
+                 bot_think_time: float, visibility: str, turn_time_limit: Optional[float] = None,
+                 reveal_cards: bool = True, show_logs: bool = True):
         self.room_code = room_code
         self.game_id = generate_game_id()
         self.seats = seats
@@ -75,6 +75,12 @@ class GameRoom:
         self.bot_think_time = bot_think_time
         self.visibility = visibility  # "public" | "private"
         self.turn_time_limit = turn_time_limit  # seconds per move, or None for no limit
+        # Fixed for the whole table at creation time — the frontend has no
+        # runtime toggle for either of these anymore (see app.js's
+        # resetGameState), just a read-only status label reflecting whatever
+        # the host picked.
+        self.reveal_cards = reveal_cards
+        self.show_logs = show_logs
 
         self.players = create_bot_players(bot_mix, bot_think_time) if bot_mix else []
         self.human_seats = seats - len(self.players)
@@ -154,7 +160,8 @@ def _generate_room_code() -> str:
 
 
 def _create_room(seats: int, bot_mix: list[str], seed: Optional[int], bot_think_time: float,
-                  visibility: str, turn_time_limit: Optional[float] = None) -> GameRoom:
+                  visibility: str, turn_time_limit: Optional[float] = None,
+                  reveal_cards: bool = True, show_logs: bool = True) -> GameRoom:
     with _rooms_lock:
         for _ in range(20):
             code = _generate_room_code()
@@ -166,7 +173,8 @@ def _create_room(seats: int, bot_mix: list[str], seed: Optional[int], bot_think_
             code = "".join(random.choices(_ROOM_CODE_ALPHABET, k=_ROOM_CODE_LENGTH * 2))
         room = GameRoom(room_code=code, seats=seats, bot_mix=bot_mix, seed=seed,
                          bot_think_time=bot_think_time, visibility=visibility,
-                         turn_time_limit=turn_time_limit)
+                         turn_time_limit=turn_time_limit, reveal_cards=reveal_cards,
+                         show_logs=show_logs)
         _rooms[code] = room
         return room
 
@@ -317,8 +325,14 @@ def api_create_game():
         if turn_time_limit <= 0:
             turn_time_limit = None  # 0/blank means "no limit", not "instant timeout"
 
+    reveal_cards = body.get("reveal_cards", True)
+    show_logs = body.get("show_logs", True)
+    if not isinstance(reveal_cards, bool) or not isinstance(show_logs, bool):
+        return jsonify({"error": "reveal_cards and show_logs must be booleans"}), 400
+
     room = _create_room(seats=seats, bot_mix=bot_mix, seed=seed, bot_think_time=bot_think_time,
-                         visibility=visibility, turn_time_limit=turn_time_limit)
+                         visibility=visibility, turn_time_limit=turn_time_limit,
+                         reveal_cards=reveal_cards, show_logs=show_logs)
     return jsonify(_status_payload(room))
 
 
@@ -335,6 +349,8 @@ def _status_payload(room: Optional[GameRoom]) -> dict:
         "human_seats": room.human_seats,
         "bot_mix": room.bot_mix,
         "turn_time_limit": room.turn_time_limit,
+        "reveal_cards": room.reveal_cards,
+        "show_logs": room.show_logs,
         "joined": room.joined_summary(),
     }
     if room.state == "finished" and room.game is not None:
@@ -371,6 +387,42 @@ def api_rooms():
         ]
     rooms.sort(key=lambda r: r["room_code"])
     return jsonify({"rooms": rooms})
+
+
+@app.route("/api/add_bot", methods=["POST"])
+def api_add_bot():
+    """
+    Lets anyone already waiting in a room's lobby fill an empty seat with a
+    bot — e.g. one friend backs out at the last minute and nobody wants to
+    wait around for a replacement. Same effect as configuring more bots at
+    creation time, just usable after the room already exists.
+    """
+    body = request.get_json(silent=True) or {}
+    room = _get_room(body.get("room"))
+    if room is None:
+        return jsonify({"error": "No such room."}), 404
+
+    bot_type = body.get("bot_type")
+    if bot_type not in BOT_TYPES:
+        return jsonify({"error": f"Unknown bot type; choose from {list(BOT_TYPES)}"}), 400
+
+    with room.lock:
+        if room.state != "lobby":
+            return jsonify({"error": "This game has already started."}), 409
+        if len(room.players) >= room.seats:
+            return jsonify({"error": "The room is already full."}), 409
+
+        taken_usernames = {p.username for p in room.players}
+        bot = create_bot_players([bot_type], think_time=room.bot_think_time, taken_usernames=taken_usernames)[0]
+        room.players.append(bot)
+        room.bot_mix.append(bot_type)
+        room.human_seats -= 1  # this seat is no longer reserved for a human
+        room.touch()
+
+    if room.try_start():
+        room.run_game()
+
+    return jsonify(_status_payload(room))
 
 
 def _relay_player_chat(username: str, room: GameRoom, msg: dict) -> None:

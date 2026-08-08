@@ -484,19 +484,14 @@ if __name__ == '__main__':
 
     bot_players = []
     if args.bots:
-        from highsociety.code.ai import BOT_TYPES
+        from highsociety.code.ai import BOT_TYPES, create_bot_players
         bot_mix = [b.strip() for b in args.bots.split(',') if b.strip()]
         unknown = set(bot_mix) - set(BOT_TYPES)
         if unknown:
             parser.error(f"Unknown bot type(s) {sorted(unknown)}; choose from {list(BOT_TYPES)}")
         if len(bot_mix) > args.players:
             parser.error(f"--bots has {len(bot_mix)} entries but --players is only {args.players}")
-        counts = {}
-        for bot_type in bot_mix:
-            counts[bot_type] = counts.get(bot_type, 0) + 1
-            username = f"{bot_type}{counts[bot_type]}"
-            bot_players.append(BOT_TYPES[bot_type](name=username.capitalize(), username=username,
-                                                     think_time=args.bot_think_time))
+        bot_players = create_bot_players(bot_mix, think_time=args.bot_think_time)
 
     start_server(host=args.host, port=args.port, num_players=args.players, seed=args.seed,
                  record_path=args.record, bot_players=bot_players)

@@ -281,7 +281,10 @@ class PlayGame():
             # Numeric bids
             bid_value = player.current_bid_value + sum(bids)
             if bid_value <= max_bid:
-                player.send_message(f"⚠️ Your bid must exceed the current highest bid ({max_bid}). Try again.", message_type = "INPUT_ERROR")
+                needed = max_bid - player.current_bid_value + 1
+                player.send_message(
+                    f"⚠️ Insufficient bid — add at least {needed} more to beat the current highest bid ({max_bid}).",
+                    message_type = "INPUT_ERROR")
                 continue
 
             # Place bid
@@ -556,7 +559,8 @@ class PlayGame():
             self.host.send_message("No Winners for this game.")
             self.winners = []
             self.final_standings = [
-                {"username": p.username, "points": player_points[i], "money_left": player_money_left[i], "active": p.active}
+                {"username": p.username, "points": player_points[i], "money_left": player_money_left[i],
+                 "active": p.active, "eliminated": False}
                 for i, p in enumerate(self.players)
             ]
             return None
@@ -564,12 +568,19 @@ class PlayGame():
         # Step 2: Eliminate the active player with the least money, unless
         # there's a tie for least (nobody eliminated) or only one active
         # player remains (nobody left to compare against, so they win outright).
+        # eliminated_idx records *which* player this rule knocked out (if
+        # any) — distinct from simply "not a winner" (someone can lose on
+        # points alone without ever being money-eliminated) — so a UI can
+        # show that specific player as the one who was out of contention
+        # entirely, e.g. sorted to the bottom of a standings list.
+        eliminated_idx = None
         if len(active_indices) > 1:
             min_money = min(player_money_left[i] for i in active_indices)
             lowest_money_indices = [i for i in active_indices if player_money_left[i] == min_money]
 
             if len(lowest_money_indices) == 1:
-                winner_candidates[lowest_money_indices[0]] = False
+                eliminated_idx = lowest_money_indices[0]
+                winner_candidates[eliminated_idx] = False
 
         # Step 3: From remaining candidates, find the highest point(s)
         remaining_points = [player_points[i] if winner_candidates[i] else float('-inf') 
@@ -583,7 +594,8 @@ class PlayGame():
 
         # Step 5: Announce results
         self.final_standings = [
-            {"username": p.username, "points": player_points[idx], "money_left": player_money_left[idx], "active": p.active}
+            {"username": p.username, "points": player_points[idx], "money_left": player_money_left[idx],
+             "active": p.active, "eliminated": idx == eliminated_idx}
             for idx, p in enumerate(self.players)
         ]
         self.winners = winners
@@ -607,7 +619,7 @@ class PlayGame():
 
         return winners
 
-    def countdown_to_start(self, countdown: int = 5) -> None:
+    def countdown_to_start(self, countdown: int = 3) -> None:
         for remaining in range(countdown, 0, -1):
             self.host.send_message(f"⏳  Game starting in {remaining}...")
             time.sleep(1)
@@ -617,8 +629,10 @@ class PlayGame():
 
 
     def play_game(self):
-        # 5-second countdown
-        self.countdown_to_start(countdown=5)
+        # Brief countdown so every player's screen has a moment to render
+        # before the first auction starts, without making everyone wait long
+        # after the last seat just filled.
+        self.countdown_to_start(countdown=3)
 
         
         LoggingManager.info("Game Started..")

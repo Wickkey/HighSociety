@@ -38,7 +38,8 @@
               <strong>Goal:</strong> End the game with the most points — but there's a catch.
               When the game ends, whoever has the <strong>least money left</strong> is eliminated
               from winning entirely (unless there's a tie for least, or only one player is left).
-              Only then, among whoever remains, does the highest score win. Ties are possible.
+              Only then, among whoever remains, does the highest score win. If two or more players
+              tie for the highest score, they all win together — there's no tiebreaker.
               So hoarding money matters just as much as winning cards.
             </p>
 
@@ -75,8 +76,8 @@
         <fieldset class="bot-mix">
           <legend>Who can join?</legend>
           <div class="bot-row">
-            <label class="radio-label"><input type="radio" name="host-visibility" id="host-visibility-public" value="public" checked> Public — listed for anyone to join</label>
-            <label class="radio-label"><input type="radio" name="host-visibility" id="host-visibility-private" value="private"> Private — only joinable with the room code</label>
+            <label class="radio-label"><input type="radio" name="host-visibility" id="host-visibility-public" value="public" checked> Public - Anyone can join</label>
+            <label class="radio-label"><input type="radio" name="host-visibility" id="host-visibility-private" value="private"> Private - Requires room code</label>
           </div>
         </fieldset>
 
@@ -102,6 +103,12 @@
             <input type="number" id="host-turn-time" min="0" step="1" placeholder="no limit">
           </label>
           <p class="hint">Leave blank for no timer. If set, each player gets this many seconds per bid/pass before they're auto-passed.</p>
+
+          <div class="bot-row">
+            <label class="radio-label"><input type="checkbox" id="host-reveal-cards" checked> Reveal opponents' cards</label>
+            <label class="radio-label"><input type="checkbox" id="host-show-logs" checked> Show game log</label>
+          </div>
+          <p class="hint">These are fixed for the whole table once the game starts — set them here, not adjustable mid-game.</p>
         </details>
 
         <button id="btn-create-game" class="primary">Host Game</button>
@@ -122,7 +129,8 @@
               <strong>Goal:</strong> end the game with the most points — but there's a catch.
               When the game ends, whoever has the <strong>least money left</strong> is eliminated
               from winning entirely (unless there's a tie for least, or only one player is left).
-              Only then, among whoever remains, does the highest score win. Ties are possible.
+              Only then, among whoever remains, does the highest score win. If two or more players
+              tie for the highest score, they all win together — there's no tiebreaker.
               So hoarding money matters just as much as winning cards.
             </p>
 
@@ -164,6 +172,15 @@
 
         <div id="join-waiting" class="hidden">
           <p>✅ You're in! Waiting for the rest of the table…</p>
+          <div class="button-row">
+            <select id="waiting-bot-type">
+              <option value="pass">Pass bot</option>
+              <option value="greedy" selected>Greedy bot</option>
+              <option value="capped">Capped-greedy bot</option>
+            </select>
+            <button id="btn-add-bot" class="secondary">Fill an empty seat with a bot</button>
+          </div>
+          <p id="add-bot-error" class="error hidden"></p>
         </div>
 
         <button id="btn-spectate-link" class="secondary standalone">Watch as a spectator instead</button>
@@ -254,7 +271,7 @@
 
         <div class="side-col">
           <div class="card panel">
-            <h3>You — <span id="my-username-label"></span></h3>
+            <h3>You - <span id="my-username-label"></span></h3>
             <div>Points: <strong id="my-points">0</strong></div>
             <div id="my-status-cards" class="chip-row small"></div>
           </div>
@@ -262,10 +279,7 @@
           <div class="card panel">
             <div class="panel-header-row">
               <h3>Opponents</h3>
-              <label class="reveal-toggle">
-                <input type="checkbox" id="reveal-cards-toggle">
-                Reveal cards
-              </label>
+              <span id="reveal-cards-status" class="reveal-status"></span>
             </div>
             <div id="opponents-list"></div>
           </div>
@@ -325,10 +339,7 @@
           <div class="card panel">
             <div class="panel-header-row">
               <h3>Players</h3>
-              <label class="reveal-toggle">
-                <input type="checkbox" id="spec-reveal-cards-toggle">
-                Reveal cards
-              </label>
+              <span id="spec-reveal-cards-status" class="reveal-status"></span>
             </div>
             <div id="spec-players-list"></div>
           </div>

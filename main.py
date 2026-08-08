@@ -7,7 +7,7 @@ from highsociety.code.gamecore.player.cliplayer import CLIPlayer
 from highsociety.code.gamecore.recording.session_recorder import SessionRecorder
 from highsociety.code.gamecore.recording.recording_player import RecordingPlayer
 from highsociety.code.gamecore.recording.replay_player import ReplayPlayer
-from highsociety.code.ai import BOT_TYPES
+from highsociety.code.ai import BOT_TYPES, create_bot_players
 
 def get_num_players() -> int:
     """Prompt user for the number of players, enforcing HSConfig.json's min_players/max_players."""
@@ -34,25 +34,6 @@ def get_player_details(player_idx: int):
         name = username
 
     return username, name
-
-def create_bot_players(bot_mix: list[str], think_time: float = 1.0) -> list:
-    """
-    Build bot instances (see highsociety/code/ai/) from a list of type names.
-
-    think_time: seconds each bot pauses before announcing a decision. Defaults
-    to 1.0 (not 0) here specifically because a real game is meant to be
-    watched — an instant decision is easy to miss entirely; compare
-    dev_tools/simulate_bots.py, which defaults the same way for the same
-    reason.
-    """
-    players = []
-    counts = {}
-    for bot_type in bot_mix:
-        counts[bot_type] = counts.get(bot_type, 0) + 1
-        username = f"{bot_type}{counts[bot_type]}"
-        players.append(BOT_TYPES[bot_type](name=username.capitalize(), username=username, think_time=think_time))
-    return players
-
 
 def create_players(num_players: int, bot_mix: list[str] = None, bot_think_time: float = 1.0) -> list:
     """
