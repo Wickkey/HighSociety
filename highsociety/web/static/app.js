@@ -471,8 +471,12 @@ function renderFinished(status) {
   const rows = standings.map((s, i) => {
     const isWinner = winners.has(s.username);
     const state = isWinner ? 'winner' : s.eliminated ? 'eliminated' : (s.active === false ? 'inactive' : 'lost');
+    // Full reasoning lives in the "How is the winner decided?" details right
+    // below the table — this tag just flags *which* row it applies to, kept
+    // short, with a hover title for anyone who wants the one-line version
+    // without leaving the row.
     const tag = isWinner ? ' 🏆'
-      : s.eliminated ? ' (least money — out of contention)'
+      : s.eliminated ? ' <span class="standing-tag" title="Eliminated from winning for having the least money left">(least money)</span>'
       : (s.active === false ? ' (left the game)' : '');
     return `
     <div class="standing-row ${state}" style="animation-delay: ${i * 90}ms">
@@ -788,7 +792,16 @@ function applyGameMessage(msg, isSpectator) {
       }
       break;
     case 'INPUT_ERROR':
-      if (!isSpectator) showError($('move-error'), msg.prompt);
+      if (!isSpectator) {
+        showError($('move-error'), msg.prompt);
+        // onPlaceBid() optimistically pends the panel the instant a bid is
+        // sent, before the server has actually validated it (e.g. an
+        // insufficient raise) — undo that here so a rejected bid looks
+        // exactly like the "select at least one money card" case, which
+        // never pends in the first place: an error message, panel still
+        // fully interactive, not the disabled "waiting for the table" look.
+        $('move-panel').classList.remove('pending');
+      }
       break;
     case 'CHAT':
       appendChatLine(isSpectator ? 'spec-chat-log' : 'player-chat-log', msg.prompt);
@@ -919,6 +932,10 @@ function applyPlayerMove(msg) {
 // never appears — the feature is a no-op unless a host opts in.
 let moveTimerInterval = null;
 let moveTimerDeadline = null;
+// Tracks the last whole-second value we've already beeped for, so the tick
+// fires once per second during the urgent window instead of every 250ms
+// poll (see updateMoveTimerDisplay).
+let moveTimerLastBeepSecond = null;
 
 function startMoveTimer(secondsRemaining) {
   clearMoveTimer();
@@ -930,16 +947,48 @@ function startMoveTimer(secondsRemaining) {
 function clearMoveTimer() {
   if (moveTimerInterval) { clearInterval(moveTimerInterval); moveTimerInterval = null; }
   moveTimerDeadline = null;
+  moveTimerLastBeepSecond = null;
   $('move-timer').classList.add('hidden');
 }
 
 function updateMoveTimerDisplay() {
   const remaining = Math.max(0, (moveTimerDeadline - Date.now()) / 1000);
   const el = $('move-timer');
-  el.textContent = `⏰ ${Math.ceil(remaining)}s left`;
+  const secondsLeft = Math.ceil(remaining);
+  el.textContent = `⏰ ${secondsLeft}s left`;
   el.classList.remove('hidden');
-  el.classList.toggle('urgent', remaining <= 5);
+  const isUrgent = remaining > 0 && remaining <= 5;
+  el.classList.toggle('urgent', isUrgent);
+  if (isUrgent && secondsLeft !== moveTimerLastBeepSecond) {
+    moveTimerLastBeepSecond = secondsLeft;
+    playTimerTick();
+  }
   if (remaining <= 0) clearMoveTimer();
+}
+
+// A short synthesized "tick" (no audio file needed — fits this app's
+// zero-external-assets approach) played once per second while the move
+// timer is in its urgent (<=5s) state, chess.com-clock-style. Wrapped in
+// try/catch since some browsers block audio before any user gesture has
+// happened on the page — by the time a timer is running the player has
+// already clicked Join/a bid button, but this stays silent-safe regardless.
+let _timerTickAudioCtx = null;
+function playTimerTick() {
+  try {
+    _timerTickAudioCtx = _timerTickAudioCtx || new (window.AudioContext || window.webkitAudioContext)();
+    const ctx = _timerTickAudioCtx;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.value = 880;
+    gain.gain.setValueAtTime(0.15, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.12);
+    osc.connect(gain).connect(ctx.destination);
+    osc.start();
+    osc.stop(ctx.currentTime + 0.12);
+  } catch (e) {
+    // Silently skip — the visual countdown already conveys urgency.
+  }
 }
 
 // Marks the move panel as "acted on, waiting for the table" — greyed out and

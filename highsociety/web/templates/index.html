@@ -76,8 +76,14 @@
         <fieldset class="bot-mix">
           <legend>Who can join?</legend>
           <div class="bot-row">
-            <label class="radio-label"><input type="radio" name="host-visibility" id="host-visibility-public" value="public" checked> Public - Anyone can join</label>
-            <label class="radio-label"><input type="radio" name="host-visibility" id="host-visibility-private" value="private"> Private - Requires room code</label>
+            <label class="radio-label">
+              <input type="radio" name="host-visibility" id="host-visibility-public" value="public" checked>
+              <span class="radio-label-text"><strong>Public</strong><span class="hint">Anyone can join</span></span>
+            </label>
+            <label class="radio-label">
+              <input type="radio" name="host-visibility" id="host-visibility-private" value="private">
+              <span class="radio-label-text"><strong>Private</strong><span class="hint">Requires room code</span></span>
+            </label>
           </div>
         </fieldset>
 

@@ -214,6 +214,19 @@ button.secondary.standalone { margin-top: 0.9rem; display: inline-block; }
   margin-top: 0.9rem;
 }
 .button-row button { flex: 0 0 auto; margin-top: 0; }
+.button-row select {
+  flex: 0 0 auto;
+  padding: 0.55rem 0.7rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--panel-border);
+  background: var(--panel-bg-soft);
+  color: var(--text);
+  font-size: 0.9rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: border-color 0.15s ease;
+}
+.button-row select:focus { outline: none; border-color: var(--accent); }
 
 .lobby-status {
   background: var(--panel-bg-soft);
@@ -238,17 +251,30 @@ button.secondary.standalone { margin-top: 0.9rem; display: inline-block; }
 
 .radio-label {
   display: flex;
-  align-items: center;
-  gap: 0.45rem;
+  align-items: flex-start;
+  gap: 0.55rem;
   flex: 1 1 220px;
+  padding: 0.45rem 0.55rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
   font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
 }
+.radio-label:hover { background: var(--panel-bg-soft); }
+.radio-label:has(input:checked) { background: var(--accent-soft); border-color: var(--accent-light); }
 .radio-label input[type="radio"],
 .radio-label input[type="checkbox"] {
   display: inline-block;
   width: auto;
-  margin: 0;
+  margin: 0.2rem 0 0;
 }
+/* Title + one-line description stacked, rather than crowding onto a single
+   line — two options of very different description length (e.g. "Anyone
+   can join" vs "Requires room code") used to wrap irregularly otherwise. */
+.radio-label-text { display: flex; flex-direction: column; line-height: 1.35; }
+.radio-label-text strong { font-weight: 600; font-size: 0.92rem; }
+.radio-label-text .hint { font-size: 0.78rem; }
 
 .rooms-list { margin-bottom: 1.1rem; }
 .room-row {
@@ -712,15 +738,19 @@ button.secondary.standalone { margin-top: 0.9rem; display: inline-block; }
    via animation-fill-mode: forwards. */
 .standing-row.inactive { filter: opacity(0.5); }
 /* The money-eliminated player (see gameplay.py's determine_winner) was
-   never in contention regardless of their score — a distinct reddish tint
-   (not just muted like an ordinary non-winner) signals that clearly. */
+   never in contention regardless of their score — flagged with the same
+   gold accent family used elsewhere in the app (not an alarm-red "error"
+   color, which doesn't fit — this isn't a mistake, just a rule outcome),
+   distinguished from an ordinary non-winner by the left accent bar. */
 .standing-row.eliminated {
-  color: var(--danger);
-  background: var(--danger-soft);
+  color: var(--muted);
+  background: var(--panel-bg-soft);
+  border-left: 3px solid var(--accent-light);
   border-radius: var(--radius-sm);
   padding-left: 0.6rem;
   padding-right: 0.6rem;
 }
+.standing-tag { font-weight: 600; color: var(--accent-strong); cursor: help; }
 
 .winner-rule-info { text-align: left; margin-top: 0.6rem; }
 
