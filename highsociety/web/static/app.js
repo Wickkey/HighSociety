@@ -901,11 +901,14 @@ function applyPlayerState(msg) {
 }
 
 function applyPlayerMove(msg) {
-  $('move-error').classList.add('hidden');
   $('move-panel').classList.remove('hidden', 'pending');
   const bidControls = $('bid-controls');
   const discardControls = $('discard-controls');
   if (msg.move_type === 'discard_painting') {
+    // Discard has no bid-error concept at all, so it's safe (and correct) to
+    // clear out any leftover bid-rejection error here rather than leaving it
+    // visible under the now-irrelevant discard controls.
+    hide($('move-error'));
     bidControls.classList.add('hidden');
     discardControls.classList.remove('hidden');
     renderPaintingChoices(msg.constraints.allowed_paintings);
@@ -915,6 +918,14 @@ function applyPlayerMove(msg) {
     // rather than leaving a stale/wrong number showing.
     clearMoveTimer();
   } else {
+    // Deliberately NOT clearing #move-error here: this same branch is what
+    // renders the very next bid prompt immediately after a rejected bid (see
+    // the INPUT_ERROR case above) — the server loops back and re-prompts
+    // right away, far faster than a human can read the error. Leaving the
+    // error up means a rejected bid stays visible until the player actually
+    // does something new (onPlaceBid/onPass/onQuit below each clear it
+    // before sending), exactly matching the client-side "select at least
+    // one money card" case.
     discardControls.classList.add('hidden');
     bidControls.classList.remove('hidden');
     game.selectedBid = new Set();
@@ -1172,6 +1183,7 @@ function renderPaintingChoices(values) {
 // ------------------------------------------------------------- controls --
 
 function onPlaceBid() {
+  hide($('move-error'));
   const values = [...game.selectedBid];
   if (values.length === 0) { showError($('move-error'), 'Select at least one money card.'); return; }
   ws.send(JSON.stringify({ message_type: 'RESPONSE', prompt: JSON.stringify(values) }));
@@ -1179,12 +1191,14 @@ function onPlaceBid() {
 }
 
 function onPass() {
+  hide($('move-error'));
   ws.send(JSON.stringify({ message_type: 'RESPONSE', prompt: 'pass' }));
   setMovePending();
 }
 
 function onQuit() {
   if (!confirm('Quit the game? This cannot be undone.')) return;
+  hide($('move-error'));
   ws.send(JSON.stringify({ message_type: 'RESPONSE', prompt: 'quit' }));
   setMovePending();
 }
