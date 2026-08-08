@@ -97,7 +97,7 @@
             <input type="number" id="host-seed" placeholder="random">
           </label>
           <label>Bot think time (seconds)
-            <input type="number" id="host-think-time" min="0" step="0.1" value="1">
+            <input type="number" id="host-think-time" min="0" step="0.1" value="1.5">
           </label>
           <label>Time per move (seconds, optional)
             <input type="number" id="host-turn-time" min="0" step="1" placeholder="no limit">
@@ -221,6 +221,13 @@
             <div class="auction-stage">
               <div id="auction-card" class="auction-card-slot"></div>
               <div id="event-toast" class="event-toast"></div>
+              <div id="final-green-overlay" class="final-green-overlay">
+                <div class="final-green-banner">
+                  <div class="final-green-icon">🟢</div>
+                  <div class="final-green-title"></div>
+                  <div class="final-green-sub">The game ends now — final scores coming up</div>
+                </div>
+              </div>
             </div>
             <div class="bid-block">
               <span class="bid-label">Current Highest Bid</span>
@@ -309,6 +316,13 @@
             <div class="auction-stage">
               <div id="spec-auction-card" class="auction-card-slot"></div>
               <div id="spec-event-toast" class="event-toast"></div>
+              <div id="spec-final-green-overlay" class="final-green-overlay">
+                <div class="final-green-banner">
+                  <div class="final-green-icon">🟢</div>
+                  <div class="final-green-title"></div>
+                  <div class="final-green-sub">The game ends now — final scores coming up</div>
+                </div>
+              </div>
             </div>
             <div class="bid-block">
               <span class="bid-label">Current Highest Bid</span>

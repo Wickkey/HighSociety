@@ -308,7 +308,7 @@ def api_create_game():
             return jsonify({"error": "seed must be an integer"}), 400
 
     try:
-        bot_think_time = float(body.get("bot_think_time", 1.0))
+        bot_think_time = float(body.get("bot_think_time", 1.5))
     except (TypeError, ValueError):
         return jsonify({"error": "bot_think_time must be a number"}), 400
 

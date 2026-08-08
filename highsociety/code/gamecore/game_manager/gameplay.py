@@ -24,6 +24,18 @@ _TURN_DURATION_UNSET = object()
 
 
 class PlayGame():
+    # Floors the gap between consecutive "toast-worthy" broadcasts (see
+    # _pace_toast_event) at this many seconds, matching the web frontend's
+    # real toast display cadence: app.js's TOAST_DURATION_MS (1500ms) plus
+    # its 250ms fade-out gap before the next queued toast can show, so
+    # ~1.75s minimum — with a small safety margin.
+    MIN_TOAST_GAP_SECONDS = 1.8
+
+    # AUCTION_UPDATE kinds that actually produce a toast client-side (see
+    # applyAuctionUpdate in app.js) — turn_start is received but not
+    # toast-worthy, so it shouldn't consume/extend the pacing clock.
+    _TOAST_UPDATE_KINDS = frozenset({"auction_start", "bid", "pass", "fold", "quit"})
+
     """
     Notes:
     spectators is a shared list, which will get updated in the run-time if new specators join.
@@ -78,6 +90,7 @@ class PlayGame():
         else:
             self.__TURN_DURATION = turn_duration
         self.__green_card_limit = self.__game_config.get("green_card_limit", 4)
+        self._last_toast_broadcast_at = 0.0
 
         if mode.lower() == 'cli':
             self.host = CLIHost(players)
@@ -141,6 +154,7 @@ class PlayGame():
         to poll for it — see BOT_API.md. In CLI mode this is a no-op for the
         human-readable side (the win/loss line was already sent separately).
         """
+        self._pace_toast_event()
         recipient_desc = record.recipient or "nobody"
         spent = record.money_spent.get(record.recipient, 0)
         summary = f"[auction_result] {record.card['type']} → {recipient_desc} for {spent}"
@@ -157,6 +171,8 @@ class PlayGame():
         message type (see host.py) since it duplicates the plain-text line
         already sent right next to each call.
         """
+        if kind in self._TOAST_UPDATE_KINDS:
+            self._pace_toast_event()
         payload = {
             "round_number": len(self.auction_rounds) + 1,
             "kind": kind,
@@ -200,6 +216,25 @@ class PlayGame():
         if self.__TURN_DURATION is None:
             return None
         return time.time() + self.__TURN_DURATION
+
+    def _pace_toast_event(self) -> None:
+        """
+        Floors the gap between consecutive toast-worthy broadcasts at
+        MIN_TOAST_GAP_SECONDS, matching the web frontend's real toast
+        display cadence. Persistent game state is never gated on this —
+        only the transient narration broadcasts that feed the client's
+        toast queue. Without this, several broadcasts in this file fire
+        back to back with zero natural delay (e.g. a pass that immediately
+        ends an auction, followed at once by that auction's result; or an
+        auction's result immediately followed by the next card's green-
+        reveal/auction_start) — bumping bot think_time alone can't fix
+        that, since no bot decision happens in between those broadcasts.
+        """
+        now = time.time()
+        wait = self._last_toast_broadcast_at + self.MIN_TOAST_GAP_SECONDS - now
+        if wait > 0:
+            time.sleep(wait)
+        self._last_toast_broadcast_at = time.time()
 
 
     def _handle_player_turn(self, player: BasePlayer, max_bid: int, status_card: StatusCard) -> Union[int,str]:
@@ -523,6 +558,7 @@ class PlayGame():
                 # Player disconnected or otherwise failed to choose; retry on the next opportunity.
                 return False
             player.discard_painting_card(chosen.value)
+            self._pace_toast_event()
             self.host.send_message(
                 f"🎨 {player.username} discarded a painting due to Faux Pas.",
                 data={"event": "faux_pas_discard", "player": player.username, "discarded_value": chosen.value},
@@ -649,10 +685,23 @@ class PlayGame():
             status_card = self.status_card_manager.remove_top_card()
             if status_card.is_green:
                 num_green_cards += 1
-                if num_green_cards <=3:
+                is_final_green_card = num_green_cards >= self.__green_card_limit
+                if num_green_cards <= 3:
+                    self._pace_toast_event()
                     self.host.send_message(
                         f"{num_green_cards} green card(s) revealed ..",
-                        data={"event": "green_card_revealed", "count": num_green_cards},
+                        data={"event": "green_card_revealed", "count": num_green_cards, "is_final": is_final_green_card},
+                    )
+                elif is_final_green_card:
+                    # The limit-th green card ends the game immediately
+                    # without ever reaching auction (see HSConfig.json's
+                    # green_card_limit comment) — previously this was
+                    # completely silent to players/spectators, who'd just
+                    # see the game end with no explanation.
+                    self._pace_toast_event()
+                    self.host.send_message(
+                        f"🚨 {num_green_cards} green card(s) revealed — the game ends now!",
+                        data={"event": "green_card_revealed", "count": num_green_cards, "is_final": True},
                     )
 
             if self._should_end_game(num_players_in_auction, num_green_cards):

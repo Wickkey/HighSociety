@@ -471,8 +471,8 @@ if __name__ == '__main__':
                        help='Comma-separated bot types (see highsociety/code/ai/) to fill some of '
                             '--players seats with, e.g. --bots greedy,pass — the server then only '
                             'waits for the remaining seats to connect over the network.')
-    parser.add_argument('--bot-think-time', type=float, default=1.0,
-                       help='Seconds each bot pauses before announcing a decision (default: 1.0). '
+    parser.add_argument('--bot-think-time', type=float, default=1.5,
+                       help='Seconds each bot pauses before announcing a decision (default: 1.5). '
                             'Only matters if --bots is given.')
 
     args = parser.parse_args()

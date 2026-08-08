@@ -35,7 +35,7 @@ def get_player_details(player_idx: int):
 
     return username, name
 
-def create_players(num_players: int, bot_mix: list[str] = None, bot_think_time: float = 1.0) -> list:
+def create_players(num_players: int, bot_mix: list[str] = None, bot_think_time: float = 1.5) -> list:
     """
     Create and return the full seat list: bot_mix fills that many seats
     without prompting, then CLIPlayer prompts interactively for the rest.
@@ -72,8 +72,8 @@ if __name__ == '__main__':
     parser.add_argument('--bots', type=str, default=None,
                        help='Comma-separated bot types (see highsociety/code/ai/) to fill some seats '
                             'with, e.g. --bots greedy,pass — you are only prompted for the rest.')
-    parser.add_argument('--bot-think-time', type=float, default=1.0,
-                       help='Seconds each bot pauses before announcing a decision (default: 1.0). '
+    parser.add_argument('--bot-think-time', type=float, default=1.5,
+                       help='Seconds each bot pauses before announcing a decision (default: 1.5). '
                             'Only matters if --bots is given.')
     args = parser.parse_args()
 

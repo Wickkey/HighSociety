@@ -120,6 +120,30 @@ function pumpEventQueue(key) {
   }, TOAST_DURATION_MS);
 }
 
+function ordinal(n) {
+  const rem10 = n % 10;
+  const rem100 = n % 100;
+  if (rem100 >= 11 && rem100 <= 13) return `${n}th`;
+  return `${n}${{ 1: 'st', 2: 'nd', 3: 'rd' }[rem10] || 'th'}`;
+}
+
+// The game-ending green card gets a dedicated, unmissable overlay rather
+// than going through enqueueEvent/the toast queue — it's a one-off moment
+// that shouldn't be interruptible or cut short by whatever narration would
+// normally queue up next (and nothing does queue up after it anyway, since
+// the game ends here). Self-cleans visually the instant showScreen() hides
+// this screen for the finished screen, so no extra coordination is needed
+// between this timer and the screen transition.
+function showFinalGreenOverlay(isSpectator, count) {
+  const overlay = $(isSpectator ? 'spec-final-green-overlay' : 'final-green-overlay');
+  overlay.querySelector('.final-green-title').textContent = `${ordinal(count)} Green Card Revealed!`;
+  overlay.classList.remove('show');
+  void overlay.offsetWidth; // restart the entrance animation even on a rapid repeat
+  overlay.classList.add('show');
+  clearTimeout(overlay._hideTimer);
+  overlay._hideTimer = setTimeout(() => overlay.classList.remove('show'), 4000);
+}
+
 // Points formula mirrors BasePlayer.__calculate_points(): sum of values,
 // times the product of multipliers (Passe: -5/×1, Scandale: 0/×0.5,
 // Prestige: 0/×2) — see components_module/{disgrace_card,prestige_card}.py.
@@ -507,7 +531,7 @@ async function onCreateGame() {
     seats,
     bot_mix: botMix,
     seed: seedRaw ? parseInt(seedRaw, 10) : null,
-    bot_think_time: parseFloat($('host-think-time').value || '1'),
+    bot_think_time: parseFloat($('host-think-time').value || '1.5'),
     visibility: $('host-visibility-private').checked ? 'private' : 'public',
     turn_time_limit: turnTimeRaw ? parseFloat(turnTimeRaw) : null,
     reveal_cards: $('host-reveal-cards').checked,
@@ -728,8 +752,14 @@ function applyGameMessage(msg, isSpectator) {
             : `${d.player} discarded a painting`, 'disgrace');
         }
       } else if (d && d.event === 'green_card_revealed') {
-        // REVEAL_GREEN
-        enqueueEvent(isSpectator, `🟢 Green card revealed (${d.count})`, 'green');
+        // REVEAL_GREEN — the limit-th (final) green card ends the game
+        // immediately, so it gets a distinct, unmissable overlay instead of
+        // just another toast in the queue (see showFinalGreenOverlay).
+        if (d.is_final) {
+          showFinalGreenOverlay(isSpectator, d.count);
+        } else {
+          enqueueEvent(isSpectator, `🟢 Green card revealed (${d.count})`, 'green');
+        }
       }
       if (msg.prompt && !isDuplicateOfStructuredEvent(msg.prompt)) logLine(msg.prompt.trim(), isSpectator);
       break;

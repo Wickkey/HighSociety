@@ -13,7 +13,7 @@ BOT_TYPES = {
 }
 
 
-def create_bot_players(bot_mix: list[str], think_time: float = 1.0, taken_usernames: set = None) -> list:
+def create_bot_players(bot_mix: list[str], think_time: float = 1.5, taken_usernames: set = None) -> list:
     """
     Build bot instances from a list of type names (e.g. ["greedy", "greedy",
     "pass"]) — the single shared implementation for every entry point that
