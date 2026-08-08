@@ -698,29 +698,48 @@ function applyAuctionUpdate(msg, isSpectator) {
   game.card = d.card;
   if (typeof d.max_bid === 'number') game.maxBid = d.max_bid;
 
+  // A player who joined the room *after* this browser's own seedOpponents()
+  // snapshot was taken (see onJoin — it seeds once, from whatever /api/status
+  // said right before connecting) would otherwise stay invisible in the
+  // Opponents panel until they happened to win a card or take a Faux Pas —
+  // the only two spots that used to call ensureOpponent(). Every other event
+  // below now does the same create-if-missing, so a real opponent shows up
+  // the moment they take their very first action (usually within round 1),
+  // not whenever the first auction happens to resolve.
+  // game.myUsername is null for spectators, so "!== game.myUsername" is
+  // always true for them — every player they see is tracked as one of
+  // game.opponents, which is exactly right since a spectator has no "my side".
   if (d.kind === 'auction_start') {
     game.maxBid = 0;
     game.myAuctionBid = 0;
     game.turnPlayer = d.starting_player;
+    if (d.starting_player !== game.myUsername) ensureOpponent(d.starting_player);
     // Everyone's back in for the new auction — clear last round's greyed-out state.
     Object.values(game.opponents).forEach((o) => { o.outOfAuction = false; });
     enqueueEvent(isSpectator, `New auction: ${describeCard(d.card)}`, 'start');
     logLine(`🃏 Auction #${d.round_number}: ${describeCard(d.card)}`, isSpectator);
   } else if (d.kind === 'turn_start') {
     game.turnPlayer = d.player;
+    if (d.player !== game.myUsername) ensureOpponent(d.player);
   } else if (d.kind === 'bid') {
     if (d.player === game.myUsername) {
       game.myAuctionBid = d.max_bid; // this event's max_bid is the bidder's own new cumulative total
       updateBidStatus();
+    } else {
+      ensureOpponent(d.player);
     }
     enqueueEvent(isSpectator, `${actorLabel(d.player)} raised to ${d.max_bid}`, 'bid');
     logLine(`💰 ${d.player} raised to ${d.max_bid}`, isSpectator);
   } else if (d.kind === 'pass' || d.kind === 'fold') {
-    if (game.opponents[d.player]) game.opponents[d.player].outOfAuction = true;
+    if (d.player !== game.myUsername) ensureOpponent(d.player).outOfAuction = true;
     enqueueEvent(isSpectator, `${actorLabel(d.player)} passed`, 'pass');
     logLine(`⚪ ${d.player} passed`, isSpectator);
   } else if (d.kind === 'quit') {
-    if (game.opponents[d.player]) { game.opponents[d.player].active = false; game.opponents[d.player].outOfAuction = true; }
+    if (d.player !== game.myUsername) {
+      const o = ensureOpponent(d.player);
+      o.active = false;
+      o.outOfAuction = true;
+    }
     enqueueEvent(isSpectator, `${actorLabel(d.player)} quit`, 'quit');
     logLine(`❌ ${d.player} quit`, isSpectator);
   }
