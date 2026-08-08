@@ -698,7 +698,13 @@ class PlayGame():
                     # green_card_limit comment) — previously this was
                     # completely silent to players/spectators, who'd just
                     # see the game end with no explanation.
-                    self._pace_toast_event()
+                    #
+                    # Deliberately NOT paced (contrast the <=3 branch above):
+                    # pacing exists to keep a following event from cutting
+                    # this one off before a human can read it, but nothing
+                    # else is ever broadcast after this — the game ends
+                    # right here. Waiting ~1.8s first would only delay the
+                    # results screen with no readability benefit.
                     self.host.send_message(
                         f"🚨 {num_green_cards} green card(s) revealed — the game ends now!",
                         data={"event": "green_card_revealed", "count": num_green_cards, "is_final": True},
