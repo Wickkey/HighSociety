@@ -22,13 +22,17 @@
   --danger-soft: rgba(163, 48, 42, 0.12);
   --chip-money: #1f7a4d;
   --chip-money-selected: var(--accent);
-  --painting: #7a5230;
-  --painting-2: #4d3320;
-  --prestige: #8570bf;
-  --prestige-2: #574a82;
-  --disgrace: #a96a68;
-  --disgrace-2: #6e3f3e;
+  /* Status cards: only the two actual "green cards" (Prestige, Scandale —
+     see is_green in HSConfig.json) get real green; every other card
+     (Painting, Faux Pas, Passe) shares one neutral stone/taupe tone rather
+     than each having its own color, so green stays a meaningful signal
+     instead of one hue among several. */
+  --card-green: var(--green-dot);
+  --card-green-2: #1c7a3c;
+  --card-neutral: #8c8171;
+  --card-neutral-2: #5b5346;
   --green-dot: #2fa84f;
+  --toast-start: #8570bf;
   --radius: 18px;
   --radius-card: 14px;
   --radius-sm: 12px;
@@ -362,7 +366,7 @@ button.secondary.standalone { margin-top: 0.9rem; display: inline-block; }
 .event-toast.tone-buy { background: var(--accent); color: #fff; }
 .event-toast.tone-disgrace, .event-toast.tone-quit { background: var(--danger); color: #fff; }
 .event-toast.tone-green { background: var(--green-dot); }
-.event-toast.tone-start { background: var(--prestige); }
+.event-toast.tone-start { background: var(--toast-start); }
 
 .bid-block { margin-top: 1rem; }
 .bid-label {
@@ -482,7 +486,7 @@ button.secondary.standalone { margin-top: 0.9rem; display: inline-block; }
 .chip:hover { filter: brightness(1.08); }
 .chip.money { background: var(--chip-money); color: #fff; }
 .chip.money.selected { background: var(--chip-money-selected); border-color: #fff; transform: translateY(-2px); }
-.chip.painting { background: var(--painting); color: #fff; }
+.chip.neutral { background: var(--card-neutral); color: #fff; }
 
 /* status cards */
 .status-card {
@@ -501,10 +505,9 @@ button.secondary.standalone { margin-top: 0.9rem; display: inline-block; }
   box-shadow: var(--shadow-sm);
 }
 .status-card.big { width: 92px; height: 128px; font-size: 1.35rem; margin: 0 auto; }
-.status-card.painting { background: linear-gradient(160deg, var(--painting), var(--painting-2)); }
-.status-card.prestige { background: linear-gradient(160deg, var(--prestige), var(--prestige-2)); }
-.status-card.disgrace { background: linear-gradient(160deg, var(--disgrace), var(--disgrace-2)); }
-.status-card:not(.painting):not(.prestige):not(.disgrace) { background: #565f5a; }
+.status-card.neutral { background: linear-gradient(160deg, var(--card-neutral), var(--card-neutral-2)); }
+.status-card.green { background: linear-gradient(160deg, var(--card-green), var(--card-green-2)); }
+.status-card:not(.neutral):not(.green) { background: #565f5a; }
 .status-card .green-dot {
   position: absolute;
   top: 5px;

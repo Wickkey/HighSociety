@@ -50,13 +50,18 @@ function describeCard(card) {
   return names[card.type] || card.type;
 }
 
+// Color coding is deliberately just green-vs-not: Prestige and Scandale are
+// the two actual "green cards" (see is_green / the green_card_limit rule),
+// so only they get real green — every other card shares one neutral tone
+// rather than each type having its own color, keeping green a meaningful
+// signal instead of one hue among several.
 function cardLabel(card) {
   switch (card.type) {
-    case 'Painting': return { cls: 'painting', text: String(card.value) };
-    case 'PrestigeCard': return { cls: 'prestige', text: '×2' };
-    case 'FauxPas': return { cls: 'disgrace', text: 'Faux Pas' };
-    case 'Passe': return { cls: 'disgrace', text: '−5' };
-    case 'Scandale': return { cls: 'disgrace green', text: '½×' };
+    case 'Painting': return { cls: 'neutral', text: String(card.value) };
+    case 'PrestigeCard': return { cls: 'green', text: '×2' };
+    case 'FauxPas': return { cls: 'neutral', text: 'Faux Pas' };
+    case 'Passe': return { cls: 'neutral', text: '−5' };
+    case 'Scandale': return { cls: 'green', text: '½×' };
     default: return { cls: '', text: card.type };
   }
 }
@@ -1001,7 +1006,7 @@ function renderPaintingChoices(values) {
   values.forEach((value) => {
     const btn = document.createElement('button');
     btn.type = 'button';
-    btn.className = 'chip painting';
+    btn.className = 'chip neutral';
     btn.textContent = value;
     btn.addEventListener('click', () => {
       ws.send(JSON.stringify({ message_type: 'RESPONSE', prompt: String(value) }));
