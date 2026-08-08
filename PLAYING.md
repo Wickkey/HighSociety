@@ -78,7 +78,7 @@ The page opens on a "Join a game" screen listing every open public game (room co
 filled) plus a room-code box for joining a private one, and a "Host a new game" form below it:
 total seats, how many of those seats to fill with bots (`pass`/`greedy`/`capped` — see "Playing
 against bots" below), an optional seed for a reproducible game, and whether the room is **public**
-(listed for anyone to join) or **private** (joinable only by sharing its room code). Submitting the
+(Open to everyone) or **private** (Requires room code). Submitting the
 host form opens that specific room to everyone else — either they pick it from the public list, or
 the host shares the room code directly for a private one. Everyone joining sees a "Join this game"
 form (username + display name), the room code, and a live "seats filled" count. The game starts
