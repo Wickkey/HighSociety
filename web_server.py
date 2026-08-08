@@ -66,7 +66,7 @@ class GameRoom:
     """
 
     def __init__(self, room_code: str, seats: int, bot_mix: list[str], seed: Optional[int],
-                 bot_think_time: float, visibility: str):
+                 bot_think_time: float, visibility: str, turn_time_limit: Optional[float] = None):
         self.room_code = room_code
         self.game_id = generate_game_id()
         self.seats = seats
@@ -74,6 +74,7 @@ class GameRoom:
         self.seed = seed if seed is not None else random.randint(0, 2 ** 31 - 1)
         self.bot_think_time = bot_think_time
         self.visibility = visibility  # "public" | "private"
+        self.turn_time_limit = turn_time_limit  # seconds per move, or None for no limit
 
         self.players = create_bot_players(bot_mix, bot_think_time) if bot_mix else []
         self.human_seats = seats - len(self.players)
@@ -114,7 +115,8 @@ class GameRoom:
     def run_game(self) -> None:
         def _run():
             game = PlayGame(players=self.players, spectators=self.spectators,
-                             mode='network', game_id=self.game_id, seed=self.seed)
+                             mode='network', game_id=self.game_id, seed=self.seed,
+                             turn_duration=self.turn_time_limit)
             self.game = game
             self.state = "in_progress"
             game.play_game()
@@ -152,7 +154,7 @@ def _generate_room_code() -> str:
 
 
 def _create_room(seats: int, bot_mix: list[str], seed: Optional[int], bot_think_time: float,
-                  visibility: str) -> GameRoom:
+                  visibility: str, turn_time_limit: Optional[float] = None) -> GameRoom:
     with _rooms_lock:
         for _ in range(20):
             code = _generate_room_code()
@@ -163,7 +165,8 @@ def _create_room(seats: int, bot_mix: list[str], seed: Optional[int], bot_think_
             # a longer code guarantees termination rather than looping forever.
             code = "".join(random.choices(_ROOM_CODE_ALPHABET, k=_ROOM_CODE_LENGTH * 2))
         room = GameRoom(room_code=code, seats=seats, bot_mix=bot_mix, seed=seed,
-                         bot_think_time=bot_think_time, visibility=visibility)
+                         bot_think_time=bot_think_time, visibility=visibility,
+                         turn_time_limit=turn_time_limit)
         _rooms[code] = room
         return room
 
@@ -305,8 +308,17 @@ def api_create_game():
     if visibility not in ("public", "private"):
         return jsonify({"error": "visibility must be 'public' or 'private'"}), 400
 
+    turn_time_limit = body.get("turn_time_limit")
+    if turn_time_limit is not None:
+        try:
+            turn_time_limit = float(turn_time_limit)
+        except (TypeError, ValueError):
+            return jsonify({"error": "turn_time_limit must be a number"}), 400
+        if turn_time_limit <= 0:
+            turn_time_limit = None  # 0/blank means "no limit", not "instant timeout"
+
     room = _create_room(seats=seats, bot_mix=bot_mix, seed=seed, bot_think_time=bot_think_time,
-                         visibility=visibility)
+                         visibility=visibility, turn_time_limit=turn_time_limit)
     return jsonify(_status_payload(room))
 
 
@@ -322,6 +334,7 @@ def _status_payload(room: Optional[GameRoom]) -> dict:
         "seats": room.seats,
         "human_seats": room.human_seats,
         "bot_mix": room.bot_mix,
+        "turn_time_limit": room.turn_time_limit,
         "joined": room.joined_summary(),
     }
     if room.state == "finished" and room.game is not None:

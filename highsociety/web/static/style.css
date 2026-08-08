@@ -550,6 +550,24 @@ button.secondary.standalone { margin-top: 0.9rem; display: inline-block; }
 }
 .move-panel.pending .move-panel-overlay { display: flex; }
 
+.move-timer {
+  display: inline-block;
+  font-weight: 700;
+  font-size: 0.85rem;
+  letter-spacing: 0.02em;
+  color: var(--accent-strong);
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-light);
+  border-radius: 999px;
+  padding: 0.25rem 0.7rem;
+  margin-bottom: 0.7rem;
+}
+.move-timer.urgent {
+  color: #fff;
+  background: var(--danger);
+  border-color: var(--danger);
+}
+
 .bid-status {
   display: flex;
   justify-content: space-between;

@@ -180,6 +180,58 @@ def test_rooms_listing_shows_only_open_public_rooms(running_web_server):
     assert private_room["room_code"] not in codes  # private rooms aren't listed
 
 
+def test_create_game_validates_and_normalizes_turn_time_limit(running_web_server):
+    client = web_server.app.test_client()
+
+    with_limit = client.post(
+        "/api/create_game", json={"seats": 2, "bot_mix": ["pass"], "turn_time_limit": 30}
+    ).get_json()
+    assert with_limit["turn_time_limit"] == 30.0
+
+    no_limit_specified = client.post(
+        "/api/create_game", json={"seats": 2, "bot_mix": ["pass"]}
+    ).get_json()
+    assert no_limit_specified["turn_time_limit"] is None
+
+    # 0/blank means "no limit", not "instant timeout" — the lobby form's
+    # placeholder is "no limit" for an empty field, which the frontend sends
+    # through as 0 or omits entirely; either way it must not create a game
+    # nobody can ever actually move in.
+    zero_limit = client.post(
+        "/api/create_game", json={"seats": 2, "bot_mix": ["pass"], "turn_time_limit": 0}
+    ).get_json()
+    assert zero_limit["turn_time_limit"] is None
+
+    bad_limit = client.post(
+        "/api/create_game", json={"seats": 2, "bot_mix": ["pass"], "turn_time_limit": "soon"}
+    )
+    assert bad_limit.status_code == 400
+
+
+def test_player_receives_a_live_countdown_when_the_host_sets_a_turn_time_limit(running_web_server):
+    port = running_web_server
+    room_code = web_server.app.test_client().post(
+        "/api/create_game",
+        json={"seats": 2, "bot_mix": ["pass"], "seed": 3, "bot_think_time": 0, "turn_time_limit": 30},
+    ).get_json()["room_code"]
+
+    player = ScriptedWSClient(_ws_url(port, f"/ws?room={room_code}"), "alice")
+    player.handshake()
+    player.start()
+
+    deadline = time.time() + 15
+    timer_messages = []
+    while time.time() < deadline and not timer_messages:
+        timer_messages = player.messages_of_type("PLAYER_MOVE_TIMER")
+        threading.Event().wait(0.1)
+
+    assert timer_messages, "player never received a PLAYER_MOVE_TIMER message"
+    seconds_remaining = timer_messages[0]["data"]["seconds_remaining"]
+    assert 0 < seconds_remaining <= 30
+
+    player.close()
+
+
 def test_full_game_over_websockets_against_a_bot(running_web_server):
     port = running_web_server
     resp = web_server.app.test_client().post(

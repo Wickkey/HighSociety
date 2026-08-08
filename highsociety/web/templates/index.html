@@ -99,6 +99,10 @@
           <label>Bot think time (seconds)
             <input type="number" id="host-think-time" min="0" step="0.1" value="1">
           </label>
+          <label>Time per move (seconds, optional)
+            <input type="number" id="host-turn-time" min="0" step="1" placeholder="no limit">
+          </label>
+          <p class="hint">Leave blank for no timer. If set, each player gets this many seconds per bid/pass before they're auto-passed.</p>
         </details>
 
         <button id="btn-create-game" class="primary">Host Game</button>
@@ -210,6 +214,7 @@
 
           <div id="move-panel" class="card panel move-panel hidden">
             <div class="move-panel-inner">
+              <div id="move-timer" class="move-timer hidden"></div>
               <div id="bid-controls">
                 <h3>Your move</h3>
                 <div class="bid-status">

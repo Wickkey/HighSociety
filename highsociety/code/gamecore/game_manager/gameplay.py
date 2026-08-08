@@ -15,18 +15,34 @@ from highsociety.code.gamecore.components_module.painting import Painting
 from highsociety.code.gamecore.game_manager.disgrace_settlement import DisgraceAuctionSettlement, ForfeitSettlement
 from highsociety.code.gamecore.game_manager.auction_information import AuctionRecord, summarize_card
 
+# Distinguishes "turn_duration not passed at all" (use HSConfig.json's
+# time_per_move, today null/no limit — the CLI/network_server.py behavior,
+# unchanged) from "explicitly passed as None" (a caller, e.g. web_server.py,
+# deliberately wants no timer for this specific game) — plain `None` as the
+# default couldn't tell those two cases apart.
+_TURN_DURATION_UNSET = object()
+
+
 class PlayGame():
     """
     Notes:
     spectators is a shared list, which will get updated in the run-time if new specators join.
     """
     def __init__(self, players: list[BasePlayer], spectators: list[NetworkSpectator] = None, mode = 'cli', game_id: str = None,
-                 disgrace_settlement: DisgraceAuctionSettlement = None, seed: Optional[int] = None):
+                 disgrace_settlement: DisgraceAuctionSettlement = None, seed: Optional[int] = None,
+                 turn_duration: Optional[float] = _TURN_DURATION_UNSET):
         """
         seed: if given, seeds the RNG before anything random happens (deck
         shuffle here, then player shuffle / starting-player pick in
         play_game()), making the entire game 100% reproducible — same seed +
         same sequence of player decisions always produces the same game.
+
+        turn_duration: seconds each player gets per move, or None for no
+        limit. Defaults to HSConfig.json's game_settings.rules.time_per_move
+        (today null, i.e. no limit) when not given at all — this is what CLI
+        play and network_server.py get. Pass an explicit value (including
+        None) to override that per-game, e.g. web_server.py letting a host
+        pick a per-move timer from the lobby form.
         """
         self.players = players
         self.spectators = spectators
@@ -57,7 +73,10 @@ class PlayGame():
             player._auction_history_source = self.auction_rounds
 
         self.__game_config = get_game_setting_configurations()
-        self.__TURN_DURATION = self.__game_config['time_per_move']
+        if turn_duration is _TURN_DURATION_UNSET:
+            self.__TURN_DURATION = self.__game_config['time_per_move']
+        else:
+            self.__TURN_DURATION = turn_duration
         self.__green_card_limit = self.__game_config.get("green_card_limit", 4)
 
         if mode.lower() == 'cli':

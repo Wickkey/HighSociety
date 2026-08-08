@@ -437,12 +437,14 @@ async function onCreateGame() {
   for (const [type, n] of Object.entries(counts)) for (let i = 0; i < n; i += 1) botMix.push(type);
 
   const seedRaw = $('host-seed').value;
+  const turnTimeRaw = $('host-turn-time').value;
   const body = {
     seats,
     bot_mix: botMix,
     seed: seedRaw ? parseInt(seedRaw, 10) : null,
     bot_think_time: parseFloat($('host-think-time').value || '1'),
     visibility: $('host-visibility-private').checked ? 'private' : 'public',
+    turn_time_limit: turnTimeRaw ? parseFloat(turnTimeRaw) : null,
   };
   try {
     const status = await fetchJSON('/api/create_game', {
@@ -665,6 +667,17 @@ function applyGameMessage(msg, isSpectator) {
     case 'PLAYER_MOVE':
       if (!isSpectator) applyPlayerMove(msg);
       break;
+    case 'PLAYER_MOVE_TIMER':
+      // Sent once per move (including once per retry after an invalid
+      // input), carrying how many seconds are left at that instant — the
+      // server doesn't tick this down itself, so we run a local countdown
+      // from this starting point (see startMoveTimer). Only ever sent to
+      // the specific player whose turn it is (see NetworkPlayer.get_bid),
+      // never broadcast, so spectators never receive this message type.
+      if (!isSpectator && msg.data && typeof msg.data.seconds_remaining === 'number') {
+        startMoveTimer(msg.data.seconds_remaining);
+      }
+      break;
     case 'INPUT_ERROR':
       if (!isSpectator) showError($('move-error'), msg.prompt);
       break;
@@ -672,7 +685,7 @@ function applyGameMessage(msg, isSpectator) {
       appendChatLine(isSpectator ? 'spec-chat-log' : 'player-chat-log', msg.prompt);
       break;
     default:
-      break; // GLOBAL_MOVE_INFO, PLAYER_INFO, PLAYER_MOVE_TIMER: superseded by the structured messages above
+      break; // GLOBAL_MOVE_INFO, PLAYER_INFO: superseded by the structured messages above
   }
 }
 
@@ -755,6 +768,11 @@ function applyPlayerMove(msg) {
     bidControls.classList.add('hidden');
     discardControls.classList.remove('hidden');
     renderPaintingChoices(msg.constraints.allowed_paintings);
+    // Discard prompts never carry a per-move timer (see
+    // NetworkPlayer.choose_painting_to_discard — it waits indefinitely), so
+    // clear out any leftover countdown from this player's last bidding turn
+    // rather than leaving a stale/wrong number showing.
+    clearMoveTimer();
   } else {
     discardControls.classList.add('hidden');
     bidControls.classList.remove('hidden');
@@ -764,10 +782,43 @@ function applyPlayerMove(msg) {
   }
 }
 
+// Optional per-move countdown (host-configured "time per move" — see
+// host-turn-time in the lobby form). The server sends one PLAYER_MOVE_TIMER
+// message per move (or per retry after an invalid input) with the seconds
+// remaining *at that instant*; it doesn't tick the value down itself, so
+// this runs a local countdown from that starting point. Games hosted with
+// no time limit simply never receive this message, so the element just
+// never appears — the feature is a no-op unless a host opts in.
+let moveTimerInterval = null;
+let moveTimerDeadline = null;
+
+function startMoveTimer(secondsRemaining) {
+  clearMoveTimer();
+  moveTimerDeadline = Date.now() + secondsRemaining * 1000;
+  updateMoveTimerDisplay();
+  moveTimerInterval = setInterval(updateMoveTimerDisplay, 250);
+}
+
+function clearMoveTimer() {
+  if (moveTimerInterval) { clearInterval(moveTimerInterval); moveTimerInterval = null; }
+  moveTimerDeadline = null;
+  $('move-timer').classList.add('hidden');
+}
+
+function updateMoveTimerDisplay() {
+  const remaining = Math.max(0, (moveTimerDeadline - Date.now()) / 1000);
+  const el = $('move-timer');
+  el.textContent = `⏰ ${Math.ceil(remaining)}s left`;
+  el.classList.remove('hidden');
+  el.classList.toggle('urgent', remaining <= 5);
+  if (remaining <= 0) clearMoveTimer();
+}
+
 // Marks the move panel as "acted on, waiting for the table" — greyed out and
 // non-interactive but still visible (so you can see what you just did),
 // rather than disappearing entirely between your turns.
 function setMovePending() {
+  clearMoveTimer(); // acted — no need to keep counting down what's already submitted
   $('move-panel').classList.add('pending');
 }
 

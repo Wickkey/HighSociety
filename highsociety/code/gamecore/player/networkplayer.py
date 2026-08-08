@@ -103,7 +103,8 @@ class NetworkPlayer(BasePlayer):
         self.print_player_info()
 
         if timeout:
-            self.send_message(f"Time left: {timeout:.2f}s ⏰", message_type="PLAYER_MOVE_TIMER")
+            self.send_message(f"Time left: {timeout:.2f}s ⏰", message_type="PLAYER_MOVE_TIMER",
+                               data={"seconds_remaining": timeout})
         self.send_message("Enter your bid for the auction: ", message_type="PLAYER_MOVE")
 
         bid = self.transport.receive(timeout=timeout)

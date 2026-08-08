@@ -1,3 +1,5 @@
+import time
+
 import pytest
 
 from highsociety.code.gamecore.game_manager.gameplay import PlayGame
@@ -380,3 +382,26 @@ class TestSeededDeterminism:
             return [(p.username, p.points, p.money_left()) for p in game.players]
 
         assert run() == run()
+
+
+class TestTurnDuration:
+    """
+    turn_duration lets a caller (e.g. web_server.py, letting a host pick a
+    per-move timer in the lobby form) override HSConfig.json's
+    game_settings.rules.time_per_move on a per-game basis — see
+    PlayGame.__init__'s _TURN_DURATION_UNSET sentinel.
+    """
+
+    def test_default_uses_configured_value_which_is_currently_no_limit(self, make_player):
+        game = PlayGame(players=[make_player("A"), make_player("B")], mode="cli")
+        assert game._compute_deadline() is None
+
+    def test_explicit_turn_duration_overrides_the_config_default(self, make_player):
+        game = PlayGame(players=[make_player("A"), make_player("B")], mode="cli", turn_duration=30)
+        deadline = game._compute_deadline()
+        assert deadline is not None
+        assert deadline == pytest.approx(time.time() + 30, abs=1)
+
+    def test_explicit_none_disables_the_timer(self, make_player):
+        game = PlayGame(players=[make_player("A"), make_player("B")], mode="cli", turn_duration=None)
+        assert game._compute_deadline() is None
