@@ -1521,7 +1521,16 @@ function updateMoveTimerDisplay() {
     moveTimerUrgentAnnounced = true;
     playUrgentDoubleBeep();
   }
-  if (remaining <= 0) clearMoveTimer();
+  if (remaining <= 0) {
+    // The server auto-passes on timeout (see gameplay.py's
+    // _handle_player_turn), but its broadcast of that — and whatever
+    // happens right after (bots can resolve their own turns near-
+    // instantly) — takes a moment to arrive. Marking the panel pending
+    // immediately, the same treatment a real submitted move already gets,
+    // avoids a stretch where the clock reads 0 but the bid controls still
+    // look live and clickable for a beat before the table visibly moves on.
+    setMovePending();
+  }
 }
 
 // A single low-pitched double-beep (no audio file needed — fits this app's

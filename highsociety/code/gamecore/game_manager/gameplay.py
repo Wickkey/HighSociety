@@ -307,6 +307,19 @@ class PlayGame():
                              message_type = "PLAYER_INFO")
         player.send_message(f"\nCurrent Highest Bid: {max_bid}", message_type = "PLAYER_INFO")
         player.send_message(f"You have {self.__TURN_DURATION}s to make a move.", message_type="PLAYER_INFO")
+        if self.__TURN_DURATION is not None:
+            # turn_start (just above) isn't a paced broadcast (see
+            # _TOAST_UPDATE_KINDS) — nothing here has ever waited for the
+            # client's toast queue to actually finish displaying whatever
+            # led up to this turn. That's harmless with no clock running,
+            # but with one, a burst of fast bot turns right before a timed
+            # human turn was eating into their think time before they'd
+            # even seen the card that's now up for auction (bots deciding
+            # near-instantly, per bot_think_time, makes this worse, not
+            # better). Only the deadline computation waits — the PLAYER_MOVE
+            # itself was already sent above and reflects the real game
+            # state either way.
+            self._pace_toast_event()
         turn_expires_at = self._compute_deadline()
 
         while True:
