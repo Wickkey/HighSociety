@@ -19,6 +19,7 @@ import argparse
 import json
 import os
 import random
+import secrets
 import sys
 import threading
 import time
@@ -37,6 +38,7 @@ from highsociety.code.common.utils.utility import (
     get_game_setting_configurations,
     validate_player_count,
 )
+from highsociety.code.gamecore.game_manager.auction_information import summarize_card
 from highsociety.code.gamecore.game_manager.gameplay import PlayGame
 from highsociety.code.gamecore.network.transport import WebSocketTransport
 from highsociety.code.gamecore.player.networkplayer import NetworkPlayer
@@ -90,6 +92,11 @@ class GameRoom:
         self.game: Optional[PlayGame] = None
         self.lock = threading.Lock()
         self.last_active_at = time.time()
+        # token -> username, so a disconnected human player's browser can
+        # reattach to their existing seat instead of the game treating a
+        # refresh/dropped connection as a permanent quit. Issued once at
+        # IDENTIFY_SUCCESS (see ws_player), never for bots.
+        self.rejoin_tokens: dict[str, str] = {}
 
     def touch(self) -> None:
         """Marks the room as recently active, so the reaper thread's idle
@@ -234,13 +241,17 @@ def _recv_json(ws, timeout: float = 30.0) -> dict:
         return {}
 
 
-def _send(ws, game_id: str, message_type: str, prompt: str, requires_response: bool = False) -> None:
-    ws.send(json.dumps({
+def _send(ws, game_id: str, message_type: str, prompt: str, requires_response: bool = False,
+          data: Optional[dict] = None) -> None:
+    payload = {
         "game_id": game_id,
         "message_type": message_type,
         "prompt": prompt,
         "requires_response": requires_response,
-    }))
+    }
+    if data is not None:
+        payload["data"] = data
+    ws.send(json.dumps(payload))
 
 
 def _identify(ws, game_id: str, first_prompt: str, second_prompt: str):
@@ -449,11 +460,117 @@ def _relay_player_chat(username: str, room: GameRoom, msg: dict) -> None:
             s.send_message(formatted, message_type="CHAT", from_user=username)
 
 
+def _wait_for_player_disconnect(player: NetworkPlayer, transport: WebSocketTransport) -> None:
+    # Keep this HTTP upgrade alive for the lifetime of the connection —
+    # PlayGame calls transport.receive()/send() directly from the game
+    # thread once it's this player's turn; this thread's only job is to let
+    # flask-sock know when the socket has actually gone away (dead
+    # connection detection is ping/pong-based — see SOCK_SERVER_OPTIONS).
+    # threading.Event().wait() here, not time.sleep(): the test suite's
+    # autouse fixture monkeypatches time.sleep to a no-op (see
+    # tests/network/test_transport.py's note on this exact gotcha), which
+    # would turn this into a real busy-spin — one per connection, for its
+    # entire lifetime — instead of an idle wait.
+    while player.active and transport.is_connected:
+        threading.Event().wait(0.5)
+    # Only clear `active` if this transport is still the one attached to the
+    # player. A concurrent reconnect (see NetworkPlayer.reattach) may have
+    # already swapped in a fresh transport and marked them active again by
+    # the time this loop notices the *old* transport died — without this
+    # check, that reconnect gets silently clobbered back to inactive right
+    # after succeeding, which then tears the new connection down too (its
+    # own copy of this same loop reads active=False and exits immediately).
+    if player.transport is transport:
+        player.active = False
+
+
+def _send_reconnect_catchup(player: NetworkPlayer, room: "GameRoom") -> None:
+    """
+    A reconnecting browser starts from a completely blank client-side game
+    state (see app.js's resetGameState) — without this, it would just sit
+    there showing nothing until the next live event happens to arrive.
+    Pushes: the player's own hand/points/cards, a synthetic "sync" auction
+    update (current round/card/highest bid/whose turn — see PlayGame's
+    get_live_auction_state), and every other player's currently-visible
+    status cards (built up over the whole game via individual AUCTION_RESULT
+    broadcasts they missed while disconnected). Deliberately not routed
+    through the normal toast-generating message shapes (AUCTION_RESULT's
+    real path, enqueueEvent) — this is a silent state catch-up, not a
+    replay of past events.
+    """
+    if room.game is None:
+        return
+    room.game._send_player_state(player)
+
+    live_state = room.game.get_live_auction_state()
+    if live_state.get("card") is not None:
+        player.send_message(
+            "", message_type="AUCTION_UPDATE",
+            data={
+                "round_number": live_state["round_number"],
+                "kind": "sync",
+                "card": live_state["card"],
+                "max_bid": live_state["max_bid"],
+                "turn_player": live_state["turn_player"],
+            },
+        )
+
+    for other in room.players:
+        if other is player:
+            continue
+        player.send_message(
+            "", message_type="GLOBAL_EVENT",
+            data={
+                "event": "opponent_state_sync",
+                "username": other.username,
+                "name": other.name,
+                "is_bot": not isinstance(other, NetworkPlayer),
+                "active": other.active,
+                "status_cards": [summarize_card(c) for c in other.status_cards],
+            },
+        )
+
+
+def _handle_player_reconnect(ws, room: "GameRoom", rejoin_token: str) -> None:
+    username = room.rejoin_tokens.get(rejoin_token)
+    player = None
+    if username:
+        player = next(
+            (p for p in room.players if isinstance(p, NetworkPlayer) and p.username == username),
+            None,
+        )
+    if player is None or room.state not in ("starting", "in_progress"):
+        _send(ws, room.game_id, "IDENTIFY_ERROR", "This reconnect link is no longer valid.")
+        return
+
+    transport = WebSocketTransport(
+        ws, label=f"{username}@web-reconnect",
+        on_chat=lambda msg: _relay_player_chat(username, room, msg),
+    )
+    player.reattach(transport)
+    room.touch()
+
+    _send(ws, room.game_id, "IDENTIFY_SUCCESS", f"Welcome back, {username}!",
+          data={"rejoin_token": rejoin_token, "reconnected": True})
+    _send_reconnect_catchup(player, room)
+
+    _wait_for_player_disconnect(player, transport)
+
+
 @sock.route("/ws")
 def ws_player(ws):
     room = _get_room(request.args.get("room"))
-    if room is None or room.state != "lobby":
-        _send(ws, "", "IDENTIFY_ERROR", "No game is accepting players right now.")
+    if room is None:
+        _send(ws, "", "IDENTIFY_ERROR", "No game found for this room.")
+        return
+
+    rejoin_token = request.args.get("rejoin_token")
+    if rejoin_token:
+        _handle_player_reconnect(ws, room, rejoin_token)
+        return
+
+    if room.state != "lobby":
+        _send(ws, room.game_id, "IDENTIFY_ERROR", "No game is accepting players right now.")
         return
 
     game_id = room.game_id
@@ -480,26 +597,30 @@ def ws_player(ws):
         transport.start()
         player = NetworkPlayer(name=name, username=username, transport=transport, game_id=game_id)
         room.players.append(player)
+        rejoin_token = secrets.token_urlsafe(16)
+        room.rejoin_tokens[rejoin_token] = username
         room.touch()
 
-    _send(ws, game_id, "IDENTIFY_SUCCESS", f"Welcome {username}! Waiting for other players...")
+    _send(ws, game_id, "IDENTIFY_SUCCESS", f"Welcome {username}! Waiting for other players...",
+          data={"rejoin_token": rejoin_token})
 
     if room.try_start():
         room.run_game()
 
-    # Keep this HTTP upgrade alive for the lifetime of the connection —
-    # PlayGame calls transport.receive()/send() directly from the game
-    # thread once it's this player's turn; this thread's only job is to let
-    # flask-sock know when the socket has actually gone away (dead
-    # connection detection is ping/pong-based — see SOCK_SERVER_OPTIONS).
-    # threading.Event().wait() here, not time.sleep(): the test suite's
-    # autouse fixture monkeypatches time.sleep to a no-op (see
-    # tests/network/test_transport.py's note on this exact gotcha), which
-    # would turn this into a real busy-spin — one per connection, for its
-    # entire lifetime — instead of an idle wait.
-    while player.active and transport.is_connected:
-        threading.Event().wait(0.5)
-    player.active = False
+    _wait_for_player_disconnect(player, transport)
+
+    # A disconnect during the lobby is fully recoverable (nothing about the
+    # game has started, nothing to reconnect to) — free the seat entirely
+    # rather than leaving a permanent ghost that occupies a spot forever and
+    # can prevent the room from ever filling. Once the game has actually
+    # started, leave them in room.players: that's exactly what lets a later
+    # reconnect (see _handle_player_reconnect) resume their seat.
+    if room.state == "lobby":
+        with room.lock:
+            if player in room.players:
+                room.players.remove(player)
+            room.rejoin_tokens = {t: u for t, u in room.rejoin_tokens.items() if u != username}
+        room.touch()
 
 
 def _spectator_chat_listener(spectator: NetworkSpectator, room: GameRoom) -> None:

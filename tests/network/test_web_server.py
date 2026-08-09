@@ -44,6 +44,11 @@ class ScriptedWSClient:
         self._send({"message_type": "IDENTIFY_ACK", "prompt": f"{self.username}-display"})
         welcome = self._recv()
         assert welcome.get("message_type") == "IDENTIFY_SUCCESS", welcome
+        # _recv() doesn't go through _loop(), so it never lands in
+        # self.received on its own — record it so rejoin_token() (and any
+        # other post-handshake inspection) can actually find it.
+        with self._lock:
+            self.received.append(welcome)
 
     def _send(self, payload):
         self.client.send(json.dumps(payload))
@@ -99,6 +104,27 @@ class ScriptedWSClient:
             self.client.close()
         except Exception:
             pass
+
+    def rejoin_token(self):
+        """The token issued at IDENTIFY_SUCCESS (see web_server.py's
+        ws_player) — None if this client's handshake hasn't completed yet."""
+        for msg in self.messages_of_type("IDENTIFY_SUCCESS"):
+            token = (msg.get("data") or {}).get("rejoin_token")
+            if token:
+                return token
+        return None
+
+
+class ReconnectingWSClient(ScriptedWSClient):
+    """Connects straight to a rejoin-token URL — no IDENTIFY/IDENTIFY_ACK
+    exchange, since the server skips that entirely for a valid reconnect
+    (see web_server.py's _handle_player_reconnect)."""
+
+    def handshake(self):
+        welcome = self._recv()
+        assert welcome.get("message_type") == "IDENTIFY_SUCCESS", welcome
+        with self._lock:
+            self.received.append(welcome)
 
 
 @pytest.fixture
@@ -456,3 +482,141 @@ def test_sending_to_a_dead_websocket_marks_the_player_inactive_instead_of_crashi
     bob_player.active = True  # force the exact "still marked active, but the transport is already dead" state
     bob_player.send_message("test broadcast", message_type="GLOBAL_EVENT")  # must not raise
     assert bob_player.active is False
+
+
+def test_player_can_reconnect_after_disconnecting_mid_game(running_web_server):
+    """
+    A dropped connection (e.g. an accidental tab refresh) shouldn't
+    permanently lock a player out of a game still in progress.
+
+    Uses 3 real WS clients (no bots) with no --bot-think-time/turn-timer
+    pacing to race against: with pytest's autouse time.sleep mock, a
+    bot-only game resolves in well under a second (bots never sleep for
+    real, and this suite's pacing/think-time sleeps are all no-ops), which
+    left no reliable window to actually perform a reconnect before the game
+    had already finished. With three real sockets, whoever's turn it is
+    next simply blocks until *something* answers it (no turn_time_limit is
+    configured), giving this test full deterministic control over pacing.
+    """
+    port = running_web_server
+    room_code = web_server.app.test_client().post(
+        "/api/create_game", json={"seats": 3, "bot_mix": [], "seed": 1}
+    ).get_json()["room_code"]
+
+    clients = {
+        name: ScriptedWSClient(_ws_url(port, f"/ws?room={room_code}"), name)
+        for name in ("alice", "bob", "carol")
+    }
+    for client in clients.values():
+        client.handshake()  # game auto-starts once the 3rd seat completes its handshake
+
+    # Find out whose turn actually comes up first (shuffled server-side) by
+    # polling all three raw sockets round-robin, rather than assuming it's
+    # alice — none of them have their auto-responder thread running yet, so
+    # whoever doesn't get picked here just sits with an unanswered prompt,
+    # which is fine (nothing times out with no turn_time_limit configured).
+    mover_name = None
+    deadline = time.time() + 10
+    while time.time() < deadline and mover_name is None:
+        for name, client in clients.items():
+            try:
+                raw = client.client.receive(timeout=0.2)
+            except ConnectionClosed:
+                continue
+            if raw is None:
+                continue
+            with client._lock:
+                client.received.append(json.loads(raw))
+            if json.loads(raw).get("message_type") == "PLAYER_MOVE":
+                mover_name = name
+                break
+    assert mover_name is not None, "nobody got a turn"
+
+    mover = clients[mover_name]
+    token = mover.rejoin_token()
+    assert token, "no rejoin_token issued at IDENTIFY_SUCCESS"
+    mover.client.close()  # simulate a refresh/dropped connection, no response sent
+
+    room = web_server._rooms[room_code]
+    mover_player = next(p for p in room.players if p.username == mover_name)
+    deadline = time.time() + 10
+    while time.time() < deadline and mover_player.active:
+        threading.Event().wait(0.1)
+    assert not mover_player.active, "server never noticed the disconnect"
+    assert mover_player in room.players, "mid-game disconnect must keep the seat, not remove it"
+    assert room.state == "in_progress", "the other two haven't answered anything yet — nothing should have resolved"
+
+    # Reconnect with the same token/username and confirm the server marks
+    # them active again immediately, with catch-up state waiting for them.
+    reconnected = ReconnectingWSClient(
+        _ws_url(port, f"/ws?room={room_code}&rejoin_token={token}"), mover_name,
+    )
+    reconnected.handshake()
+    assert mover_player.active, "reattach() should mark the player active again"
+    reconnected.start()  # start collecting: the catch-up messages arrive right after IDENTIFY_SUCCESS
+
+    deadline = time.time() + 5
+    while time.time() < deadline and not reconnected.messages_of_type("PLAYER_STATE"):
+        threading.Event().wait(0.1)
+    assert reconnected.messages_of_type("PLAYER_STATE"), "no reconnect catch-up state was sent"
+
+    # Let everyone (the two original clients plus the reconnected one)
+    # finish the game normally from here.
+    for name, client in clients.items():
+        if name != mover_name:
+            client.start()
+
+    deadline = time.time() + 20
+    while time.time() < deadline and room.state != "finished":
+        threading.Event().wait(0.2)
+    assert room.state == "finished"
+
+    # Confirm the reconnected player genuinely got to act again post-reconnect
+    # — not just marked active with no real turn ever coming their way.
+    assert reconnected.messages_of_type("PLAYER_MOVE"), "never got another turn after reconnecting"
+
+    reconnected.close()
+    for name, client in clients.items():
+        if name != mover_name:
+            client.close()
+
+
+def test_reconnect_with_an_invalid_token_is_rejected(running_web_server):
+    port = running_web_server
+    room_code = web_server.app.test_client().post(
+        "/api/create_game", json={"seats": 2, "bot_mix": ["pass"], "seed": 1, "bot_think_time": 0}
+    ).get_json()["room_code"]
+
+    bad = simple_websocket.Client(_ws_url(port, f"/ws?room={room_code}&rejoin_token=not-a-real-token"))
+    msg = json.loads(bad.receive(timeout=5))
+    assert msg["message_type"] == "IDENTIFY_ERROR"
+
+
+def test_disconnecting_during_lobby_frees_the_seat(running_web_server):
+    """
+    Disconnecting before the game has even started is fully recoverable —
+    nothing is at stake yet — so the seat should be freed entirely rather
+    than left as a permanent ghost that blocks the room from ever filling
+    (and blocks the same username from ever joining again).
+    """
+    port = running_web_server
+    room_code = web_server.app.test_client().post(
+        "/api/create_game", json={"seats": 2, "bot_mix": [], "seed": 1}
+    ).get_json()["room_code"]
+
+    alice = ScriptedWSClient(_ws_url(port, f"/ws?room={room_code}"), "alice")
+    alice.handshake()
+    alice.client.close()
+
+    room = web_server._rooms[room_code]
+    deadline = time.time() + 10
+    while time.time() < deadline and any(p.username == "alice" for p in room.players):
+        threading.Event().wait(0.1)
+    assert not any(p.username == "alice" for p in room.players), \
+        "a lobby-phase disconnect should free the seat, not leave a ghost"
+
+    # The same username can now join fresh.
+    alice2 = ScriptedWSClient(_ws_url(port, f"/ws?room={room_code}"), "alice")
+    alice2.handshake()
+    assert any(p.username == "alice" for p in room.players)
+    alice2.close()

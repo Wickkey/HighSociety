@@ -29,6 +29,26 @@ class NetworkPlayer(BasePlayer):
         starting anyone's receiver."""
         self.transport.start()
 
+    def reattach(self, transport: Transport) -> None:
+        """
+        Swaps in a fresh transport after a reconnect (see web_server.py's
+        rejoin-token handling) and marks the player active again.
+
+        This does NOT retroactively fix whatever was happening at the exact
+        moment they disconnected: if get_bid()/choose_painting_to_discard()
+        was already blocked waiting on the old (now-dead) transport when it
+        died, that call already resolved (typically as an auto-"quit" for
+        that one decision — see get_bid()'s is_connected check) before this
+        ever runs. What reattach() actually restores is everything from
+        their *next* decision onward — the turn loop's own `if not
+        player.active` check (gameplay.py's _handle_player_turn) stops
+        short-circuiting them into an automatic pass once self.active is
+        True again, so normal play resumes.
+        """
+        self.transport = transport
+        self.active = True
+        self.transport.start()
+
     def stop_receiver_thread(self) -> None:
         self.transport.stop()
 

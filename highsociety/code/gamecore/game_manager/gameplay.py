@@ -68,6 +68,13 @@ class PlayGame():
         self.game_state = "initialized"
         self.auction_rounds = []
         self.current_auction = None
+        # Just enough live state for a reconnecting player's client to catch
+        # up immediately (see web_server.py's reconnect handling and
+        # get_live_auction_state below) instead of showing a blank auction
+        # panel until the next event happens to arrive naturally. Updated
+        # incrementally in _broadcast_auction_update as events fire — not a
+        # full history, just "what's true right now".
+        self._live_auction_state = {"round_number": 0, "card": None, "max_bid": 0, "turn_player": None}
         # Populated by determine_winner() — lets a caller holding this
         # PlayGame (e.g. web_server.py's game-runner thread) read the
         # authoritative outcome after play_game() returns, instead of
@@ -179,7 +186,26 @@ class PlayGame():
             "card": summarize_card(status_card),
         }
         payload.update(extra)
+
+        self._live_auction_state["round_number"] = payload["round_number"]
+        self._live_auction_state["card"] = payload["card"]
+        if kind == "auction_start":
+            self._live_auction_state["max_bid"] = 0
+            self._live_auction_state["turn_player"] = extra.get("starting_player")
+        elif kind == "turn_start":
+            self._live_auction_state["turn_player"] = extra.get("player")
+        if "max_bid" in extra:
+            self._live_auction_state["max_bid"] = extra["max_bid"]
+
         self.host.send_message(f"[auction_update] {kind}", message_type="AUCTION_UPDATE", data=payload)
+
+    def get_live_auction_state(self) -> dict:
+        """A snapshot of "what's true right now" for the current auction
+        (round number, card, highest bid, whose turn) — see
+        web_server.py's reconnect handling, which replays this to a
+        reconnecting player's client as a synthetic AUCTION_UPDATE (kind
+        "sync") so their UI doesn't sit blank until the next real event."""
+        return dict(self._live_auction_state)
 
     def _send_player_state(self, player: BasePlayer) -> None:
         """

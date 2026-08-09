@@ -173,6 +173,36 @@ let game = null;
 let currentRoomCode = null;
 let roomsPollTimer = null;
 
+// Reconnection: if a refresh/dropped connection happens mid-game, the
+// server keeps your seat (see web_server.py's rejoin-token handling) —
+// this is what lets the browser find its way back to it. Stored per-room
+// (not just "the" token) so multiple rooms across tabs/history don't clash.
+// isReconnecting distinguishes "this IDENTIFY_SUCCESS is a fresh join" vs
+// "this is resuming an existing seat" for handlePlayerMessage; reconnectAttempted
+// guards against retrying a bad/expired token in a loop.
+let isReconnecting = false;
+let reconnectAttempted = false;
+
+function rejoinStorageKey(roomCode) {
+  return `hs_rejoin_${roomCode}`;
+}
+function saveRejoinInfo(roomCode, token, username, name) {
+  localStorage.setItem(rejoinStorageKey(roomCode), JSON.stringify({ token, username, name }));
+}
+function loadRejoinInfo(roomCode) {
+  const raw = roomCode && localStorage.getItem(rejoinStorageKey(roomCode));
+  if (!raw) return null;
+  try {
+    const info = JSON.parse(raw);
+    return info && info.token && info.username ? info : null;
+  } catch (e) {
+    return null;
+  }
+}
+function clearRejoinInfo(roomCode) {
+  if (roomCode) localStorage.removeItem(rejoinStorageKey(roomCode));
+}
+
 // Whether opponents' actual won cards/points are shown, or kept hidden
 // behind card-backs, and whether the game-log panel is shown at all — both
 // are host-time settings (see host-reveal-cards/host-show-logs in the
@@ -270,7 +300,9 @@ async function enterRoom(roomCode) {
 }
 
 function leaveToHome() {
+  clearRejoinInfo(currentRoomCode);
   currentRoomCode = null;
+  reconnectAttempted = false;
   history.replaceState(null, '', location.pathname);
   stopPolling();
   showScreen('screen-host-setup');
@@ -360,6 +392,13 @@ function renderForStatus(status) {
   }
   // starting / in_progress
   if (!ws) {
+    if (!reconnectAttempted) {
+      reconnectAttempted = true;
+      if (attemptReconnect()) {
+        stopPolling();
+        return;
+      }
+    }
     stopPolling();
     showScreen('screen-join');
     $('join-form').classList.add('hidden');
@@ -439,6 +478,7 @@ function renderLobby(status) {
 }
 
 function renderFinished(status) {
+  clearRejoinInfo(currentRoomCode); // game's over — nothing left to reconnect to
   showScreen('screen-finished');
   // The money-eliminated player (see gameplay.py's determine_winner —
   // distinct from simply "didn't have the highest score") was never in
@@ -592,20 +632,66 @@ function connectPlayerSocket() {
   setBadge('connecting…');
 }
 
+// Called when the room turns out to already be starting/in_progress and we
+// have no open socket (fresh page load after a refresh, or the tab was just
+// sitting on some other screen when the game started) — see
+// renderForStatus. Returns true if a stored rejoin token existed and a
+// reconnect attempt was actually started (caller should stop polling and
+// wait for the result), false if there was nothing to try (falls through
+// to the normal "watch as a spectator" message).
+function attemptReconnect() {
+  const info = loadRejoinInfo(currentRoomCode);
+  if (!info) return false;
+
+  isReconnecting = true;
+  resetGameState(info.username, lastStatus);
+  if (lastStatus) seedOpponents(lastStatus, info.username);
+  ws = new WebSocket(wsUrl(
+    `/ws?room=${encodeURIComponent(currentRoomCode)}&rejoin_token=${encodeURIComponent(info.token)}`,
+  ));
+  ws.onmessage = (evt) => handlePlayerMessage(JSON.parse(evt.data));
+  ws.onclose = () => { ws = null; refreshStatus(); };
+  setBadge('reconnecting…');
+  return true;
+}
+
 function handlePlayerMessage(msg) {
   switch (msg.message_type) {
     case 'IDENTIFY':
       respondIdentify(ws, pendingJoin, msg);
       break;
     case 'IDENTIFY_ERROR':
-      pendingIdentifyError = msg.prompt;
-      ws.close();
+      if (isReconnecting) {
+        // Token was invalid/expired (e.g. the game finished in the
+        // meantime, or someone else already reconnected with it) — drop it
+        // and fall back to the normal "already in progress" message rather
+        // than retrying it forever.
+        isReconnecting = false;
+        clearRejoinInfo(currentRoomCode);
+        ws.close();
+        showScreen('screen-join');
+        $('join-form').classList.add('hidden');
+        $('join-waiting').classList.add('hidden');
+        $('lobby-status').textContent = 'A game is already in progress — you can watch as a spectator.';
+      } else {
+        pendingIdentifyError = msg.prompt;
+        ws.close();
+      }
       break;
     case 'IDENTIFY_SUCCESS':
-      $('join-form').classList.add('hidden');
-      $('join-waiting').classList.remove('hidden');
-      setBadge(`playing as ${game.myUsername}`);
-      startWaitingRoomPolling();
+      if (isReconnecting) {
+        isReconnecting = false;
+        setBadge(`playing as ${game.myUsername}`);
+        ensureGameScreenVisible(false);
+      } else {
+        $('join-form').classList.add('hidden');
+        $('join-waiting').classList.remove('hidden');
+        setBadge(`playing as ${game.myUsername}`);
+        startWaitingRoomPolling();
+        if (msg.data && msg.data.rejoin_token) {
+          saveRejoinInfo(currentRoomCode, msg.data.rejoin_token, pendingJoin.username, pendingJoin.name);
+        }
+      }
       break;
     default:
       applyGameMessage(msg, false);
@@ -764,6 +850,19 @@ function applyGameMessage(msg, isSpectator) {
         } else {
           enqueueEvent(isSpectator, `🟢 Green card revealed (${d.count})`, 'green');
         }
+      } else if (d && d.event === 'opponent_state_sync') {
+        // Reconnect catch-up only (see web_server.py's
+        // _send_reconnect_catchup): restores what this specific opponent's
+        // status-card panel should already show (built up over the whole
+        // game via individual AUCTION_RESULT broadcasts we missed while
+        // disconnected). Silent — no toast, no log line.
+        if (d.username !== game.myUsername) {
+          const o = ensureOpponent(d.username);
+          o.name = d.name;
+          o.active = d.active;
+          o.statusCards = d.status_cards;
+          renderOpponents(isSpectator);
+        }
       }
       if (msg.prompt && !isDuplicateOfStructuredEvent(msg.prompt)) logLine(msg.prompt.trim(), isSpectator);
       break;
@@ -864,6 +963,14 @@ function applyAuctionUpdate(msg, isSpectator) {
     }
     enqueueEvent(isSpectator, `${actorLabel(d.player)} quit`, 'quit');
     logLine(`❌ ${d.player} quit`, isSpectator);
+  } else if (d.kind === 'sync') {
+    // Reconnect catch-up only (see web_server.py's _send_reconnect_catchup)
+    // — a silent state restore, not a live event: no toast, no log line,
+    // and deliberately doesn't touch myAuctionBid/outOfAuction the way a
+    // real auction_start does, since we don't know whether we'd already
+    // committed part of a bid before dropping.
+    game.turnPlayer = d.turn_player;
+    if (d.turn_player && d.turn_player !== game.myUsername) ensureOpponent(d.turn_player);
   }
 
   renderAuctionPanel(isSpectator);
