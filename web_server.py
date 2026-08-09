@@ -558,6 +558,13 @@ def _maybe_start_rematch(room: "GameRoom") -> None:
             bot_mix, think_time=room.bot_think_time,
             taken_usernames={p.username for p in eligible},
         ) if bot_mix else []
+        # Same NetworkPlayer objects as the just-finished game, deliberately
+        # not fresh ones (see reset_for_new_game's docstring for why) —
+        # reset in place so the new PlayGame starts everyone with a clean
+        # hand/0 points instead of carrying over the last game's final
+        # money cards and score.
+        for p in eligible:
+            p.reset_for_new_game()
         room.players = eligible + bots
         room.human_seats = len(eligible)
         room.state = "starting"

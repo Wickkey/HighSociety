@@ -5,6 +5,8 @@ import time
 
 import pytest
 
+from highsociety.code.gamecore.card_manager.money_card_manager import MoneyCardManager
+
 # CLI/socket play has zero third-party dependencies (see README.md); only the
 # web path needs flask/flask-sock installed (requirements.txt). Skip this
 # whole module rather than failing collection for anyone running the suite
@@ -696,6 +698,17 @@ def test_single_player_rematch_reuses_the_connection_for_a_fresh_game(running_we
         threading.Event().wait(0.2)
     assert room.state == "finished"
     first_game = room.game
+    alice_player = next(p for p in first_game.players if p.username == "alice")
+    # Both sides always pass, so whoever isn't first to pass in each auction
+    # wins it by default (for free — neither side ever places a real bid, so
+    # this can't also exercise a spent-money-cards reset) — alice should
+    # have picked up at least one card (and its points) by the time a whole
+    # game against a pass-only bot finishes. If this ever assert-fails, the
+    # rest of this test can't tell a real reset apart from "there was
+    # nothing to reset in the first place" — see the regression this guards
+    # below.
+    assert alice_player.points != 0 or alice_player.status_cards, \
+        "test setup assumption broken: alice won nothing in game 1"
 
     # Player connections are kept open past game-end specifically for this
     # (see GameRoom.run_game) — the connection must still be usable here.
@@ -709,8 +722,24 @@ def test_single_player_rematch_reuses_the_connection_for_a_fresh_game(running_we
     assert alice.messages_of_type("REMATCH_STARTING"), "alice never got REMATCH_STARTING"
     assert room.bot_mix == ["greedy"], "the requested bot mix should replace the room's old one"
 
+    # Regression test for a real bug: the rematch used to reuse alice's exact
+    # NetworkPlayer object (deliberately — see reset_for_new_game's
+    # docstring for why a fresh object isn't the fix) but never actually
+    # reset its game state, so game 2 silently started with game 1's final
+    # points/status cards/spent money still attached.
+    deadline = time.time() + 10
+    while time.time() < deadline and room.game is first_game:
+        threading.Event().wait(0.1)
+    new_game_alice = next(p for p in room.game.players if p.username == "alice")
+    assert new_game_alice is alice_player, "rematch should reuse the same player object, not a fresh one"
+    assert alice_player.points == 0, "points must reset for a rematch, not carry over from the last game"
+    assert alice_player.status_cards == (), "status cards must reset for a rematch"
+    full_hand = sorted(c.value for c in MoneyCardManager().cards)
+    assert sorted(c.value for c in alice_player.money_cards) == full_hand, \
+        "money cards must reset to a fresh full hand for a rematch"
+
     deadline = time.time() + 30
-    while time.time() < deadline and (room.state != "finished" or room.game is first_game):
+    while time.time() < deadline and room.state != "finished":
         threading.Event().wait(0.2)
     assert room.state == "finished"
     assert room.game is not None and room.game is not first_game, "rematch should run a brand new PlayGame"

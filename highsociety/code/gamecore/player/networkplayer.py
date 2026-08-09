@@ -29,6 +29,16 @@ class NetworkPlayer(BasePlayer):
         # distinct from an accidental disconnect.
         self.resigned = False
 
+    def reset_for_new_game(self) -> None:
+        """Extends BasePlayer.reset_for_new_game() with the two fields that
+        are NetworkPlayer's own (see web_server.py's _maybe_start_rematch,
+        the only caller) — both should already hold these values for any
+        player eligible for a rematch in the first place, but resetting
+        them explicitly is cheap insurance against relying on that."""
+        super().reset_for_new_game()
+        self.active = True
+        self.resigned = False
+
     def start_receiver_thread(self) -> None:
         """Begin receiving messages in the background. Kept as an explicit,
         separately-timed step (rather than starting in __init__) to match
