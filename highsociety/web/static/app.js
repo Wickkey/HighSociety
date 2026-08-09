@@ -1748,6 +1748,14 @@ function onPlaceBid() {
   const values = [...game.selectedBid];
   if (values.length === 0) { showError($('move-error'), 'Select at least one money card.'); return; }
   ws.send(JSON.stringify({ message_type: 'RESPONSE', prompt: JSON.stringify(values) }));
+  // Once sent, these chips are no longer "being added on top" — they're
+  // already part of the committed bid. Without clearing this, the server's
+  // own echo of this same bid (applyAuctionUpdate's "bid" kind, which
+  // updates game.myAuctionBid to the new committed total and re-renders)
+  // would add the just-submitted chips a *second* time on top of that new
+  // total, e.g. selecting 10 shows "10 → 20" instead of "0 → 10".
+  game.selectedBid.clear();
+  updateSelectedBidTotal();
   setMovePending();
 }
 
