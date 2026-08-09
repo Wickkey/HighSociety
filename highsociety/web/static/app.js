@@ -14,6 +14,30 @@ function hide(el) { el.classList.add('hidden'); }
 function show(el) { el.classList.remove('hidden'); }
 function showError(el, text) { el.textContent = text; el.classList.remove('hidden'); }
 
+// In-page confirm dialog (resign, leaving mid-game — see onResign/
+// onHomeLinkClick) styled like every other panel in the app, replacing the
+// browser's own native confirm() popup. Promise-based so a call site just
+// reads `if (!(await confirmDialog(...))) return;`, same shape as the
+// native confirm() it replaces. Only one can be open at a time in this app
+// (both call sites are themselves mutually exclusive — you can't resign
+// and click the home link in the same instant), so a single pending
+// resolver is enough; no stacking/queueing needed.
+let _confirmDialogResolve = null;
+function confirmDialog(message, confirmLabel) {
+  return new Promise((resolve) => {
+    _confirmDialogResolve = resolve;
+    $('confirm-modal-message').textContent = message;
+    $('confirm-modal-confirm').textContent = confirmLabel;
+    show($('confirm-modal'));
+  });
+}
+function _resolveConfirmDialog(result) {
+  hide($('confirm-modal'));
+  const resolve = _confirmDialogResolve;
+  _confirmDialogResolve = null;
+  if (resolve) resolve(result);
+}
+
 // Usernames are entirely user-supplied and end up interpolated into a couple
 // of innerHTML strings (final standings, the turn indicator) — escape them
 // first so a username like "<img src=x onerror=...>" renders as inert text
@@ -33,6 +57,12 @@ function setBadge(text) {
   const badge = $('connection-badge');
   badge.textContent = text;
   badge.classList.remove('hidden');
+  // A live room session's identity is already fixed — editing the *saved*
+  // profile wouldn't change the current seat, so the chip stops being an
+  // "edit" target for as long as this text describes a session (see
+  // renderProfileChip, which re-enables it once back at the idle state).
+  badge.classList.remove('editable');
+  closeProfilePopover();
 }
 
 // ---------------------------------------------------------------- cards --
@@ -315,33 +345,47 @@ function saveProfile(username, name) {
 // genuinely new room is entered.
 let joinIdentityOverridden = false;
 
-function renderProfileBar() {
+// The top-right chip is the one persistent "profile area" (see
+// #profile-chip-wrap in index.html): whenever this browser isn't currently
+// locked into a room session, it shows the saved name (or "Guest" — a
+// placeholder that itself signals "click me to set this") and opens the
+// popover below on click. setBadge() below is what locks it during an
+// actual session (connecting/playing/spectating), where the joined
+// identity is already fixed and editing the *saved* profile wouldn't
+// change anything about the current seat anyway.
+function renderProfileChip() {
+  const badge = $('connection-badge');
   const profile = loadProfile();
-  hide($('profile-error'));
-  if (profile) {
-    $('profile-name-display').textContent = profile.name;
-    show($('profile-display'));
-    hide($('profile-form'));
-  } else {
-    show($('profile-form'));
-    hide($('profile-display'));
-    hide($('btn-cancel-profile-edit')); // nothing saved yet to cancel back to
-  }
+  badge.textContent = profile ? profile.name : 'Guest';
+  badge.classList.remove('hidden');
+  badge.classList.add('editable');
+  closeProfilePopover();
   applyJoinIdentityDefaults();
 }
 
-function onEditProfileClick() {
+function openProfilePopover() {
   const profile = loadProfile();
   $('profile-username').value = profile ? profile.username : '';
   $('profile-display-name').value = profile ? profile.name : '';
   hide($('profile-error'));
-  hide($('profile-display'));
-  show($('btn-cancel-profile-edit'));
-  show($('profile-form'));
+  show($('profile-popover'));
+}
+
+function closeProfilePopover() {
+  hide($('profile-popover'));
+}
+
+function onProfileChipClick() {
+  if (!$('connection-badge').classList.contains('editable')) return; // locked into a room session
+  if ($('profile-popover').classList.contains('hidden')) {
+    openProfilePopover();
+  } else {
+    closeProfilePopover();
+  }
 }
 
 function onCancelProfileEdit() {
-  renderProfileBar();
+  closeProfilePopover();
 }
 
 function onSaveProfileClick() {
@@ -350,7 +394,7 @@ function onSaveProfileClick() {
   const name = $('profile-display-name').value.trim() || username;
   if (!username) { showError($('profile-error'), 'Username is required.'); return; }
   saveProfile(username, name);
-  renderProfileBar();
+  renderProfileChip();
 }
 
 // Pre-fills the join screen's username/name fields from the saved profile
@@ -461,7 +505,7 @@ function ensureOpponent(username) {
 
 document.addEventListener('DOMContentLoaded', () => {
   wireStaticHandlers();
-  renderProfileBar();
+  renderProfileChip();
   currentRoomCode = new URLSearchParams(location.search).get('room');
   if (currentRoomCode) {
     refreshStatus();
@@ -519,7 +563,7 @@ function leaveToHome(clearRejoin = true) {
   history.replaceState(null, '', location.pathname);
   stopPolling();
   showScreen('screen-host-setup');
-  renderProfileBar();
+  renderProfileChip();
   startRoomsPolling();
 }
 
@@ -540,10 +584,13 @@ function isActivelyPlayingLiveGame() {
 // resigning) is deliberate: this should behave exactly like closing the
 // tab would — recoverable via the room's own reconnect flow — not like
 // clicking Resign, which is permanent.
-function onHomeLinkClick() {
+async function onHomeLinkClick() {
   const midGame = isActivelyPlayingLiveGame();
   if (midGame) {
-    const ok = confirm('Leave this game and go back to the home screen? Your seat stays open to rejoin from this device.');
+    const ok = await confirmDialog(
+      'Leave this game and go back to the home screen? Your seat stays open to rejoin from this device.',
+      'Leave',
+    );
     if (!ok) return;
   }
   if (ws) { ws.close(); ws = null; }
@@ -892,6 +939,8 @@ function showRematchDeclinedNotice(declinedBy) {
 // ------------------------------------------------------------- host flow --
 
 function wireStaticHandlers() {
+  $('confirm-modal-cancel').addEventListener('click', () => _resolveConfirmDialog(false));
+  $('confirm-modal-confirm').addEventListener('click', () => _resolveConfirmDialog(true));
   $('btn-create-game').addEventListener('click', onCreateGame);
   $('btn-join-by-code').addEventListener('click', onJoinByCode);
   $('btn-add-bot').addEventListener('click', onAddBot);
@@ -903,9 +952,14 @@ function wireStaticHandlers() {
   $('btn-back-to-join').addEventListener('click', () => { showScreen('screen-join'); refreshStatus(); });
   $('btn-spectate-join').addEventListener('click', onSpectateJoin);
   $('btn-new-game').addEventListener('click', () => leaveToHome());
-  $('btn-edit-profile').addEventListener('click', onEditProfileClick);
+  $('connection-badge').addEventListener('click', onProfileChipClick);
   $('btn-cancel-profile-edit').addEventListener('click', onCancelProfileEdit);
   $('btn-save-profile').addEventListener('click', onSaveProfileClick);
+  // Standard popover UX: a click anywhere outside the chip/popover itself
+  // closes it, same as a browser's own menus.
+  document.addEventListener('click', (e) => {
+    if (!$('profile-chip-wrap').contains(e.target)) closeProfilePopover();
+  });
   $('btn-change-join-identity').addEventListener('click', onChangeJoinIdentity);
   $('btn-change-spectate-identity').addEventListener('click', onChangeSpectateIdentity);
   $('home-link').addEventListener('click', onHomeLinkClick);
@@ -1765,8 +1819,9 @@ function onPass() {
   setMovePending();
 }
 
-function onResign() {
-  if (!confirm("Resign from the game? This can't be undone — you won't be able to rejoin.")) return;
+async function onResign() {
+  const ok = await confirmDialog("Are you sure you want to resign? You won't be able to rejoin.", 'Resign');
+  if (!ok) return;
   hide($('move-error'));
   hasResigned = true;
   clearRejoinInfo(currentRoomCode);

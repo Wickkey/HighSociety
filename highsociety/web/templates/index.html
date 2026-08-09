@@ -4,36 +4,41 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>High Society</title>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+CiAgPHJlY3Qgd2lkdGg9IjY0IiBoZWlnaHQ9IjY0IiByeD0iMTQiIGZpbGw9IiMwYjM0MjciLz4KICA8dGV4dCB4PSIzMyIgeT0iNDciIGZvbnQtc2l6ZT0iNDAiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZvbnQtZmFtaWx5PSJHZW9yZ2lhLCAnVGltZXMgTmV3IFJvbWFuJywgc2VyaWYiIGZpbGw9IiNjOGEwNGQiPiYjOTgyNDs8L3RleHQ+Cjwvc3ZnPgo=">
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
   <header class="topbar">
     <h1 id="home-link" class="home-link" role="link" tabindex="0">High&nbsp;Society</h1>
-    <span id="connection-badge" class="badge hidden"></span>
+    <div id="profile-chip-wrap" class="profile-chip-wrap">
+      <button type="button" id="connection-badge" class="badge profile-chip"></button>
+      <div id="profile-popover" class="profile-popover card panel hidden">
+        <label>Username <input type="text" id="profile-username" placeholder="e.g. alex" autocomplete="off"></label>
+        <label>Display name <input type="text" id="profile-display-name" placeholder="e.g. Alex" autocomplete="off"></label>
+        <div class="button-row">
+          <button type="button" id="btn-save-profile" class="primary">Save</button>
+          <button type="button" id="btn-cancel-profile-edit" class="secondary">Cancel</button>
+        </div>
+        <p id="profile-error" class="error hidden"></p>
+      </div>
+    </div>
   </header>
+
+  <!-- ===================== CONFIRM MODAL (resign, leave mid-game) ===================== -->
+  <div id="confirm-modal" class="modal-overlay hidden">
+    <div class="modal-box card panel">
+      <p id="confirm-modal-message"></p>
+      <div class="button-row modal-actions">
+        <button type="button" id="confirm-modal-cancel" class="secondary">Cancel</button>
+        <button type="button" id="confirm-modal-confirm" class="danger"></button>
+      </div>
+    </div>
+  </div>
 
   <main id="app">
 
     <!-- ===================== HOST SETUP ===================== -->
     <section id="screen-host-setup" class="screen hidden">
-      <div id="profile-bar" class="card panel profile-bar">
-        <div id="profile-display" class="hidden">
-          <span>Playing as <strong id="profile-name-display"></strong></span>
-          <button type="button" id="btn-edit-profile" class="secondary standalone">Change name</button>
-        </div>
-        <div id="profile-form">
-          <h2>Your name</h2>
-          <p class="muted">Saved on this device, so you won't need to enter it again next time.</p>
-          <label>Username <input type="text" id="profile-username" placeholder="e.g. alex" autocomplete="off"></label>
-          <label>Display name <input type="text" id="profile-display-name" placeholder="e.g. Alex" autocomplete="off"></label>
-          <div class="button-row">
-            <button type="button" id="btn-save-profile" class="primary">Save</button>
-            <button type="button" id="btn-cancel-profile-edit" class="secondary hidden">Cancel</button>
-          </div>
-          <p id="profile-error" class="error hidden"></p>
-        </div>
-      </div>
-
       <div class="card panel">
         <h2>Join a game</h2>
         <p class="muted">Public games anyone can join, or enter a room code a friend shared with you.</p>

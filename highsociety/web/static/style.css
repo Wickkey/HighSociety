@@ -58,6 +58,7 @@ body {
 .topbar {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 1rem;
   padding: 1.1rem 1.75rem;
   color: #f5f1e6;
@@ -85,6 +86,64 @@ body {
   letter-spacing: 0.02em;
 }
 .hidden { display: none !important; }
+
+/* Top-right profile chip: doubles as the in-session status pill ("playing
+   as X" / "spectating" / "reconnecting…" — see app.js's setBadge, not
+   clickable while locked into a room) and, whenever idle, as the entry
+   point into editing the saved device identity (see app.js's
+   renderProfileChip/loadProfile) — sized and positioned so it visibly
+   reads as "the profile area" rather than a small aside. */
+.profile-chip-wrap { position: relative; }
+.profile-chip {
+  font: inherit;
+  font-size: 0.95rem;
+  font-weight: 600;
+  padding: 0.5rem 1.1rem;
+  cursor: default;
+  color: #f5f1e6;
+}
+.profile-chip.editable {
+  cursor: pointer;
+  background: var(--accent-soft);
+  border-color: var(--accent-light);
+}
+.profile-chip.editable:hover { background: rgba(185, 138, 47, 0.28); }
+.profile-chip.editable::after { content: " ✎"; opacity: 0.75; font-size: 0.85em; }
+.profile-chip:focus-visible { outline: 2px solid var(--accent-light); outline-offset: 2px; }
+
+.profile-popover {
+  position: absolute;
+  top: calc(100% + 0.6rem);
+  right: 0;
+  width: 260px;
+  z-index: 200;
+  text-align: left;
+  padding: 1.1rem 1.2rem;
+  margin-bottom: 0;
+  /* .topbar sets a light color for its own dark background — reset back to
+     the standard panel text color here, since this popover has the usual
+     light .panel background despite living inside the dark header. */
+  color: var(--text);
+}
+
+/* ------------- confirm modal (resign, leaving mid-game) ------------- */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.5);
+}
+.modal-box {
+  max-width: 380px;
+  width: calc(100% - 2.5rem);
+  text-align: center;
+  margin-bottom: 0;
+}
+.modal-box p { margin: 0 0 1.1rem; font-size: 1.05rem; font-weight: 500; color: var(--text); }
+.modal-actions { justify-content: center; }
 
 #app {
   max-width: 1120px;
@@ -839,24 +898,10 @@ button.link-button {
 }
 button.link-button:hover { color: var(--accent); }
 
-/* The saved-identity strip at the top of the home screen (see app.js's
-   loadProfile/saveProfile) — deliberately looks like every other .panel,
-   not a distinct "settings" widget, since it's meant to read as a normal
-   part of the page rather than a system dialog. */
-#profile-display {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.8rem;
-  flex-wrap: wrap;
-}
-#profile-display span { font-size: 0.95rem; }
-#profile-form h2 { margin-top: 0; }
-
-/* Mirrors #profile-display's pattern on the join/spectate screens: once a
-   saved identity exists, the raw username/name inputs stay in the DOM
-   (still readable by the same onJoin()/onSpectateJoin() that always did)
-   but hidden behind a one-line "Joining as X — not you?" confirmation. */
+/* Once a saved identity exists, the join/spectate screens' raw
+   username/name inputs stay in the DOM (still readable by the same
+   onJoin()/onSpectateJoin() that always did) but hidden behind a one-line
+   "Joining as X — not you?" confirmation. */
 #join-as-label, #spectate-as-label { margin: 0 0 0.9rem; }
 
 #spec-chat-input {
