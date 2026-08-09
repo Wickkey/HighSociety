@@ -16,7 +16,8 @@ def test_create_bot_players_builds_one_instance_per_entry_with_distinct_username
     assert len(set(usernames)) == 3
     for p in players:
         assert p.name.lower() == p.username
-        assert p.name in BOT_NAME_POOL
+        assert p.name.endswith(" bot")
+        assert p.name[: -len(" bot")] in BOT_NAME_POOL
 
 
 def test_create_players_fills_bot_seats_first_and_prompts_for_the_rest(monkeypatch):
@@ -33,7 +34,8 @@ def test_create_players_fills_bot_seats_first_and_prompts_for_the_rest(monkeypat
     players = create_players(num_players=3, bot_mix=["greedy"])
 
     assert type(players[0]) is GreedyBot
-    assert players[0].name in BOT_NAME_POOL
+    assert players[0].name.endswith(" bot")
+    assert players[0].name[: -len(" bot")] in BOT_NAME_POOL
     assert [p.username for p in players[1:]] == ["human1", "human2"]
     assert prompted_indices == [1, 2]
 
