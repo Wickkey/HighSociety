@@ -165,12 +165,21 @@ function ordinal(n) {
 // the game ends here). Self-cleans visually the instant showScreen() hides
 // this screen for the finished screen, so no extra coordination is needed
 // between this timer and the screen transition.
+// Tracks when the final-green overlay last appeared, so the game_over
+// handler below can hold off switching to the results screen until it's
+// actually had time on screen — the game ending this way has nothing left
+// to broadcast afterward (see gameplay.py's comment on this being
+// deliberately unpaced), so game_over used to arrive right on its heels
+// and cut the overlay off before a human could read it.
+let finalGreenOverlayShownAt = null;
+
 function showFinalGreenOverlay(isSpectator, count) {
   const overlay = $(isSpectator ? 'spec-final-green-overlay' : 'final-green-overlay');
   overlay.querySelector('.final-green-title').textContent = `${ordinal(count)} Green Card Revealed!`;
   overlay.classList.remove('show');
   void overlay.offsetWidth; // restart the entrance animation even on a rapid repeat
   overlay.classList.add('show');
+  finalGreenOverlayShownAt = Date.now();
   clearTimeout(overlay._hideTimer);
   overlay._hideTimer = setTimeout(() => overlay.classList.remove('show'), 4000);
 }
@@ -969,6 +978,7 @@ function wireStaticHandlers() {
   $('btn-place-bid').addEventListener('click', onPlaceBid);
   $('btn-pass').addEventListener('click', onPass);
   $('btn-resign').addEventListener('click', onResign);
+  $('btn-discard-painting').addEventListener('click', onDiscardPainting);
   $('btn-spec-chat-send').addEventListener('click', onSpecChatSend);
   $('spec-chat-input').addEventListener('keydown', (e) => { if (e.key === 'Enter') onSpecChatSend(); });
   $('spec-chat-target-toggle').addEventListener('change', (e) => {
@@ -1118,12 +1128,12 @@ function handlePlayerMessage(msg) {
     case 'IDENTIFY_SUCCESS':
       if (isReconnecting) {
         isReconnecting = false;
-        setBadge(`playing as ${game.myUsername}`);
+        setBadge(`Playing as ${game.myUsername}`);
         ensureGameScreenVisible(false);
       } else {
         $('join-form').classList.add('hidden');
         $('join-waiting').classList.remove('hidden');
-        setBadge(`playing as ${game.myUsername}`);
+        setBadge(`Playing as ${game.myUsername}`);
         startWaitingRoomPolling();
         if (msg.data && msg.data.rejoin_token) {
           saveRejoinInfo(currentRoomCode, msg.data.rejoin_token, pendingJoin.username, pendingJoin.name);
@@ -1346,7 +1356,19 @@ function applyGameMessage(msg, isSpectator) {
         // nothing closes this socket to trigger the old ws.onclose ->
         // refreshStatus() transition to the results screen. This is that
         // signal instead.
-        refreshStatus();
+        //
+        // If the game just ended via the 4th-green-card overlay, give it
+        // the same ~3.5s on screen it always intended to have (see
+        // showFinalGreenOverlay) before switching to results — otherwise
+        // this fires right on its heels and the overlay flashes past
+        // unread. A normal deck-exhaustion ending never showed that
+        // overlay, so this is a no-op wait there.
+        const elapsedSinceGreen = finalGreenOverlayShownAt ? Date.now() - finalGreenOverlayShownAt : Infinity;
+        const wait = Math.max(0, 3500 - elapsedSinceGreen);
+        setTimeout(() => {
+          finalGreenOverlayShownAt = null;
+          refreshStatus();
+        }, wait);
       }
       if (msg.prompt && !isDuplicateOfStructuredEvent(msg.prompt)) logLine(msg.prompt.trim(), isSpectator);
       break;
@@ -1634,8 +1656,9 @@ function renderAuctionPanel(isSpectator) {
   // has its own pulsing dot, and the auction panel otherwise represents
   // shared state (card, bid) that stays fully legible regardless of whose
   // turn it is, not something that dims/greys based on turn.
+  const turnText = game.turnPlayer === game.myUsername ? 'Your turn' : `${escapeHtml(game.turnPlayer)}'s turn`;
   $(`${prefix}turn-label`).innerHTML = game.turnPlayer
-    ? `<span class="turn-dot"></span>${escapeHtml(game.turnPlayer)}'s turn`
+    ? `<span class="turn-dot"></span>${turnText}`
     : '';
 
   const bidEl = $(`${prefix}max-bid`);
@@ -1779,20 +1802,38 @@ function updateSelectedBidTotal() {
   $('new-total-bid').textContent = game.myAuctionBid + addingTotal;
 }
 
+// Selecting a painting doesn't discard it immediately — a Faux Pas is
+// irreversible, and a bare click (unlike a bid, which shows its own
+// running total before submission) gave a hand slip no chance to be
+// noticed before it was already sent. Bots are unaffected: this is purely
+// this UI's own two-step confirmation on top of the same RESPONSE message
+// a single click always sent — the engine still just sees one answer.
+let selectedDiscardValue = null;
+
 function renderPaintingChoices(values) {
   const row = $('my-paintings');
   row.innerHTML = '';
+  selectedDiscardValue = null;
+  $('btn-discard-painting').disabled = true;
   values.forEach((value) => {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'chip neutral';
     btn.textContent = value;
     btn.addEventListener('click', () => {
-      ws.send(JSON.stringify({ message_type: 'RESPONSE', prompt: String(value) }));
-      setMovePending();
+      selectedDiscardValue = value;
+      row.querySelectorAll('button.chip').forEach((b) => b.classList.remove('selected'));
+      btn.classList.add('selected');
+      $('btn-discard-painting').disabled = false;
     });
     row.appendChild(btn);
   });
+}
+
+function onDiscardPainting() {
+  if (selectedDiscardValue === null) return;
+  ws.send(JSON.stringify({ message_type: 'RESPONSE', prompt: String(selectedDiscardValue) }));
+  setMovePending();
 }
 
 // ------------------------------------------------------------- controls --
@@ -1820,7 +1861,7 @@ function onPass() {
 }
 
 async function onResign() {
-  const ok = await confirmDialog("Are you sure you want to resign? You won't be able to rejoin.", 'Resign');
+  const ok = await confirmDialog('Are you sure you want to resign?', 'Resign');
   if (!ok) return;
   hide($('move-error'));
   hasResigned = true;

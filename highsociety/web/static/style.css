@@ -707,6 +707,7 @@ button.secondary.standalone { margin-top: 0.9rem; display: inline-block; }
 .chip.money { background: var(--chip-money); color: #fff; }
 .chip.money.selected { background: var(--chip-money-selected); border-color: #fff; transform: translateY(-2px); }
 .chip.neutral { background: var(--card-neutral); color: #fff; }
+.chip.neutral.selected { background: var(--accent); border-color: #fff; transform: translateY(-2px); }
 
 /* status cards */
 .status-card {
