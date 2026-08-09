@@ -433,7 +433,7 @@ button.secondary.standalone { margin-top: 0.9rem; display: inline-block; }
 }
 .final-green-banner {
   position: relative;
-  background: linear-gradient(160deg, var(--accent-highlight) 0%, var(--green-dot) 55%, #1f7a4d 100%);
+  background: linear-gradient(160deg, var(--accent-highlight) 0%, var(--green-dot) 55%, var(--chip-money) 100%);
   border: 3px solid rgba(255, 255, 255, 0.65);
   border-radius: var(--radius);
   padding: 1.6rem 2.6rem;
@@ -491,12 +491,12 @@ button.secondary.standalone { margin-top: 0.9rem; display: inline-block; }
 }
 .game-start-banner {
   position: relative;
-  background: linear-gradient(160deg, #f5e2b8 0%, var(--accent-highlight) 55%, var(--accent-strong) 100%);
+  background: linear-gradient(160deg, var(--accent-highlight) 0%, var(--accent) 55%, var(--accent-strong) 100%);
   border: 3px solid rgba(255, 255, 255, 0.65);
   border-radius: var(--radius);
   padding: 1.6rem 2.6rem;
   text-align: center;
-  box-shadow: var(--shadow), 0 0 0 6px rgba(185, 138, 47, 0.25);
+  box-shadow: var(--shadow), 0 0 0 6px var(--accent-soft);
   transform: scale(0.4) rotate(-6deg);
   opacity: 0;
 }
@@ -505,19 +505,19 @@ button.secondary.standalone { margin-top: 0.9rem; display: inline-block; }
              game-start-glow 1.3s ease-in-out 0.5s infinite;
 }
 @keyframes game-start-glow {
-  0%, 100% { box-shadow: var(--shadow), 0 0 0 6px rgba(185, 138, 47, 0.25); }
+  0%, 100% { box-shadow: var(--shadow), 0 0 0 6px var(--accent-soft); }
   50% { box-shadow: var(--shadow), 0 0 0 14px rgba(185, 138, 47, 0.45); }
 }
 .game-start-icon { font-size: 2.4rem; line-height: 1; }
 .game-start-title {
   font-size: 1.4rem;
   font-weight: 800;
-  color: #4a3208;
+  color: var(--text);
   text-transform: uppercase;
   letter-spacing: 0.03em;
   margin: 0.35rem 0 0.2rem;
 }
-.game-start-sub { font-size: 0.95rem; font-weight: 600; color: #5c4310; }
+.game-start-sub { font-size: 0.95rem; font-weight: 600; color: var(--text); opacity: 0.8; }
 
 .bid-block { margin-top: 1rem; }
 .bid-label {
