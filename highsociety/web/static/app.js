@@ -150,27 +150,62 @@ function showFinalGreenOverlay(isSpectator, count) {
 // Each tick updates the same banner in place (rather than re-popping fresh
 // every second) so it reads as one smooth countdown; only pops in once, on
 // the first tick.
+// Server-side, each countdown tick is really 1 real second apart
+// (gameplay.py's countdown_to_start does an actual time.sleep(1) between
+// them) — but nothing guarantees they *arrive* that evenly spaced: a slow
+// connection, a cold-started host, or just ordinary network jitter can
+// buffer several of them and deliver them in a near-simultaneous burst.
+// Without a floor on how long each one stays on screen, a burst like that
+// collapses the whole countdown into a single instant flash — exactly the
+// "didn't get to see 3, 2, 1" report this queue fixes. Mirrors the
+// enqueueEvent/pumpEventQueue toast queue's shape, but as its own queue
+// since this needs a different minimum duration and end state (hidden, not
+// faded-and-cleared) than a routine toast.
+const countdownQueue = { game: [], spec: [] };
+const countdownBusy = { game: false, spec: false };
+const COUNTDOWN_STEP_MIN_MS = 700;
+
 function showCountdownOverlay(isSpectator, secondsLeft) {
-  const overlay = $(isSpectator ? 'spec-game-start-overlay' : 'game-start-overlay');
-  const alreadyShowing = overlay.classList.contains('show');
-  overlay.querySelector('.game-start-icon').textContent = '⏳';
-  overlay.querySelector('.game-start-title').textContent = `Game starting in ${secondsLeft}…`;
-  overlay.querySelector('.game-start-sub').textContent = 'Get ready!';
-  clearTimeout(overlay._hideTimer);
-  if (!alreadyShowing) {
-    overlay.classList.remove('show');
-    void overlay.offsetWidth;
-    overlay.classList.add('show');
-  }
+  queueCountdownStep(isSpectator, { kind: 'tick', secondsLeft });
 }
 
 // The countdown's final tick — just clear the overlay so the first real
 // auction underneath takes over immediately, no separate "Game Started!"
 // message.
 function hideCountdownOverlay(isSpectator) {
-  const overlay = $(isSpectator ? 'spec-game-start-overlay' : 'game-start-overlay');
-  clearTimeout(overlay._hideTimer);
-  overlay.classList.remove('show');
+  queueCountdownStep(isSpectator, { kind: 'hide' });
+}
+
+function queueCountdownStep(isSpectator, step) {
+  const key = isSpectator ? 'spec' : 'game';
+  countdownQueue[key].push(step);
+  pumpCountdownQueue(key);
+}
+
+function pumpCountdownQueue(key) {
+  if (countdownBusy[key] || countdownQueue[key].length === 0) return;
+  countdownBusy[key] = true;
+  const step = countdownQueue[key].shift();
+  const overlay = $(key === 'spec' ? 'spec-game-start-overlay' : 'game-start-overlay');
+
+  if (step.kind === 'tick') {
+    const alreadyShowing = overlay.classList.contains('show');
+    overlay.querySelector('.game-start-icon').textContent = '⏳';
+    overlay.querySelector('.game-start-title').textContent = `Game starting in ${step.secondsLeft}…`;
+    overlay.querySelector('.game-start-sub').textContent = 'Get ready!';
+    if (!alreadyShowing) {
+      overlay.classList.remove('show');
+      void overlay.offsetWidth; // restart the entrance animation even on a rapid repeat
+      overlay.classList.add('show');
+    }
+  } else {
+    overlay.classList.remove('show');
+  }
+
+  setTimeout(() => {
+    countdownBusy[key] = false;
+    pumpCountdownQueue(key);
+  }, COUNTDOWN_STEP_MIN_MS);
 }
 
 // Points formula mirrors BasePlayer.__calculate_points(): sum of values,
