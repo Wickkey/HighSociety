@@ -144,6 +144,38 @@ function showFinalGreenOverlay(isSpectator, count) {
   overlay._hideTimer = setTimeout(() => overlay.classList.remove('show'), 4000);
 }
 
+// The pre-game "starting in N..." countdown gets the same unmissable-
+// overlay treatment as the game-ending green card, so the moment a lobby
+// actually becomes a live game reads as an event, not a buried log line.
+// Each tick updates the same banner in place (rather than re-popping fresh
+// every second) so it reads as one smooth countdown; only pops in once, on
+// the first tick.
+function showCountdownOverlay(isSpectator, secondsLeft) {
+  const overlay = $(isSpectator ? 'spec-game-start-overlay' : 'game-start-overlay');
+  const alreadyShowing = overlay.classList.contains('show');
+  overlay.querySelector('.game-start-icon').textContent = '⏳';
+  overlay.querySelector('.game-start-title').textContent = `Game starting in ${secondsLeft}…`;
+  overlay.querySelector('.game-start-sub').textContent = 'Get ready!';
+  clearTimeout(overlay._hideTimer);
+  if (!alreadyShowing) {
+    overlay.classList.remove('show');
+    void overlay.offsetWidth;
+    overlay.classList.add('show');
+  }
+}
+
+// The countdown's final tick — a shorter linger than the countdown itself
+// since real gameplay (the first auction) starts immediately after.
+function showGameStartedOverlay(isSpectator) {
+  const overlay = $(isSpectator ? 'spec-game-start-overlay' : 'game-start-overlay');
+  overlay.querySelector('.game-start-icon').textContent = '🚀';
+  overlay.querySelector('.game-start-title').textContent = 'Game Started!';
+  overlay.querySelector('.game-start-sub').textContent = 'Good luck!';
+  overlay.classList.add('show');
+  clearTimeout(overlay._hideTimer);
+  overlay._hideTimer = setTimeout(() => overlay.classList.remove('show'), 1500);
+}
+
 // Points formula mirrors BasePlayer.__calculate_points(): sum of values,
 // times the product of multipliers (Passe: -5/×1, Scandale: 0/×0.5,
 // Prestige: 0/×2) — see components_module/{disgrace_card,prestige_card}.py.
@@ -863,6 +895,10 @@ function applyGameMessage(msg, isSpectator) {
           o.statusCards = d.status_cards;
           renderOpponents(isSpectator);
         }
+      } else if (d && d.event === 'countdown') {
+        showCountdownOverlay(isSpectator, d.seconds_left);
+      } else if (d && d.event === 'countdown_finished') {
+        showGameStartedOverlay(isSpectator);
       }
       if (msg.prompt && !isDuplicateOfStructuredEvent(msg.prompt)) logLine(msg.prompt.trim(), isSpectator);
       break;

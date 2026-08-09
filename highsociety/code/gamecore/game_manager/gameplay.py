@@ -683,11 +683,12 @@ class PlayGame():
 
     def countdown_to_start(self, countdown: int = 3) -> None:
         for remaining in range(countdown, 0, -1):
-            self.host.send_message(f"⏳  Game starting in {remaining}...")
+            self.host.send_message(f"⏳  Game starting in {remaining}...",
+                                    data={"event": "countdown", "seconds_left": remaining})
             time.sleep(1)
 
         # final message:
-        self.host.send_message(f"🚀 Game Started!")
+        self.host.send_message(f"🚀 Game Started!", data={"event": "countdown_finished"})
 
 
     def play_game(self):

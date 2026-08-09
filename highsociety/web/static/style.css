@@ -466,6 +466,59 @@ button.secondary.standalone { margin-top: 0.9rem; display: inline-block; }
 }
 .final-green-sub { font-size: 0.95rem; font-weight: 600; color: #1c2b1f; }
 
+/* ------------- game-starting countdown overlay: same mechanics as the
+   final-green-overlay above (fixed, full-viewport, pop-in banner,
+   bypasses the toast queue — see showCountdownOverlay in app.js), but gold
+   accent-themed rather than green, since this isn't a green-card event —
+   it's the excited "we're about to begin" moment every game opens with. */
+.game-start-overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 500;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.35s ease;
+}
+.game-start-overlay.show { opacity: 1; }
+.game-start-overlay::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle, rgba(17, 68, 48, 0.5) 0%, rgba(11, 52, 39, 0.85) 100%);
+}
+.game-start-banner {
+  position: relative;
+  background: linear-gradient(160deg, #f5e2b8 0%, var(--accent-highlight) 55%, var(--accent-strong) 100%);
+  border: 3px solid rgba(255, 255, 255, 0.65);
+  border-radius: var(--radius);
+  padding: 1.6rem 2.6rem;
+  text-align: center;
+  box-shadow: var(--shadow), 0 0 0 6px rgba(185, 138, 47, 0.25);
+  transform: scale(0.4) rotate(-6deg);
+  opacity: 0;
+}
+.game-start-overlay.show .game-start-banner {
+  animation: final-green-pop 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) forwards,
+             game-start-glow 1.3s ease-in-out 0.5s infinite;
+}
+@keyframes game-start-glow {
+  0%, 100% { box-shadow: var(--shadow), 0 0 0 6px rgba(185, 138, 47, 0.25); }
+  50% { box-shadow: var(--shadow), 0 0 0 14px rgba(185, 138, 47, 0.45); }
+}
+.game-start-icon { font-size: 2.4rem; line-height: 1; }
+.game-start-title {
+  font-size: 1.4rem;
+  font-weight: 800;
+  color: #4a3208;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  margin: 0.35rem 0 0.2rem;
+}
+.game-start-sub { font-size: 0.95rem; font-weight: 600; color: #5c4310; }
+
 .bid-block { margin-top: 1rem; }
 .bid-label {
   display: block;
