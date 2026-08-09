@@ -539,6 +539,11 @@ def _handle_player_reconnect(ws, room: "GameRoom", rejoin_token: str) -> None:
             (p for p in room.players if isinstance(p, NetworkPlayer) and p.username == username),
             None,
         )
+    if player is not None and player.resigned:
+        # An explicit resignation is permanent — unlike an ordinary dropped
+        # connection, there's no seat left to come back to.
+        _send(ws, room.game_id, "IDENTIFY_ERROR", "You resigned from this game and can't rejoin.")
+        return
     if player is None or room.state not in ("starting", "in_progress"):
         _send(ws, room.game_id, "IDENTIFY_ERROR", "This reconnect link is no longer valid.")
         return

@@ -246,6 +246,13 @@ let roomsPollTimer = null;
 // guards against retrying a bad/expired token in a loop.
 let isReconnecting = false;
 let reconnectAttempted = false;
+// Set the moment the user clicks Resign — the client already knows this seat
+// is gone for good, so renderForStatus() should never try attemptReconnect()
+// for it. Waiting for the server's IDENTIFY_ERROR round-trip instead is
+// unreliable: the dev WebSocket server can write trailing bytes after closing
+// a just-rejected reconnect socket, which some browsers treat as a framing
+// error before the error message ever reaches onmessage.
+let hasResigned = false;
 
 function rejoinStorageKey(roomCode) {
   return `hs_rejoin_${roomCode}`;
@@ -367,6 +374,7 @@ function leaveToHome() {
   clearRejoinInfo(currentRoomCode);
   currentRoomCode = null;
   reconnectAttempted = false;
+  hasResigned = false;
   history.replaceState(null, '', location.pathname);
   stopPolling();
   showScreen('screen-host-setup');
@@ -456,7 +464,7 @@ function renderForStatus(status) {
   }
   // starting / in_progress
   if (!ws) {
-    if (!reconnectAttempted) {
+    if (!hasResigned && !reconnectAttempted) {
       reconnectAttempted = true;
       if (attemptReconnect()) {
         stopPolling();
@@ -467,7 +475,9 @@ function renderForStatus(status) {
     showScreen('screen-join');
     $('join-form').classList.add('hidden');
     $('join-waiting').classList.add('hidden');
-    $('lobby-status').textContent = 'A game is already in progress — you can watch as a spectator.';
+    $('lobby-status').textContent = hasResigned
+      ? "You resigned from this game — you can watch as a spectator."
+      : 'A game is already in progress — you can watch as a spectator.';
   }
 }
 
@@ -605,7 +615,7 @@ function wireStaticHandlers() {
   $('btn-new-game').addEventListener('click', leaveToHome);
   $('btn-place-bid').addEventListener('click', onPlaceBid);
   $('btn-pass').addEventListener('click', onPass);
-  $('btn-quit').addEventListener('click', onQuit);
+  $('btn-resign').addEventListener('click', onResign);
   $('btn-spec-chat-send').addEventListener('click', onSpecChatSend);
   $('spec-chat-input').addEventListener('keydown', (e) => { if (e.key === 'Enter') onSpecChatSend(); });
   $('spec-chat-target-toggle').addEventListener('change', (e) => {
@@ -726,17 +736,19 @@ function handlePlayerMessage(msg) {
       break;
     case 'IDENTIFY_ERROR':
       if (isReconnecting) {
-        // Token was invalid/expired (e.g. the game finished in the
-        // meantime, or someone else already reconnected with it) — drop it
-        // and fall back to the normal "already in progress" message rather
-        // than retrying it forever.
+        // Token was invalid/expired (e.g. resigned, the game finished in
+        // the meantime, or someone else already reconnected with it) — drop
+        // it and fall back to the normal "already in progress" message
+        // rather than retrying it forever. Show the server's actual reason
+        // when it gave one (e.g. "You resigned...") instead of always the
+        // generic fallback text.
         isReconnecting = false;
         clearRejoinInfo(currentRoomCode);
         ws.close();
         showScreen('screen-join');
         $('join-form').classList.add('hidden');
         $('join-waiting').classList.add('hidden');
-        $('lobby-status').textContent = 'A game is already in progress — you can watch as a spectator.';
+        $('lobby-status').textContent = msg.prompt || 'A game is already in progress — you can watch as a spectator.';
       } else {
         pendingIdentifyError = msg.prompt;
         ws.close();
@@ -1098,7 +1110,7 @@ function applyPlayerMove(msg) {
     // the INPUT_ERROR case above) — the server loops back and re-prompts
     // right away, far faster than a human can read the error. Leaving the
     // error up means a rejected bid stays visible until the player actually
-    // does something new (onPlaceBid/onPass/onQuit below each clear it
+    // does something new (onPlaceBid/onPass/onResign below each clear it
     // before sending), exactly matching the client-side "select at least
     // one money card" case.
     discardControls.classList.add('hidden');
@@ -1371,9 +1383,13 @@ function onPass() {
   setMovePending();
 }
 
-function onQuit() {
-  if (!confirm('Quit the game? This cannot be undone.')) return;
+function onResign() {
+  if (!confirm("Resign from the game? This can't be undone — you won't be able to rejoin.")) return;
   hide($('move-error'));
+  hasResigned = true;
+  clearRejoinInfo(currentRoomCode);
+  // Wire command stays "quit" (shared with CLI/network play, see
+  // gameplay.py) — "Resign" is just the web UI's label for it.
   ws.send(JSON.stringify({ message_type: 'RESPONSE', prompt: 'quit' }));
   setMovePending();
 }

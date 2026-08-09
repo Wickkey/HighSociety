@@ -21,6 +21,13 @@ class NetworkPlayer(BasePlayer):
         self.transport = transport
         self.active = True
         self.game_id: str = game_id
+        # True only for a genuine, explicit "quit" command actually received
+        # from the client (see get_bid() below) — never set for a dropped
+        # connection, which also sets active=False but should still be
+        # reconnectable (see web_server.py's rejoin-token handling). This is
+        # what lets the web UI's "Resign" button permanently forfeit a seat,
+        # distinct from an accidental disconnect.
+        self.resigned = False
 
     def start_receiver_thread(self) -> None:
         """Begin receiving messages in the background. Kept as an explicit,
@@ -145,7 +152,13 @@ class NetworkPlayer(BasePlayer):
 
         # Handle special commands
         if bid["prompt"].lower() in ["pass", "fold", "quit"]:
-            return bid["prompt"].lower()
+            cmd = bid["prompt"].lower()
+            if cmd == "quit":
+                # A real "quit" command actually received from the client —
+                # not the disconnect fallback a few lines up, which also
+                # returns "quit" but must stay reconnectable.
+                self.resigned = True
+            return cmd
 
         # Parse list input like [1, 2, 3]
         if bid["prompt"].startswith("[") and bid["prompt"].endswith("]"):

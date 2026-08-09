@@ -620,3 +620,50 @@ def test_disconnecting_during_lobby_frees_the_seat(running_web_server):
     alice2.handshake()
     assert any(p.username == "alice" for p in room.players)
     alice2.close()
+
+
+def test_resigning_permanently_forfeits_the_seat_unlike_a_dropped_connection(running_web_server):
+    """
+    The web UI's "Resign" button sends the same wire command a disconnect
+    falls back to ("quit" — see NetworkPlayer.get_bid), but the two must not
+    be treated the same for reconnection purposes: a dropped connection is
+    recoverable (see the mid-game reconnect test above), an explicit
+    resignation is not.
+    """
+    port = running_web_server
+    room_code = web_server.app.test_client().post(
+        "/api/create_game", json={"seats": 2, "bot_mix": ["pass"], "seed": 1, "bot_think_time": 0}
+    ).get_json()["room_code"]
+
+    alice = ScriptedWSClient(_ws_url(port, f"/ws?room={room_code}"), "alice")
+    alice.handshake()
+    token = alice.rejoin_token()
+    assert token
+
+    deadline = time.time() + 10
+    got_move = False
+    while time.time() < deadline and not got_move:
+        raw = alice.client.receive(timeout=1.0)
+        if raw is None:
+            continue
+        if json.loads(raw).get("message_type") == "PLAYER_MOVE":
+            got_move = True
+    assert got_move, "alice never got a turn"
+
+    # Explicitly resign, same as clicking the web UI's Resign button.
+    alice._send({"message_type": "RESPONSE", "prompt": "quit"})
+
+    room = web_server._rooms[room_code]
+    alice_player = next(p for p in room.players if p.username == "alice")
+    deadline = time.time() + 10
+    while time.time() < deadline and not alice_player.resigned:
+        threading.Event().wait(0.1)
+    assert alice_player.resigned, "explicit quit should mark the player as resigned"
+    assert not alice_player.active
+
+    reconnect_attempt = simple_websocket.Client(_ws_url(port, f"/ws?room={room_code}&rejoin_token={token}"))
+    msg = json.loads(reconnect_attempt.receive(timeout=5))
+    assert msg["message_type"] == "IDENTIFY_ERROR"
+    assert "resigned" in msg["prompt"].lower()
+
+    alice.close()
