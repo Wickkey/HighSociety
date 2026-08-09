@@ -108,7 +108,16 @@ body {
   border-color: var(--accent-light);
 }
 .profile-chip.editable:hover { background: rgba(185, 138, 47, 0.28); }
-.profile-chip.editable::after { content: " ✎"; opacity: 0.75; font-size: 0.85em; }
+.profile-chip.editable::after {
+  content: " ✎";
+  display: inline-block;
+  /* Mirrors the glyph horizontally so the pencil tip reads bottom-left with
+     the other end top-right, rather than however the unflipped character
+     happens to point. */
+  transform: scaleX(-1);
+  opacity: 0.75;
+  font-size: 0.85em;
+}
 .profile-chip:focus-visible { outline: 2px solid var(--accent-light); outline-offset: 2px; }
 
 .profile-popover {
