@@ -55,7 +55,7 @@ function wsUrl(path) {
 
 function setBadge(text) {
   const badge = $('connection-badge');
-  badge.textContent = text;
+  $('connection-badge-text').textContent = text;
   badge.classList.remove('hidden');
   // A live room session's identity is already fixed — editing the *saved*
   // profile wouldn't change the current seat, so the chip stops being an
@@ -365,7 +365,7 @@ let joinIdentityOverridden = false;
 function renderProfileChip() {
   const badge = $('connection-badge');
   const profile = loadProfile();
-  badge.textContent = profile ? profile.name : 'Guest';
+  $('connection-badge-text').textContent = profile ? profile.name : 'Guest';
   badge.classList.remove('hidden');
   badge.classList.add('editable');
   closeProfilePopover();

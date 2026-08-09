@@ -98,26 +98,38 @@ body {
   font: inherit;
   font-size: 0.95rem;
   font-weight: 600;
-  padding: 0.5rem 1.1rem;
+  padding: 0.6rem 1.3rem;
   cursor: default;
   color: #f5f1e6;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
 }
 .profile-chip.editable {
   cursor: pointer;
   background: var(--accent-soft);
   border-color: var(--accent-light);
+  /* A faint lift, like every other clickable panel/button in the app
+     (.panel's own --shadow-sm), so the chip reads as pressable rather than
+     a flat label. */
+  box-shadow: var(--shadow-sm);
 }
-.profile-chip.editable:hover { background: rgba(185, 138, 47, 0.28); }
-.profile-chip.editable::after {
-  content: " ✎";
-  display: inline-block;
-  /* Mirrors the glyph horizontally so the pencil tip reads bottom-left with
-     the other end top-right, rather than however the unflipped character
-     happens to point. */
-  transform: scaleX(-1);
-  opacity: 0.75;
-  font-size: 0.85em;
+.profile-chip.editable:hover {
+  background: rgba(185, 138, 47, 0.28);
+  box-shadow: var(--shadow);
 }
+/* A real line-art icon rather than a Unicode glyph — a font's ✎ renders
+   inconsistently thick/thin at this size and can't be tuned to sit well
+   against semi-bold UI text. stroke-width 2 in this 24-unit viewBox reads
+   as a light-medium line that matches the chip label's weight rather than
+   competing with it; sized to roughly the label's cap-height. */
+.profile-chip-icon {
+  display: none;
+  width: 15px;
+  height: 15px;
+  flex-shrink: 0;
+}
+.profile-chip.editable .profile-chip-icon { display: inline-block; }
 .profile-chip:focus-visible { outline: 2px solid var(--accent-light); outline-offset: 2px; }
 
 .profile-popover {

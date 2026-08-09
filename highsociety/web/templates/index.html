@@ -11,7 +11,13 @@
   <header class="topbar">
     <h1 id="home-link" class="home-link" role="link" tabindex="0">High&nbsp;Society</h1>
     <div id="profile-chip-wrap" class="profile-chip-wrap">
-      <button type="button" id="connection-badge" class="badge profile-chip"></button>
+      <button type="button" id="connection-badge" class="badge profile-chip">
+        <span id="connection-badge-text"></span>
+        <svg class="profile-chip-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/>
+        </svg>
+      </button>
       <div id="profile-popover" class="profile-popover card panel hidden">
         <label>Username <input type="text" id="profile-username" placeholder="e.g. alex" autocomplete="off"></label>
         <label>Display name <input type="text" id="profile-display-name" placeholder="e.g. Alex" autocomplete="off"></label>
