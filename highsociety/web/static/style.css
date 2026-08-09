@@ -77,6 +77,29 @@ body {
 .home-link { cursor: pointer; }
 .home-link:hover { opacity: 0.85; }
 .home-link:focus-visible { outline: 2px solid var(--accent-light); outline-offset: 3px; }
+.topbar-right {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+/* Plain mark, no pill/background — sits as a quiet peer to the profile chip
+   rather than competing with it for attention. */
+.github-link {
+  display: inline-flex;
+  color: #f5f1e6;
+  opacity: 0.8;
+  transition: opacity 0.15s ease, color 0.15s ease, transform 0.15s ease;
+}
+.github-link:hover {
+  opacity: 1;
+  color: var(--accent-light);
+  transform: translateY(-1px);
+}
+.github-link:focus-visible {
+  outline: 2px solid var(--accent-light);
+  outline-offset: 3px;
+  border-radius: 4px;
+}
 .badge {
   font-size: 0.75rem;
   padding: 0.3rem 0.7rem;
