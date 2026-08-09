@@ -315,9 +315,15 @@ def test_full_game_over_websockets_against_a_bot(running_web_server):
     player.handshake()
     player.start()
 
+    # Player connections are deliberately kept open past game-end now (see
+    # GameRoom.run_game — rematches reuse the same WebSocket), so
+    # player._running no longer flips False on its own here; wait on the
+    # room's own state instead, same as the rematch tests below.
+    room = web_server._rooms[room_code]
     deadline = time.time() + 30
-    while time.time() < deadline and player._running:
+    while time.time() < deadline and room.state != "finished":
         threading.Event().wait(0.2)
+    assert room.state == "finished"
 
     all_prompts = " ".join(player.prompts())
     assert "Game Started" in all_prompts or "🚀" in all_prompts
@@ -667,3 +673,118 @@ def test_resigning_permanently_forfeits_the_seat_unlike_a_dropped_connection(run
     assert "resigned" in msg["prompt"].lower()
 
     alice.close()
+
+
+def test_single_player_rematch_reuses_the_connection_for_a_fresh_game(running_web_server):
+    """
+    With only one human at the table, requesting a rematch auto-accepts (the
+    requester's own vote is enough — see _start_rematch_request) and should
+    start a brand new game over the *same* WebSocket, no rejoin needed.
+    """
+    port = running_web_server
+    room_code = web_server.app.test_client().post(
+        "/api/create_game", json={"seats": 2, "bot_mix": ["pass"], "seed": 42, "bot_think_time": 0}
+    ).get_json()["room_code"]
+
+    alice = ScriptedWSClient(_ws_url(port, f"/ws?room={room_code}"), "alice")
+    alice.handshake()
+    alice.start()
+
+    room = web_server._rooms[room_code]
+    deadline = time.time() + 30
+    while time.time() < deadline and room.state != "finished":
+        threading.Event().wait(0.2)
+    assert room.state == "finished"
+    first_game = room.game
+
+    # Player connections are kept open past game-end specifically for this
+    # (see GameRoom.run_game) — the connection must still be usable here.
+    assert alice.client.connected
+
+    alice._send({"message_type": "REMATCH_REQUEST", "data": {"bot_mix": ["greedy"]}})
+
+    deadline = time.time() + 10
+    while time.time() < deadline and not alice.messages_of_type("REMATCH_STARTING"):
+        threading.Event().wait(0.1)
+    assert alice.messages_of_type("REMATCH_STARTING"), "alice never got REMATCH_STARTING"
+    assert room.bot_mix == ["greedy"], "the requested bot mix should replace the room's old one"
+
+    deadline = time.time() + 30
+    while time.time() < deadline and (room.state != "finished" or room.game is first_game):
+        threading.Event().wait(0.2)
+    assert room.state == "finished"
+    assert room.game is not None and room.game is not first_game, "rematch should run a brand new PlayGame"
+
+    alice.close()
+
+
+def test_rematch_needs_every_players_acceptance_and_a_decline_cancels_it(running_web_server):
+    port = running_web_server
+    room_code = web_server.app.test_client().post(
+        "/api/create_game", json={"seats": 2, "bot_mix": [], "seed": 11, "bot_think_time": 0}
+    ).get_json()["room_code"]
+
+    alice = ScriptedWSClient(_ws_url(port, f"/ws?room={room_code}"), "alice")
+    bob = ScriptedWSClient(_ws_url(port, f"/ws?room={room_code}"), "bob")
+    alice.handshake()
+    bob.handshake()
+    alice.start()
+    bob.start()
+
+    room = web_server._rooms[room_code]
+    deadline = time.time() + 30
+    while time.time() < deadline and room.state != "finished":
+        threading.Event().wait(0.2)
+    assert room.state == "finished"
+
+    alice._send({"message_type": "REMATCH_REQUEST", "data": {"bot_mix": []}})
+
+    def _latest_update(client):
+        updates = client.messages_of_type("REMATCH_UPDATE")
+        return updates[-1] if updates else None
+
+    deadline = time.time() + 10
+    while time.time() < deadline and _latest_update(bob) is None:
+        threading.Event().wait(0.1)
+    update = _latest_update(bob)
+    assert update is not None, "bob never got the rematch request"
+    assert update["data"]["requested_by"] == "alice"
+    assert update["data"]["votes"] == {"alice": True, "bob": None}
+    assert room.rematch is not None
+
+    # Bob declines — the whole thing is cancelled, not just his own seat.
+    bob._send({"message_type": "REMATCH_VOTE", "data": {"accept": False}})
+
+    deadline = time.time() + 10
+    declined = False
+    while time.time() < deadline and not declined:
+        declined = any(
+            m["data"]["declined_by"] == "bob" for m in alice.messages_of_type("REMATCH_DECLINED")
+        )
+        threading.Event().wait(0.1)
+    assert declined, "alice never learned bob declined"
+    assert room.rematch is None
+    assert room.state == "finished", "a declined rematch must not start a new game"
+
+    # A second request, this time accepted by everyone, does start one. With
+    # bot_think_time=0 and both sides auto-passing, a rematch can run to
+    # completion (finished -> starting -> in_progress -> finished again)
+    # faster than a poll interval here could ever catch it mid-flight — so
+    # rather than racing to observe a transient state, just confirm a *new*
+    # PlayGame instance actually ran (room.game's identity changes).
+    first_game = room.game
+    updates_before = len(bob.messages_of_type("REMATCH_UPDATE"))
+    alice._send({"message_type": "REMATCH_REQUEST", "data": {"bot_mix": []}})
+    deadline = time.time() + 10
+    while time.time() < deadline and len(bob.messages_of_type("REMATCH_UPDATE")) <= updates_before:
+        threading.Event().wait(0.05)
+    assert len(bob.messages_of_type("REMATCH_UPDATE")) > updates_before, "bob never got the second rematch request"
+    bob._send({"message_type": "REMATCH_VOTE", "data": {"accept": True}})
+
+    deadline = time.time() + 10
+    while time.time() < deadline and room.game is first_game:
+        threading.Event().wait(0.05)
+    assert room.game is not None and room.game is not first_game, "unanimous acceptance should start a new game"
+
+    alice.close()
+    bob.close()

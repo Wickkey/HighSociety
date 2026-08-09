@@ -25,6 +25,12 @@ PLAYER_MESSAGE_TYPES = {
     # socket clients that don't look for these fields are unaffected.
     "AUCTION_UPDATE",  # live in-auction narration (turn start/bid/pass/fold/quit) — GLOBAL_EVENT-shaped
     "PLAYER_STATE",  # a snapshot of one player's own hand/points/status cards — PLAYER_INFO-shaped
+    # Rematch voting, sent only after a game finishes (see web_server.py's
+    # _broadcast_rematch_update/_handle_rematch_vote/_maybe_start_rematch) —
+    # GLOBAL_EVENT-shaped, since none of them need a player_id/response.
+    "REMATCH_UPDATE",  # a request was just made, or someone just voted on one
+    "REMATCH_DECLINED",  # cancels a pending request
+    "REMATCH_STARTING",  # unanimous accept — a fresh game is starting now
 }
 
 SPECTATOR_MESSAGE_TYPES = {
@@ -84,7 +90,8 @@ def build_player_payload(
 
     if message_type == "CHAT":
         payload = _chat_payload(game_id=game_id, prompt=prompt, created_at=created_at, from_user=from_user, to_users=to_users)
-    elif message_type in ("GLOBAL_EVENT", "AUCTION_RESULT", "AUCTION_UPDATE"):
+    elif message_type in ("GLOBAL_EVENT", "AUCTION_RESULT", "AUCTION_UPDATE",
+                          "REMATCH_UPDATE", "REMATCH_DECLINED", "REMATCH_STARTING"):
         payload = {
             "game_id": game_id,
             "message_type": message_type,

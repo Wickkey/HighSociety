@@ -388,12 +388,41 @@
         <details class="advanced winner-rule-info">
           <summary>How is the winner decided?</summary>
           <p class="hint">
-            First, anyone with the least money left is eliminated from winning — unless there's a
-            tie for least, or only one player is left standing. Among whoever remains, the highest
-            total points wins (a painting's value, plus a Passe's −5, all multiplied together by
-            any Prestige/Scandale cards held). Ties are possible and are left as ties.
+            First, anyone with the least money left is eliminated from winning entirely. If two or
+            more players are tied for the least money, none of them are eliminated — everyone stays
+            in contention. Among whoever remains, the highest total points wins (a painting's value,
+            plus a Passe's −5, all multiplied together by any Prestige/Scandale cards held). Ties for
+            the highest score are possible and simply win together.
           </p>
         </details>
+
+        <div id="rematch-panel" class="rematch-panel hidden">
+          <button id="btn-request-rematch" class="primary">Request Rematch</button>
+          <div id="rematch-bot-form" class="hidden">
+            <fieldset class="bot-mix">
+              <legend>Bot seats for the rematch</legend>
+              <div class="bot-row">
+                <label>Pass bot <input type="number" id="rematch-bot-pass" min="0" max="4" value="0"></label>
+                <label>Greedy bot <input type="number" id="rematch-bot-greedy" min="0" max="4" value="0"></label>
+                <label>Capped-greedy bot <input type="number" id="rematch-bot-capped" min="0" max="4" value="0"></label>
+              </div>
+              <p id="rematch-bot-hint" class="hint"></p>
+            </fieldset>
+            <p id="rematch-error" class="error hidden"></p>
+            <div class="button-row">
+              <button id="btn-send-rematch-request" class="primary">Send Rematch Request</button>
+              <button id="btn-cancel-rematch-form" class="secondary">Cancel</button>
+            </div>
+          </div>
+          <div id="rematch-status" class="rematch-status hidden">
+            <p id="rematch-status-text"></p>
+            <div id="rematch-vote-actions" class="button-row hidden">
+              <button id="btn-accept-rematch" class="primary">Accept</button>
+              <button id="btn-decline-rematch" class="danger">Decline</button>
+            </div>
+          </div>
+        </div>
+
         <button id="btn-new-game" class="primary">Host a New Game</button>
       </div>
     </section>

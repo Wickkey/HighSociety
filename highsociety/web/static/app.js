@@ -11,6 +11,7 @@ function showScreen(id) {
 }
 
 function hide(el) { el.classList.add('hidden'); }
+function show(el) { el.classList.remove('hidden'); }
 function showError(el, text) { el.textContent = text; el.classList.remove('hidden'); }
 
 // Usernames are entirely user-supplied and end up interpolated into a couple
@@ -253,6 +254,18 @@ let reconnectAttempted = false;
 // a just-rejected reconnect socket, which some browsers treat as a framing
 // error before the error message ever reaches onmessage.
 let hasResigned = false;
+
+// Rematch panel state on the finished screen: null while no vote is
+// underway, else {requestedBy, botMix, votes} mirroring web_server.py's
+// GameRoom.rematch shape (see REMATCH_UPDATE). rematchBotSeats/
+// rematchDefaultBotMix come from the /api/status payload (or a live status
+// refresh) each time the finished screen renders — the server, not this
+// file, owns how many bot seats are actually available and what they
+// default to (see _status_payload's "rematch_bot_seats"/
+// "rematch_default_bot_mix").
+let currentRematch = null;
+let rematchBotSeats = 0;
+let rematchDefaultBotMix = [];
 
 function rejoinStorageKey(roomCode) {
   return `hs_rejoin_${roomCode}`;
@@ -600,6 +613,123 @@ function renderFinished(status) {
     </div>`;
   }).join('');
   $('standings-table').innerHTML = rows || '<p class="muted">No standings available.</p>';
+
+  currentRematch = status.rematch || null;
+  rematchBotSeats = status.rematch_bot_seats || 0;
+  rematchDefaultBotMix = status.rematch_default_bot_mix || [];
+  renderRematchPanel();
+}
+
+// ----------------------------------------------------------- rematch flow --
+
+// Only a still-connected player (as opposed to a spectator, or a player
+// viewing the results via a status poll with no live socket — see
+// connectSpectatorSocket's onclose, which nulls `ws` before this ever runs)
+// has a channel to actually request/vote on a rematch over, so this hides
+// the whole panel for anyone else rather than showing controls that
+// couldn't do anything.
+function renderRematchPanel() {
+  const panel = $('rematch-panel');
+  if (!ws || ws.readyState !== WebSocket.OPEN || !game.myUsername) {
+    hide(panel);
+    return;
+  }
+  show(panel);
+  hide($('rematch-error'));
+
+  const requestBtn = $('btn-request-rematch');
+  const form = $('rematch-bot-form');
+  const statusBox = $('rematch-status');
+  const voteActions = $('rematch-vote-actions');
+
+  if (!currentRematch) {
+    show(requestBtn);
+    hide(form);
+    hide(statusBox);
+    return;
+  }
+
+  hide(requestBtn);
+  hide(form);
+  show(statusBox);
+
+  const { requestedBy, votes } = currentRematch;
+  const iHaveAccepted = votes[game.myUsername] === true;
+  const waitingOn = Object.keys(votes).filter((n) => votes[n] !== true);
+
+  if (iHaveAccepted) {
+    hide(voteActions);
+    $('rematch-status-text').textContent = waitingOn.length
+      ? `Waiting on ${waitingOn.join(', ')} to accept the rematch…`
+      : 'Everyone accepted — starting the rematch…';
+  } else {
+    show(voteActions);
+    $('rematch-status-text').textContent = `${requestedBy} wants a rematch. Accept?`;
+  }
+}
+
+function fillRematchBotForm(mix) {
+  const counts = { pass: 0, greedy: 0, capped: 0 };
+  mix.forEach((b) => { if (counts[b] !== undefined) counts[b] += 1; });
+  $('rematch-bot-pass').value = counts.pass;
+  $('rematch-bot-greedy').value = counts.greedy;
+  $('rematch-bot-capped').value = counts.capped;
+  $('rematch-bot-hint').textContent = rematchBotSeats
+    ? `${rematchBotSeats} bot seat${rematchBotSeats === 1 ? '' : 's'} to fill — same as last time by default, but changeable.`
+    : 'No bot seats this time — every seat is a returning player.';
+}
+
+function onRequestRematchClick() {
+  if (rematchBotSeats > 0) {
+    fillRematchBotForm(rematchDefaultBotMix);
+    hide($('btn-request-rematch'));
+    show($('rematch-bot-form'));
+  } else {
+    sendRematchRequest([]);
+  }
+}
+
+function onCancelRematchForm() {
+  hide($('rematch-bot-form'));
+  show($('btn-request-rematch'));
+}
+
+function onSendRematchRequest() {
+  const counts = {
+    pass: parseInt($('rematch-bot-pass').value || '0', 10),
+    greedy: parseInt($('rematch-bot-greedy').value || '0', 10),
+    capped: parseInt($('rematch-bot-capped').value || '0', 10),
+  };
+  const botMix = [];
+  for (const [type, n] of Object.entries(counts)) for (let i = 0; i < n; i += 1) botMix.push(type);
+  if (botMix.length !== rematchBotSeats) {
+    showError($('rematch-error'), `Choose exactly ${rematchBotSeats} bot${rematchBotSeats === 1 ? '' : 's'} total.`);
+    return;
+  }
+  sendRematchRequest(botMix);
+}
+
+function sendRematchRequest(botMix) {
+  hide($('rematch-bot-form'));
+  ws.send(JSON.stringify({ message_type: 'REMATCH_REQUEST', data: { bot_mix: botMix } }));
+}
+
+function onAcceptRematch() {
+  ws.send(JSON.stringify({ message_type: 'REMATCH_VOTE', data: { accept: true } }));
+}
+
+function onDeclineRematch() {
+  ws.send(JSON.stringify({ message_type: 'REMATCH_VOTE', data: { accept: false } }));
+}
+
+function showRematchDeclinedNotice(declinedBy) {
+  show($('rematch-status'));
+  hide($('rematch-vote-actions'));
+  $('rematch-status-text').textContent = `${declinedBy} declined the rematch.`;
+  // The next real update (a fresh request, or none at all) re-renders this
+  // properly; this is just a few seconds of "here's what just happened"
+  // before falling back to the normal "Request Rematch" state.
+  setTimeout(() => { if (!currentRematch) renderRematchPanel(); }, 4000);
 }
 
 // ------------------------------------------------------------- host flow --
@@ -623,9 +753,18 @@ function wireStaticHandlers() {
   });
   $('btn-player-chat-send').addEventListener('click', onPlayerChatSend);
   $('player-chat-input').addEventListener('keydown', (e) => { if (e.key === 'Enter') onPlayerChatSend(); });
+  $('btn-request-rematch').addEventListener('click', onRequestRematchClick);
+  $('btn-cancel-rematch-form').addEventListener('click', onCancelRematchForm);
+  $('btn-send-rematch-request').addEventListener('click', onSendRematchRequest);
+  $('btn-accept-rematch').addEventListener('click', onAcceptRematch);
+  $('btn-decline-rematch').addEventListener('click', onDeclineRematch);
 
   window.addEventListener('beforeunload', (e) => {
-    if (ws && ws.readyState === WebSocket.OPEN && game && game.round > 0) {
+    // Once the finished screen is showing, the connection is only being kept
+    // open for a possible rematch (see web_server.py's GameRoom.run_game) —
+    // there's no live game left to warn about losing.
+    const gameIsOver = !$('screen-finished').classList.contains('hidden');
+    if (ws && ws.readyState === WebSocket.OPEN && game && game.round > 0 && !gameIsOver) {
       e.preventDefault();
       e.returnValue = 'Leaving now drops you from the game — there is no reconnect.';
     }
@@ -769,6 +908,41 @@ function handlePlayerMessage(msg) {
         }
       }
       break;
+    // These three arrive only on the finished screen (see
+    // web_server.py's _broadcast_rematch_update/_maybe_start_rematch) —
+    // handled here rather than in applyGameMessage() so they skip its
+    // unconditional ensureGameScreenVisible() call, which would otherwise
+    // yank the screen back to the live game panel while a rematch is still
+    // just being voted on.
+    case 'REMATCH_UPDATE':
+      currentRematch = { requestedBy: msg.data.requested_by, botMix: msg.data.bot_mix, votes: msg.data.votes };
+      renderRematchPanel();
+      break;
+    case 'REMATCH_DECLINED':
+      currentRematch = null;
+      showRematchDeclinedNotice(msg.data.declined_by);
+      break;
+    case 'REMATCH_STARTING': {
+      currentRematch = null;
+      const myUsername = game.myUsername;
+      resetGameState(myUsername, lastStatus);
+      // resetGameState only resets the in-memory model — the DOM still shows
+      // whatever the *previous* game last rendered (final points, opponents'
+      // won cards, auction count) until the new game's first live event
+      // overwrites it, which can be a couple of seconds away (see
+      // countdown_to_start). Force it to reflect the fresh, empty state
+      // immediately instead of flashing the old game's numbers first.
+      hide($('move-panel'));
+      renderAuctionPanel(false);
+      renderMyPanel();
+      ensureGameScreenVisible(false);
+      fetchJSON(`/api/status?room=${encodeURIComponent(currentRoomCode)}`).then((status) => {
+        lastStatus = status;
+        seedOpponents(status, myUsername);
+        renderOpponents(false);
+      }).catch(() => {});
+      break;
+    }
     default:
       applyGameMessage(msg, false);
   }
@@ -943,6 +1117,13 @@ function applyGameMessage(msg, isSpectator) {
         showCountdownOverlay(isSpectator, d.seconds_left);
       } else if (d && d.event === 'countdown_finished') {
         hideCountdownOverlay(isSpectator);
+      } else if (d && d.event === 'game_over') {
+        // The connection is deliberately kept open past game-end now (see
+        // web_server.py's GameRoom.run_game — a rematch reuses it), so
+        // nothing closes this socket to trigger the old ws.onclose ->
+        // refreshStatus() transition to the results screen. This is that
+        // signal instead.
+        refreshStatus();
       }
       if (msg.prompt && !isDuplicateOfStructuredEvent(msg.prompt)) logLine(msg.prompt.trim(), isSpectator);
       break;

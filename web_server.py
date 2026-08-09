@@ -97,6 +97,12 @@ class GameRoom:
         # refresh/dropped connection as a permanent quit. Issued once at
         # IDENTIFY_SUCCESS (see ws_player), never for bots.
         self.rejoin_tokens: dict[str, str] = {}
+        # None, or {"requested_by": username, "bot_mix": [...], "votes": {username: True|None}}
+        # while a rematch is being voted on — see _start_rematch_request/
+        # _handle_rematch_vote/_maybe_start_rematch. Only set while
+        # state == "finished"; cleared the moment it's declined or the
+        # rematch actually starts.
+        self.rematch: Optional[dict] = None
 
     def touch(self) -> None:
         """Marks the room as recently active, so the reaper thread's idle
@@ -135,9 +141,19 @@ class GameRoom:
             game.play_game()
             self.state = "finished"
             self.touch()  # start the reaper's finished-room retention window from now
+            # Unlike before, human players' connections are deliberately left
+            # open here instead of closed — a rematch (see
+            # _start_rematch_request/_maybe_start_rematch) reuses the same
+            # WebSocket rather than making everyone rejoin from scratch. Each
+            # connected player's own per-connection loop (_run_player_session)
+            # picks up rematch request/vote messages from here on; this
+            # broadcast is what tells their *client* to stop watching the
+            # live game panel and show the results screen instead — the job
+            # closing the connection used to do implicitly (see app.js's
+            # GLOBAL_EVENT "game_over" handler).
             for p in self.players:
-                if isinstance(p, NetworkPlayer):
-                    p.close()
+                if isinstance(p, NetworkPlayer) and p.active:
+                    p.send_message("", message_type="GLOBAL_EVENT", data={"event": "game_over"})
             for s in self.spectators:
                 s.close()
 
@@ -206,12 +222,22 @@ def _reap_stale_rooms() -> None:
         now = time.time()
         with _rooms_lock:
             stale = [
-                code for code, room in _rooms.items()
+                (code, room) for code, room in _rooms.items()
                 if (room.state == "lobby" and now - room.last_active_at > _ROOM_LOBBY_IDLE_TIMEOUT_SECONDS)
                 or (room.state == "finished" and now - room.last_active_at > _ROOM_FINISHED_RETENTION_SECONDS)
             ]
-            for code in stale:
+            for code, _room in stale:
                 del _rooms[code]
+        # A finished room's human connections are deliberately kept open past
+        # game-end for rematches (see GameRoom.run_game) — once the room
+        # itself is gone, nobody's still-open tab should linger forever;
+        # close them here instead. Outside the lock: NetworkPlayer.close()
+        # can block briefly on the socket, and nothing else touches these
+        # rooms once they're out of `_rooms`.
+        for _code, room in stale:
+            for p in room.players:
+                if isinstance(p, NetworkPlayer) and p.active:
+                    p.close()
 
 
 threading.Thread(target=_reap_stale_rooms, daemon=True, name="RoomReaper").start()
@@ -370,6 +396,16 @@ def _status_payload(room: Optional[GameRoom]) -> dict:
         winners = room.game.winners or []
         payload["winners"] = [w.username for w in winners]
         payload["final_standings"] = room.game.final_standings
+
+        # Everything a finished-screen client needs to render the rematch
+        # panel from a plain page load/status poll, not just from the live
+        # REMATCH_UPDATE pushes (see _broadcast_rematch_update) — e.g. a
+        # browser that was mid-refresh when a vote was already underway.
+        eligible = _rematch_eligible_players(room)
+        bot_seats = max(room.seats - len(eligible), 0)
+        payload["rematch"] = room.rematch
+        payload["rematch_bot_seats"] = bot_seats
+        payload["rematch_default_bot_mix"] = _default_rematch_bot_mix(room, bot_seats)
     return payload
 
 
@@ -460,19 +496,152 @@ def _relay_player_chat(username: str, room: GameRoom, msg: dict) -> None:
             s.send_message(formatted, message_type="CHAT", from_user=username)
 
 
-def _wait_for_player_disconnect(player: NetworkPlayer, transport: WebSocketTransport) -> None:
-    # Keep this HTTP upgrade alive for the lifetime of the connection —
-    # PlayGame calls transport.receive()/send() directly from the game
-    # thread once it's this player's turn; this thread's only job is to let
-    # flask-sock know when the socket has actually gone away (dead
-    # connection detection is ping/pong-based — see SOCK_SERVER_OPTIONS).
-    # threading.Event().wait() here, not time.sleep(): the test suite's
-    # autouse fixture monkeypatches time.sleep to a no-op (see
-    # tests/network/test_transport.py's note on this exact gotcha), which
-    # would turn this into a real busy-spin — one per connection, for its
-    # entire lifetime — instead of an idle wait.
+def _rematch_eligible_players(room: "GameRoom") -> list[NetworkPlayer]:
+    """
+    The humans a rematch can actually reuse: still marked active (so neither
+    resigned nor disconnected-and-never-reconnected — see NetworkPlayer.resigned
+    and get_bid()'s disconnect fallback, both of which clear `active`) and
+    still actually connected right now. A seat that doesn't qualify simply
+    becomes an available bot seat for the rematch instead of blocking it.
+    """
+    return [p for p in room.players if isinstance(p, NetworkPlayer) and p.active and p.transport.is_connected]
+
+
+def _default_rematch_bot_mix(room: "GameRoom", bot_seats: int) -> list[str]:
+    """Defaults a rematch's bot mix to whatever the just-finished game used,
+    trimmed/padded to however many bot seats are actually available this
+    time (eligibility can shrink between games — see
+    _rematch_eligible_players — though it can never grow)."""
+    mix = list(room.bot_mix)[:bot_seats]
+    if mix:
+        fallback = mix[-1]
+    else:
+        fallback = next(iter(BOT_TYPES))
+    while len(mix) < bot_seats:
+        mix.append(fallback)
+    return mix
+
+
+def _broadcast_rematch_update(room: "GameRoom") -> None:
+    r = room.rematch
+    if r is None:
+        return
+    for p in _rematch_eligible_players(room):
+        p.send_message("", message_type="REMATCH_UPDATE", data={
+            "requested_by": r["requested_by"],
+            "bot_mix": r["bot_mix"],
+            "votes": r["votes"],
+        })
+
+
+def _maybe_start_rematch(room: "GameRoom") -> None:
+    """Called after every vote; actually starts the rematch once everyone
+    eligible has accepted (including the requester, who auto-accepts their
+    own request — see _start_rematch_request)."""
+    with room.lock:
+        r = room.rematch
+        if r is None or any(v is not True for v in r["votes"].values()):
+            return
+        eligible = _rematch_eligible_players(room)
+        # Re-validated fresh rather than trusting r["votes"]'s keys are still
+        # exactly right: nobody can resign/disconnect mid-vote (the game
+        # engine that used to react to that is long gone once state ==
+        # "finished"), so this only guards the reaper deleting the room out
+        # from under an abandoned vote (see _reap_stale_rooms).
+        if room.state != "finished" or {p.username for p in eligible} != set(r["votes"]):
+            room.rematch = None
+            return
+        bot_mix = r["bot_mix"]
+        room.rematch = None
+        room.bot_mix = bot_mix
+        bots = create_bot_players(
+            bot_mix, think_time=room.bot_think_time,
+            taken_usernames={p.username for p in eligible},
+        ) if bot_mix else []
+        room.players = eligible + bots
+        room.human_seats = len(eligible)
+        room.state = "starting"
+        room.touch()
+    for p in eligible:
+        p.send_message("", message_type="REMATCH_STARTING", data={"bot_mix": bot_mix, "seats": room.seats})
+    room.run_game()
+
+
+def _start_rematch_request(player: NetworkPlayer, room: "GameRoom", data: dict) -> None:
+    with room.lock:
+        if room.state != "finished" or room.rematch is not None:
+            return  # a vote's already underway, or the room's moved on — ignore a stray/duplicate request
+        eligible = _rematch_eligible_players(room)
+        bot_seats = max(room.seats - len(eligible), 0)
+        bot_mix = data.get("bot_mix")
+        if (not isinstance(bot_mix, list) or len(bot_mix) != bot_seats
+                or any(b not in BOT_TYPES for b in bot_mix)):
+            bot_mix = _default_rematch_bot_mix(room, bot_seats)
+        room.rematch = {
+            "requested_by": player.username,
+            "bot_mix": bot_mix,
+            "votes": {p.username: (True if p is player else None) for p in eligible},
+        }
+        room.touch()
+    _broadcast_rematch_update(room)
+    _maybe_start_rematch(room)  # covers the single-human-at-the-table case
+
+
+def _handle_rematch_vote(player: NetworkPlayer, room: "GameRoom", data: dict) -> None:
+    declined_by = None
+    with room.lock:
+        r = room.rematch
+        if r is None or player.username not in r["votes"]:
+            return
+        if data.get("accept"):
+            r["votes"][player.username] = True
+        else:
+            room.rematch = None
+            declined_by = player.username
+    if declined_by:
+        for p in _rematch_eligible_players(room):
+            p.send_message("", message_type="REMATCH_DECLINED", data={"declined_by": declined_by})
+        return
+    _broadcast_rematch_update(room)
+    _maybe_start_rematch(room)
+
+
+def _handle_post_game_message(player: NetworkPlayer, room: "GameRoom", msg: dict) -> None:
+    incoming_game_id = msg.get("game_id")
+    if incoming_game_id is not None and incoming_game_id != room.game_id:
+        return
+    message_type = msg.get("message_type")
+    data = msg.get("data") or {}
+    if message_type == "REMATCH_REQUEST":
+        _start_rematch_request(player, room, data)
+    elif message_type == "REMATCH_VOTE":
+        _handle_rematch_vote(player, room, data)
+
+
+def _run_player_session(player: NetworkPlayer, transport: WebSocketTransport, room: "GameRoom") -> None:
+    """
+    Owns this connection for as long as it stays alive — which, since a
+    finished room can rematch (see _maybe_start_rematch), may span more than
+    one game. While a game is starting/in progress, NetworkPlayer.get_bid()/
+    choose_painting_to_discard() are the *only* allowed readers of this
+    transport's queued messages (see WebSocketTransport's on_chat docstring
+    on why two concurrent readers can silently steal each other's messages);
+    this loop just idles, watching for a real disconnect, same as before.
+    Once the game finishes, there's nothing left to steal from, so this
+    becomes the reader instead, handling rematch request/vote messages until
+    either a rematch actually starts (back to idling) or the connection dies.
+    threading.Event().wait() rather than time.sleep(): the test suite's
+    autouse fixture monkeypatches time.sleep to a no-op (see
+    tests/network/test_transport.py's note on this exact gotcha), which would
+    turn the idle branch into a real busy-spin instead of an idle wait.
+    """
     while player.active and transport.is_connected:
-        threading.Event().wait(0.5)
+        if room.state == "finished":
+            msg = transport.receive(timeout=0.5)
+            if msg is not None:
+                _handle_post_game_message(player, room, msg)
+        else:
+            threading.Event().wait(0.5)
     # Only clear `active` if this transport is still the one attached to the
     # player. A concurrent reconnect (see NetworkPlayer.reattach) may have
     # already swapped in a fresh transport and marked them active again by
@@ -559,7 +728,7 @@ def _handle_player_reconnect(ws, room: "GameRoom", rejoin_token: str) -> None:
           data={"rejoin_token": rejoin_token, "reconnected": True})
     _send_reconnect_catchup(player, room)
 
-    _wait_for_player_disconnect(player, transport)
+    _run_player_session(player, transport, room)
 
 
 @sock.route("/ws")
@@ -612,7 +781,7 @@ def ws_player(ws):
     if room.try_start():
         room.run_game()
 
-    _wait_for_player_disconnect(player, transport)
+    _run_player_session(player, transport, room)
 
     # A disconnect during the lobby is fully recoverable (nothing about the
     # game has started, nothing to reconnect to) — free the seat entirely
