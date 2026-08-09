@@ -145,68 +145,39 @@ function showFinalGreenOverlay(isSpectator, count) {
   overlay._hideTimer = setTimeout(() => overlay.classList.remove('show'), 4000);
 }
 
-// The pre-game "starting in N..." countdown gets the same unmissable-
-// overlay treatment as the game-ending green card, so the moment a lobby
-// actually becomes a live game reads as an event, not a buried log line.
-// Each tick updates the same banner in place (rather than re-popping fresh
-// every second) so it reads as one smooth countdown; only pops in once, on
-// the first tick.
-// Server-side, each countdown tick is really 1 real second apart
-// (gameplay.py's countdown_to_start does an actual time.sleep(1) between
-// them) — but nothing guarantees they *arrive* that evenly spaced: a slow
-// connection, a cold-started host, or just ordinary network jitter can
-// buffer several of them and deliver them in a near-simultaneous burst.
-// Without a floor on how long each one stays on screen, a burst like that
-// collapses the whole countdown into a single instant flash — exactly the
-// "didn't get to see 3, 2, 1" report this queue fixes. Mirrors the
-// enqueueEvent/pumpEventQueue toast queue's shape, but as its own queue
-// since this needs a different minimum duration and end state (hidden, not
-// faded-and-cleared) than a routine toast.
-const countdownQueue = { game: [], spec: [] };
-const countdownBusy = { game: false, spec: false };
-const COUNTDOWN_STEP_MIN_MS = 700;
+// The pre-game overlay is a quiet "Starting soon…" with a CSS-only animated
+// ellipsis (see .game-start-dots in style.css) — no per-tick number to
+// render, so unlike the old 3-2-1 version there's nothing that can flash by
+// too fast to read. The server still sends one 'countdown' event per second
+// (gameplay.py's countdown_to_start) plus a final 'countdown_finished', but
+// this only cares about the first and last: show once, hide once. The one
+// remaining timing risk — a slow/cold connection buffering the *entire*
+// countdown into a single burst, show immediately followed by hide — is
+// guarded by a minimum-visible floor so the overlay can't flash for less
+// than that even in the worst case.
+const countdownShownAt = { game: null, spec: null };
+const COUNTDOWN_MIN_VISIBLE_MS = 900;
 
-function showCountdownOverlay(isSpectator, secondsLeft) {
-  queueCountdownStep(isSpectator, { kind: 'tick', secondsLeft });
-}
-
-// The countdown's final tick — just clear the overlay so the first real
-// auction underneath takes over immediately, no separate "Game Started!"
-// message.
-function hideCountdownOverlay(isSpectator) {
-  queueCountdownStep(isSpectator, { kind: 'hide' });
-}
-
-function queueCountdownStep(isSpectator, step) {
+function showCountdownOverlay(isSpectator) {
   const key = isSpectator ? 'spec' : 'game';
-  countdownQueue[key].push(step);
-  pumpCountdownQueue(key);
+  const overlay = $(key === 'spec' ? 'spec-game-start-overlay' : 'game-start-overlay');
+  if (overlay.classList.contains('show')) return;
+  countdownShownAt[key] = Date.now();
+  overlay.classList.add('show');
 }
 
-function pumpCountdownQueue(key) {
-  if (countdownBusy[key] || countdownQueue[key].length === 0) return;
-  countdownBusy[key] = true;
-  const step = countdownQueue[key].shift();
+// The countdown's final tick — clear the overlay so the first real auction
+// underneath takes over immediately, no separate "Game Started!" message.
+function hideCountdownOverlay(isSpectator) {
+  const key = isSpectator ? 'spec' : 'game';
   const overlay = $(key === 'spec' ? 'spec-game-start-overlay' : 'game-start-overlay');
-
-  if (step.kind === 'tick') {
-    const alreadyShowing = overlay.classList.contains('show');
-    overlay.querySelector('.game-start-icon').textContent = '⏳';
-    overlay.querySelector('.game-start-title').textContent = `Game starting in ${step.secondsLeft}…`;
-    overlay.querySelector('.game-start-sub').textContent = 'Get ready!';
-    if (!alreadyShowing) {
-      overlay.classList.remove('show');
-      void overlay.offsetWidth; // restart the entrance animation even on a rapid repeat
-      overlay.classList.add('show');
-    }
-  } else {
-    overlay.classList.remove('show');
-  }
-
+  const shownAt = countdownShownAt[key];
+  const elapsed = shownAt ? Date.now() - shownAt : COUNTDOWN_MIN_VISIBLE_MS;
+  const wait = Math.max(0, COUNTDOWN_MIN_VISIBLE_MS - elapsed);
   setTimeout(() => {
-    countdownBusy[key] = false;
-    pumpCountdownQueue(key);
-  }, COUNTDOWN_STEP_MIN_MS);
+    overlay.classList.remove('show');
+    countdownShownAt[key] = null;
+  }, wait);
 }
 
 // Points formula mirrors BasePlayer.__calculate_points(): sum of values,
@@ -287,6 +258,152 @@ function clearRejoinInfo(roomCode) {
   if (roomCode) localStorage.removeItem(rejoinStorageKey(roomCode));
 }
 
+// --------------------------------------------------------- saved identity --
+
+// A single persisted {username, name} — the same identity used across every
+// room this browser hosts/joins/spectates, so the join/spectate forms below
+// don't need to ask again each time (see renderProfileBar/
+// applyJoinIdentityDefaults). Deliberately one JSON blob under one key
+// rather than separate fields, so it's easy to grow later (e.g. a guestId,
+// once there's a real account/guest-login system to attach it to — this is
+// meant to become that anonymous identity's storage, not be replaced by it).
+// Mirrored into a cookie alongside localStorage: today that's just a second
+// place the identity survives (private-browsing tabs, a cleared
+// localStorage but not cookies, etc.), but it's also the one persistence
+// mechanism a server can read directly without any client JS running,
+// which matters the day this becomes a real session cookie.
+const PROFILE_STORAGE_KEY = 'hs_profile';
+
+function readCookie(key) {
+  const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const match = document.cookie.match(new RegExp(`(?:^|; )${escaped}=([^;]*)`));
+  return match ? decodeURIComponent(match[1]) : null;
+}
+
+function writeCookie(key, value, days) {
+  try {
+    const expires = new Date(Date.now() + days * 24 * 60 * 60 * 1000).toUTCString();
+    document.cookie = `${key}=${encodeURIComponent(value)}; expires=${expires}; path=/; samesite=lax`;
+  } catch (e) {
+    // Cookies disabled/blocked — localStorage (the primary copy) still works.
+  }
+}
+
+function loadProfile() {
+  let raw = null;
+  try { raw = localStorage.getItem(PROFILE_STORAGE_KEY); } catch (e) { /* private mode, etc. */ }
+  if (!raw) raw = readCookie(PROFILE_STORAGE_KEY);
+  if (!raw) return null;
+  try {
+    const profile = JSON.parse(raw);
+    return (profile && profile.username && profile.name) ? profile : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+function saveProfile(username, name) {
+  const value = JSON.stringify({ username, name });
+  try { localStorage.setItem(PROFILE_STORAGE_KEY, value); } catch (e) { /* fall through to the cookie */ }
+  writeCookie(PROFILE_STORAGE_KEY, value, 365);
+}
+
+// Whether the join/spectate screens' "not you?" link has been clicked since
+// the last time we landed on a fresh room — guards applyJoinIdentityDefaults
+// (called on every lobby status poll, not just once) from stomping over
+// someone's in-progress edit to their own name every 1.5s. Reset wherever a
+// genuinely new room is entered.
+let joinIdentityOverridden = false;
+
+function renderProfileBar() {
+  const profile = loadProfile();
+  hide($('profile-error'));
+  if (profile) {
+    $('profile-name-display').textContent = profile.name;
+    show($('profile-display'));
+    hide($('profile-form'));
+  } else {
+    show($('profile-form'));
+    hide($('profile-display'));
+    hide($('btn-cancel-profile-edit')); // nothing saved yet to cancel back to
+  }
+  applyJoinIdentityDefaults();
+}
+
+function onEditProfileClick() {
+  const profile = loadProfile();
+  $('profile-username').value = profile ? profile.username : '';
+  $('profile-display-name').value = profile ? profile.name : '';
+  hide($('profile-error'));
+  hide($('profile-display'));
+  show($('btn-cancel-profile-edit'));
+  show($('profile-form'));
+}
+
+function onCancelProfileEdit() {
+  renderProfileBar();
+}
+
+function onSaveProfileClick() {
+  hide($('profile-error'));
+  const username = $('profile-username').value.trim();
+  const name = $('profile-display-name').value.trim() || username;
+  if (!username) { showError($('profile-error'), 'Username is required.'); return; }
+  saveProfile(username, name);
+  renderProfileBar();
+}
+
+// Pre-fills the join screen's username/name fields from the saved profile
+// and collapses them behind a "Joining as X — not you?" line, so returning
+// to a room (or joining a new one) never re-asks for something already on
+// file. Safe to call repeatedly (renderLobby calls this on every status
+// poll) — a no-op past the first call unless the profile itself changes,
+// and never overwrites an in-progress "not you?" edit (see
+// joinIdentityOverridden).
+function applyJoinIdentityDefaults() {
+  if (joinIdentityOverridden) return;
+  const profile = loadProfile();
+  if (profile) {
+    $('join-username').value = profile.username;
+    $('join-name').value = profile.name;
+    $('join-as-name').textContent = profile.name;
+    show($('join-as-label'));
+    hide($('join-identity-fields'));
+  } else {
+    hide($('join-as-label'));
+    show($('join-identity-fields'));
+  }
+}
+
+function onChangeJoinIdentity() {
+  joinIdentityOverridden = true;
+  hide($('join-as-label'));
+  show($('join-identity-fields'));
+}
+
+// Spectating has no recurring-poll render path the way the join screen
+// does (screen-spectate-join is only ever shown once per click of "Watch as
+// a spectator instead"), so this doesn't need joinIdentityOverridden's
+// re-render guard — it just runs once, right when that screen is opened.
+function applySpectateIdentityDefaults() {
+  const profile = loadProfile();
+  if (profile) {
+    $('spectate-username').value = profile.username;
+    $('spectate-name').value = profile.name;
+    $('spectate-as-name').textContent = profile.name;
+    show($('spectate-as-label'));
+    hide($('spectate-identity-fields'));
+  } else {
+    hide($('spectate-as-label'));
+    show($('spectate-identity-fields'));
+  }
+}
+
+function onChangeSpectateIdentity() {
+  hide($('spectate-as-label'));
+  show($('spectate-identity-fields'));
+}
+
 // Whether opponents' actual won cards/points are shown, or kept hidden
 // behind card-backs, and whether the game-log panel is shown at all — both
 // are host-time settings (see host-reveal-cards/host-show-logs in the
@@ -307,6 +424,10 @@ function resetGameState(myUsername, status) {
     opponents: {}, // username -> {name, statusCards: [], active: true, outOfAuction: false}
     revealCards: status ? status.reveal_cards !== false : true,
     showLogs: status ? status.show_logs !== false : true,
+    // The room's fixed per-move timer (seconds, or null/undefined for no
+    // limit) — used only to scale the move-timer's "urgent" warning window
+    // (see urgentWindowSeconds), not re-sent per move.
+    turnTimeLimit: status ? status.turn_time_limit : null,
   };
   applyRoomDisplaySettings();
 }
@@ -340,6 +461,7 @@ function ensureOpponent(username) {
 
 document.addEventListener('DOMContentLoaded', () => {
   wireStaticHandlers();
+  renderProfileBar();
   currentRoomCode = new URLSearchParams(location.search).get('room');
   if (currentRoomCode) {
     refreshStatus();
@@ -375,6 +497,7 @@ async function enterRoom(roomCode) {
     showError($('host-error'), `No game found with room code "${roomCode}".`);
     return;
   }
+  joinIdentityOverridden = false; // a genuinely new room — start from the saved profile again
   currentRoomCode = roomCode;
   history.replaceState(null, '', `?room=${encodeURIComponent(roomCode)}`);
   stopRoomsPolling();
@@ -383,15 +506,48 @@ async function enterRoom(roomCode) {
   startPolling();
 }
 
-function leaveToHome() {
-  clearRejoinInfo(currentRoomCode);
+// clearRejoin is false only for the "clicked the High Society title mid-game"
+// path (see onHomeLinkClick) — that's meant to behave like closing the tab,
+// which stays reconnectable, not like clicking "Host a New Game" after the
+// game's already over, which has nothing left to reconnect to.
+function leaveToHome(clearRejoin = true) {
+  if (clearRejoin) clearRejoinInfo(currentRoomCode);
   currentRoomCode = null;
   reconnectAttempted = false;
   hasResigned = false;
+  joinIdentityOverridden = false;
   history.replaceState(null, '', location.pathname);
   stopPolling();
   showScreen('screen-host-setup');
+  renderProfileBar();
   startRoomsPolling();
+}
+
+// True once an actual seat is in play (not spectating, not still in the
+// lobby, not already looking at results) — the one condition under which
+// leaving should warn first, shared by the tab-close warning below and the
+// "High Society" home-link click.
+function isActivelyPlayingLiveGame() {
+  const gameIsOver = !$('screen-finished').classList.contains('hidden');
+  return !!(ws && ws.readyState === WebSocket.OPEN && game && game.round > 0 && !gameIsOver);
+}
+
+// The "High Society" wordmark doubles as a home link (most sites' logos
+// do) — most of the time that's a free action, but mid-game it needs the
+// same confirmation a browser's own "are you sure you want to leave"
+// would give, and it closes the socket itself first rather than leaving it
+// dangling while the UI has already moved on. Closing (rather than
+// resigning) is deliberate: this should behave exactly like closing the
+// tab would — recoverable via the room's own reconnect flow — not like
+// clicking Resign, which is permanent.
+function onHomeLinkClick() {
+  const midGame = isActivelyPlayingLiveGame();
+  if (midGame) {
+    const ok = confirm('Leave this game and go back to the home screen? Your seat stays open to rejoin from this device.');
+    if (!ok) return;
+  }
+  if (ws) { ws.close(); ws = null; }
+  leaveToHome(!midGame);
 }
 
 function startRoomsPolling() {
@@ -554,6 +710,7 @@ function renderLobby(status) {
   showScreen('screen-join');
   $('join-form').classList.remove('hidden');
   $('join-waiting').classList.add('hidden');
+  applyJoinIdentityDefaults();
   const visibilityNote = status.visibility === 'private' ? ' (private — share this code with friends)' : ' (public)';
   $('room-code-display').textContent = `Room code: ${status.room_code}${visibilityNote}`;
   const names = status.joined.map((p) => `${p.name}${p.is_bot ? ' 🤖' : ''}`).join(', ') || 'nobody yet';
@@ -739,10 +896,22 @@ function wireStaticHandlers() {
   $('btn-join-by-code').addEventListener('click', onJoinByCode);
   $('btn-add-bot').addEventListener('click', onAddBot);
   $('btn-join').addEventListener('click', onJoin);
-  $('btn-spectate-link').addEventListener('click', () => showScreen('screen-spectate-join'));
+  $('btn-spectate-link').addEventListener('click', () => {
+    applySpectateIdentityDefaults();
+    showScreen('screen-spectate-join');
+  });
   $('btn-back-to-join').addEventListener('click', () => { showScreen('screen-join'); refreshStatus(); });
   $('btn-spectate-join').addEventListener('click', onSpectateJoin);
-  $('btn-new-game').addEventListener('click', leaveToHome);
+  $('btn-new-game').addEventListener('click', () => leaveToHome());
+  $('btn-edit-profile').addEventListener('click', onEditProfileClick);
+  $('btn-cancel-profile-edit').addEventListener('click', onCancelProfileEdit);
+  $('btn-save-profile').addEventListener('click', onSaveProfileClick);
+  $('btn-change-join-identity').addEventListener('click', onChangeJoinIdentity);
+  $('btn-change-spectate-identity').addEventListener('click', onChangeSpectateIdentity);
+  $('home-link').addEventListener('click', onHomeLinkClick);
+  $('home-link').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onHomeLinkClick(); }
+  });
   $('btn-place-bid').addEventListener('click', onPlaceBid);
   $('btn-pass').addEventListener('click', onPass);
   $('btn-resign').addEventListener('click', onResign);
@@ -760,11 +929,7 @@ function wireStaticHandlers() {
   $('btn-decline-rematch').addEventListener('click', onDeclineRematch);
 
   window.addEventListener('beforeunload', (e) => {
-    // Once the finished screen is showing, the connection is only being kept
-    // open for a possible rematch (see web_server.py's GameRoom.run_game) —
-    // there's no live game left to warn about losing.
-    const gameIsOver = !$('screen-finished').classList.contains('hidden');
-    if (ws && ws.readyState === WebSocket.OPEN && game && game.round > 0 && !gameIsOver) {
+    if (isActivelyPlayingLiveGame()) {
       e.preventDefault();
       e.returnValue = 'Leaving now drops you from the game — there is no reconnect.';
     }
@@ -782,12 +947,13 @@ async function onCreateGame() {
   const botMix = [];
   for (const [type, n] of Object.entries(counts)) for (let i = 0; i < n; i += 1) botMix.push(type);
 
-  const seedRaw = $('host-seed').value;
   const turnTimeRaw = $('host-turn-time').value;
   const body = {
     seats,
     bot_mix: botMix,
-    seed: seedRaw ? parseInt(seedRaw, 10) : null,
+    // No seed field in the UI on purpose — a reproducible game is a
+    // developer/testing concern (real training/testing can go through the
+    // backend directly), not something a hosting player needs to see.
     bot_think_time: parseFloat($('host-think-time').value || '1.5'),
     visibility: $('host-visibility-private').checked ? 'private' : 'public',
     turn_time_limit: turnTimeRaw ? parseFloat(turnTimeRaw) : null,
@@ -801,6 +967,7 @@ async function onCreateGame() {
       body: JSON.stringify(body),
     });
     stopRoomsPolling();
+    joinIdentityOverridden = false; // a genuinely new room — start from the saved profile again
     currentRoomCode = status.room_code;
     history.replaceState(null, '', `?room=${encodeURIComponent(status.room_code)}`);
     lastStatus = status;
@@ -832,6 +999,7 @@ function onJoin() {
   const name = $('join-name').value.trim() || username;
   if (!username) { showError($('join-error'), 'Username is required.'); return; }
   pendingJoin = { username, name };
+  saveProfile(username, name); // this device's identity going forward — see loadProfile
   stopPolling();
   resetGameState(username, lastStatus);
   if (lastStatus) seedOpponents(lastStatus, username);
@@ -956,6 +1124,7 @@ function onSpectateJoin() {
   const username = $('spectate-username').value.trim();
   if (!name || !username) { showError($('spectate-error'), 'Both fields are required.'); return; }
   pendingSpectate = { username, name };
+  saveProfile(username, name); // this device's identity going forward — see loadProfile
   stopPolling();
   resetGameState(null, lastStatus);
   fetchJSON(`/api/status?room=${encodeURIComponent(currentRoomCode)}`)
@@ -1114,7 +1283,7 @@ function applyGameMessage(msg, isSpectator) {
           renderOpponents(isSpectator);
         }
       } else if (d && d.event === 'countdown') {
-        showCountdownOverlay(isSpectator, d.seconds_left);
+        showCountdownOverlay(isSpectator);
       } else if (d && d.event === 'countdown_finished') {
         hideCountdownOverlay(isSpectator);
       } else if (d && d.event === 'game_over') {
@@ -1311,10 +1480,10 @@ function applyPlayerMove(msg) {
 // never appears — the feature is a no-op unless a host opts in.
 let moveTimerInterval = null;
 let moveTimerDeadline = null;
-// Tracks the last whole-second value we've already beeped for, so the tick
-// fires once per second during the urgent window instead of every 250ms
-// poll (see updateMoveTimerDisplay).
-let moveTimerLastBeepSecond = null;
+// Whether the double-beep has already fired for the *current* move's urgent
+// window — set once on the transition into "urgent", not per second, so it
+// never repeats every tick (see updateMoveTimerDisplay).
+let moveTimerUrgentAnnounced = false;
 
 function startMoveTimer(secondsRemaining) {
   clearMoveTimer();
@@ -1326,8 +1495,18 @@ function startMoveTimer(secondsRemaining) {
 function clearMoveTimer() {
   if (moveTimerInterval) { clearInterval(moveTimerInterval); moveTimerInterval = null; }
   moveTimerDeadline = null;
-  moveTimerLastBeepSecond = null;
+  moveTimerUrgentAnnounced = false;
   $('move-timer').classList.add('hidden');
+}
+
+// How many seconds before zero the clock should turn urgent — scaled to the
+// room's actual per-move limit rather than a flat 5s, since 5s left out of
+// a 20s move reads very differently than 5s left out of a 3-minute one.
+function urgentWindowSeconds() {
+  const limit = game && game.turnTimeLimit;
+  if (!limit || limit < 30) return 5;
+  if (limit <= 180) return 15; // >30s and up through 3 minutes
+  return 30; // beyond 3 minutes
 }
 
 function updateMoveTimerDisplay() {
@@ -1336,35 +1515,40 @@ function updateMoveTimerDisplay() {
   const secondsLeft = Math.ceil(remaining);
   el.textContent = `⏰ ${secondsLeft}s left`;
   el.classList.remove('hidden');
-  const isUrgent = remaining > 0 && remaining <= 5;
+  const isUrgent = remaining > 0 && remaining <= urgentWindowSeconds();
   el.classList.toggle('urgent', isUrgent);
-  if (isUrgent && secondsLeft !== moveTimerLastBeepSecond) {
-    moveTimerLastBeepSecond = secondsLeft;
-    playTimerTick();
+  if (isUrgent && !moveTimerUrgentAnnounced) {
+    moveTimerUrgentAnnounced = true;
+    playUrgentDoubleBeep();
   }
   if (remaining <= 0) clearMoveTimer();
 }
 
-// A short synthesized "tick" (no audio file needed — fits this app's
-// zero-external-assets approach) played once per second while the move
-// timer is in its urgent (<=5s) state, chess.com-clock-style. Wrapped in
-// try/catch since some browsers block audio before any user gesture has
-// happened on the page — by the time a timer is running the player has
-// already clicked Join/a bid button, but this stays silent-safe regardless.
-let _timerTickAudioCtx = null;
-function playTimerTick() {
+// A single low-pitched double-beep (no audio file needed — fits this app's
+// zero-external-assets approach), played once right as the clock turns
+// urgent — not a tick repeated every second, which read as nagging rather
+// than a clear "heads up." Wrapped in try/catch since some browsers block
+// audio before any user gesture has happened on the page — by the time a
+// timer is running the player has already clicked Join/a bid button, but
+// this stays silent-safe regardless.
+let _timerBeepAudioCtx = null;
+function playUrgentDoubleBeep() {
   try {
-    _timerTickAudioCtx = _timerTickAudioCtx || new (window.AudioContext || window.webkitAudioContext)();
-    const ctx = _timerTickAudioCtx;
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    osc.type = 'sine';
-    osc.frequency.value = 880;
-    gain.gain.setValueAtTime(0.15, ctx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.12);
-    osc.connect(gain).connect(ctx.destination);
-    osc.start();
-    osc.stop(ctx.currentTime + 0.12);
+    _timerBeepAudioCtx = _timerBeepAudioCtx || new (window.AudioContext || window.webkitAudioContext)();
+    const ctx = _timerBeepAudioCtx;
+    const beepAt = (startTime) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = 220; // low pitch, deliberately not the shrill 880Hz tick this replaced
+      gain.gain.setValueAtTime(0.2, startTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, startTime + 0.1);
+      osc.connect(gain).connect(ctx.destination);
+      osc.start(startTime);
+      osc.stop(startTime + 0.1);
+    };
+    beepAt(ctx.currentTime);
+    beepAt(ctx.currentTime + 0.15); // fast-tempo second beep
   } catch (e) {
     // Silently skip — the visual countdown already conveys urgency.
   }

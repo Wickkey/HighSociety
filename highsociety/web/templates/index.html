@@ -8,7 +8,7 @@
 </head>
 <body>
   <header class="topbar">
-    <h1>High&nbsp;Society</h1>
+    <h1 id="home-link" class="home-link" role="link" tabindex="0">High&nbsp;Society</h1>
     <span id="connection-badge" class="badge hidden"></span>
   </header>
 
@@ -16,6 +16,24 @@
 
     <!-- ===================== HOST SETUP ===================== -->
     <section id="screen-host-setup" class="screen hidden">
+      <div id="profile-bar" class="card panel profile-bar">
+        <div id="profile-display" class="hidden">
+          <span>Playing as <strong id="profile-name-display"></strong></span>
+          <button type="button" id="btn-edit-profile" class="secondary standalone">Change name</button>
+        </div>
+        <div id="profile-form">
+          <h2>Your name</h2>
+          <p class="muted">Saved on this device, so you won't need to enter it again next time.</p>
+          <label>Username <input type="text" id="profile-username" placeholder="e.g. alex" autocomplete="off"></label>
+          <label>Display name <input type="text" id="profile-display-name" placeholder="e.g. Alex" autocomplete="off"></label>
+          <div class="button-row">
+            <button type="button" id="btn-save-profile" class="primary">Save</button>
+            <button type="button" id="btn-cancel-profile-edit" class="secondary hidden">Cancel</button>
+          </div>
+          <p id="profile-error" class="error hidden"></p>
+        </div>
+      </div>
+
       <div class="card panel">
         <h2>Join a game</h2>
         <p class="muted">Public games anyone can join, or enter a room code a friend shared with you.</p>
@@ -98,9 +116,6 @@
 
         <details class="advanced">
           <summary>Advanced</summary>
-          <label>Seed (optional, for a reproducible game)
-            <input type="number" id="host-seed" placeholder="random">
-          </label>
           <label>Bot think time (seconds)
             <input type="number" id="host-think-time" min="0" step="0.1" value="1.5">
           </label>
@@ -111,7 +126,7 @@
 
           <div class="bot-row">
             <label class="radio-label"><input type="checkbox" id="host-reveal-cards" checked> Reveal opponents' cards</label>
-            <label class="radio-label"><input type="checkbox" id="host-show-logs" checked> Show game log</label>
+            <label class="radio-label"><input type="checkbox" id="host-show-logs"> Show game log</label>
           </div>
           <p class="hint">These are fixed for the whole table once the game starts — set them here, not adjustable mid-game.</p>
         </details>
@@ -168,8 +183,12 @@
         <div id="lobby-status" class="lobby-status"></div>
 
         <div id="join-form">
-          <label>Username <input type="text" id="join-username" placeholder="e.g. alex" autocomplete="off"></label>
-          <label>Display name <input type="text" id="join-name" placeholder="e.g. Alex" autocomplete="off"></label>
+          <p id="join-as-label" class="hidden">Joining as <strong id="join-as-name"></strong> —
+            <button type="button" id="btn-change-join-identity" class="link-button">not you?</button></p>
+          <div id="join-identity-fields">
+            <label>Username <input type="text" id="join-username" placeholder="e.g. alex" autocomplete="off"></label>
+            <label>Display name <input type="text" id="join-name" placeholder="e.g. Alex" autocomplete="off"></label>
+          </div>
           <button id="btn-join" class="primary">Join Game</button>
           <p id="join-error" class="error hidden"></p>
         </div>
@@ -195,8 +214,12 @@
     <section id="screen-spectate-join" class="screen hidden">
       <div class="card panel">
         <h2>Watch this game</h2>
-        <label>Your name <input type="text" id="spectate-name" placeholder="e.g. Sam" autocomplete="off"></label>
-        <label>Username <input type="text" id="spectate-username" placeholder="e.g. sam" autocomplete="off"></label>
+        <p id="spectate-as-label" class="hidden">Watching as <strong id="spectate-as-name"></strong> —
+          <button type="button" id="btn-change-spectate-identity" class="link-button">not you?</button></p>
+        <div id="spectate-identity-fields">
+          <label>Your name <input type="text" id="spectate-name" placeholder="e.g. Sam" autocomplete="off"></label>
+          <label>Username <input type="text" id="spectate-username" placeholder="e.g. sam" autocomplete="off"></label>
+        </div>
         <button id="btn-spectate-join" class="primary">Watch</button>
         <p id="spectate-error" class="error hidden"></p>
         <button id="btn-back-to-join" class="secondary standalone">Back</button>
@@ -233,10 +256,8 @@
                 </div>
               </div>
               <div id="game-start-overlay" class="game-start-overlay">
-                <div class="game-start-banner">
-                  <div class="game-start-icon">⏳</div>
-                  <div class="game-start-title"></div>
-                  <div class="game-start-sub">Get ready!</div>
+                <div class="game-start-banner card panel">
+                  <div class="game-start-title">Starting soon<span class="game-start-dots"><span>.</span><span>.</span><span>.</span></span></div>
                 </div>
               </div>
             </div>
@@ -335,10 +356,8 @@
                 </div>
               </div>
               <div id="spec-game-start-overlay" class="game-start-overlay">
-                <div class="game-start-banner">
-                  <div class="game-start-icon">⏳</div>
-                  <div class="game-start-title"></div>
-                  <div class="game-start-sub">Get ready!</div>
+                <div class="game-start-banner card panel">
+                  <div class="game-start-title">Starting soon<span class="game-start-dots"><span>.</span><span>.</span><span>.</span></span></div>
                 </div>
               </div>
             </div>

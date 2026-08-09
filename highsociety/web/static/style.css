@@ -73,6 +73,9 @@ body {
   color: var(--accent);
   margin-right: 0.4rem;
 }
+.home-link { cursor: pointer; }
+.home-link:hover { opacity: 0.85; }
+.home-link:focus-visible { outline: 2px solid var(--accent-light); outline-offset: 3px; }
 .badge {
   font-size: 0.75rem;
   padding: 0.3rem 0.7rem;
@@ -466,11 +469,13 @@ button.secondary.standalone { margin-top: 0.9rem; display: inline-block; }
 }
 .final-green-sub { font-size: 0.95rem; font-weight: 600; color: #1c2b1f; }
 
-/* ------------- game-starting countdown overlay: same mechanics as the
-   final-green-overlay above (fixed, full-viewport, pop-in banner,
-   bypasses the toast queue — see showCountdownOverlay in app.js), but gold
-   accent-themed rather than green, since this isn't a green-card event —
-   it's the excited "we're about to begin" moment every game opens with. */
+/* ------------- game-starting overlay: a quiet "starting soon…" moment,
+   not an event to celebrate — chess.com-style understated messaging (plain
+   text + an animated ellipsis) rather than a pop-in banner with a
+   countdown number, per explicit design feedback that the old hourglass +
+   3-2-1 treatment read as gaudy. Reuses the app's own .card.panel look
+   (set directly on .game-start-banner in the markup) so it's never a color
+   palette of its own — just that same panel, floated over a dimmed table. */
 .game-start-overlay {
   position: fixed;
   inset: 0;
@@ -480,44 +485,39 @@ button.secondary.standalone { margin-top: 0.9rem; display: inline-block; }
   z-index: 500;
   opacity: 0;
   pointer-events: none;
-  transition: opacity 0.35s ease;
+  transition: opacity 0.3s ease;
 }
 .game-start-overlay.show { opacity: 1; }
 .game-start-overlay::before {
   content: "";
   position: absolute;
   inset: 0;
-  background: radial-gradient(circle, rgba(17, 68, 48, 0.5) 0%, rgba(11, 52, 39, 0.85) 100%);
+  background: rgba(11, 52, 39, 0.55);
 }
 .game-start-banner {
   position: relative;
-  background: linear-gradient(160deg, var(--accent-highlight) 0%, var(--accent) 55%, var(--accent-strong) 100%);
-  border: 3px solid rgba(255, 255, 255, 0.65);
-  border-radius: var(--radius);
-  padding: 1.6rem 2.6rem;
-  text-align: center;
-  box-shadow: var(--shadow), 0 0 0 6px var(--accent-soft);
-  transform: scale(0.4) rotate(-6deg);
-  opacity: 0;
+  padding: 1.1rem 1.8rem;
+  margin-bottom: 0;
 }
-.game-start-overlay.show .game-start-banner {
-  animation: final-green-pop 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) forwards,
-             game-start-glow 1.3s ease-in-out 0.5s infinite;
-}
-@keyframes game-start-glow {
-  0%, 100% { box-shadow: var(--shadow), 0 0 0 6px var(--accent-soft); }
-  50% { box-shadow: var(--shadow), 0 0 0 14px rgba(185, 138, 47, 0.45); }
-}
-.game-start-icon { font-size: 2.4rem; line-height: 1; }
 .game-start-title {
-  font-size: 1.4rem;
-  font-weight: 800;
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 0.15rem;
+  font-size: 1.05rem;
+  font-weight: 600;
   color: var(--text);
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
-  margin: 0.35rem 0 0.2rem;
 }
-.game-start-sub { font-size: 0.95rem; font-weight: 600; color: var(--text); opacity: 0.8; }
+.game-start-dots span {
+  opacity: 0;
+  animation: game-start-dot-fade 1.4s ease-in-out infinite;
+}
+.game-start-dots span:nth-child(2) { animation-delay: 0.2s; }
+.game-start-dots span:nth-child(3) { animation-delay: 0.4s; }
+@keyframes game-start-dot-fade {
+  0%, 80%, 100% { opacity: 0; }
+  40% { opacity: 1; }
+}
 
 .bid-block { margin-top: 1rem; }
 .bid-label {
@@ -823,6 +823,41 @@ button.secondary.standalone { margin-top: 0.9rem; display: inline-block; }
 }
 .rematch-status p { margin: 0; color: var(--text); font-weight: 600; }
 .rematch-status .button-row { margin-top: 0.7rem; }
+
+/* A plain inline text action (e.g. "not you?") that shouldn't look like a
+   full button — just an underlined accent-colored word inline with text. */
+button.link-button {
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  font-weight: 600;
+  color: var(--accent-strong);
+  text-decoration: underline;
+  cursor: pointer;
+}
+button.link-button:hover { color: var(--accent); }
+
+/* The saved-identity strip at the top of the home screen (see app.js's
+   loadProfile/saveProfile) — deliberately looks like every other .panel,
+   not a distinct "settings" widget, since it's meant to read as a normal
+   part of the page rather than a system dialog. */
+#profile-display {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.8rem;
+  flex-wrap: wrap;
+}
+#profile-display span { font-size: 0.95rem; }
+#profile-form h2 { margin-top: 0; }
+
+/* Mirrors #profile-display's pattern on the join/spectate screens: once a
+   saved identity exists, the raw username/name inputs stay in the DOM
+   (still readable by the same onJoin()/onSpectateJoin() that always did)
+   but hidden behind a one-line "Joining as X — not you?" confirmation. */
+#join-as-label, #spectate-as-label { margin: 0 0 0.9rem; }
 
 #spec-chat-input {
   flex: 1;
