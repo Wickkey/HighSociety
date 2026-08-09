@@ -164,16 +164,13 @@ function showCountdownOverlay(isSpectator, secondsLeft) {
   }
 }
 
-// The countdown's final tick — a shorter linger than the countdown itself
-// since real gameplay (the first auction) starts immediately after.
-function showGameStartedOverlay(isSpectator) {
+// The countdown's final tick — just clear the overlay so the first real
+// auction underneath takes over immediately, no separate "Game Started!"
+// message.
+function hideCountdownOverlay(isSpectator) {
   const overlay = $(isSpectator ? 'spec-game-start-overlay' : 'game-start-overlay');
-  overlay.querySelector('.game-start-icon').textContent = '🚀';
-  overlay.querySelector('.game-start-title').textContent = 'Game Started!';
-  overlay.querySelector('.game-start-sub').textContent = 'Good luck!';
-  overlay.classList.add('show');
   clearTimeout(overlay._hideTimer);
-  overlay._hideTimer = setTimeout(() => overlay.classList.remove('show'), 1500);
+  overlay.classList.remove('show');
 }
 
 // Points formula mirrors BasePlayer.__calculate_points(): sum of values,
@@ -898,7 +895,7 @@ function applyGameMessage(msg, isSpectator) {
       } else if (d && d.event === 'countdown') {
         showCountdownOverlay(isSpectator, d.seconds_left);
       } else if (d && d.event === 'countdown_finished') {
-        showGameStartedOverlay(isSpectator);
+        hideCountdownOverlay(isSpectator);
       }
       if (msg.prompt && !isDuplicateOfStructuredEvent(msg.prompt)) logLine(msg.prompt.trim(), isSpectator);
       break;
