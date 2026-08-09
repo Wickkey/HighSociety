@@ -326,6 +326,8 @@
             <h3>You - <span id="my-username-label"></span></h3>
             <div>Points: <strong id="my-points">0</strong></div>
             <div id="my-status-cards" class="chip-row small"></div>
+            <p class="hint money-display-label">Money</p>
+            <div id="my-money-display" class="chip-row small"></div>
           </div>
 
           <div class="card panel">
@@ -422,9 +424,11 @@
           <p class="hint">
             First, anyone with the least money left is eliminated from winning entirely. If two or
             more players are tied for the least money, none of them are eliminated — everyone stays
-            in contention. Among whoever remains, the highest total points wins (a painting's value,
-            plus a Passe's −5, all multiplied together by any Prestige/Scandale cards held). Ties for
-            the highest score are possible and simply win together.
+            in contention. Among whoever remains, the highest total points wins. That total is
+            calculated in two steps, in order: first add up the value of every painting you hold
+            plus a Passe's −5 (if you hold one); only then does any Prestige Card (×2) or Scandale
+            (½×) you hold multiply that whole total. Ties for the highest score are possible and
+            simply win together.
           </p>
         </details>
 

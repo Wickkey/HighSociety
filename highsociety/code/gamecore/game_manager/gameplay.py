@@ -31,6 +31,14 @@ class PlayGame():
     # ~1.75s minimum — with a small safety margin.
     MIN_TOAST_GAP_SECONDS = 1.8
 
+    # An auction result ("X bought Y for Z") packs in more to actually read
+    # than a routine bid/pass update, so the client gives it a longer toast
+    # (app.js's RESULT_TOAST_DURATION_MS, 3000ms) — this is that same
+    # duration plus the fade-out gap, so whatever comes next (the next
+    # auction_start, or a green-card reveal) doesn't arrive while a human's
+    # still reading who just won. See _broadcast_auction_result.
+    RESULT_TOAST_GAP_SECONDS = 3.3
+
     # AUCTION_UPDATE kinds that actually produce a toast client-side (see
     # applyAuctionUpdate in app.js) — turn_start is received but not
     # toast-worthy, so it shouldn't consume/extend the pacing clock.
@@ -166,6 +174,10 @@ class PlayGame():
         spent = record.money_spent.get(record.recipient, 0)
         summary = f"[auction_result] {record.card['type']} → {recipient_desc} for {spent}"
         self.host.send_message(summary, message_type="AUCTION_RESULT", data=record.to_dict())
+        # Push the pacing clock out further than a normal toast-worthy event
+        # would (see RESULT_TOAST_GAP_SECONDS) so whatever's broadcast next
+        # waits long enough for this result to actually be read first.
+        self._last_toast_broadcast_at = time.time() + (self.RESULT_TOAST_GAP_SECONDS - self.MIN_TOAST_GAP_SECONDS)
 
     def _broadcast_auction_update(self, kind: str, status_card: StatusCard, **extra) -> None:
         """
@@ -397,6 +409,18 @@ class PlayGame():
                     num_players_in_auction -= 1
                     record.add_event(player.username, action_result)
                     self.host.send_message(f"⚪ {player.username} passed.\n")
+                    # Passing/folding refunds whatever this player had
+                    # already committed this auction (see
+                    # _handle_player_turn's withdraw_bid()) -- without this,
+                    # their own client had no way to find out until their
+                    # next real turn, since only PLAYER_MOVE ever populated
+                    # their money display before. Sent *before*
+                    # _broadcast_auction_update, which paces itself for
+                    # everyone else's toast narration (see
+                    # _pace_toast_event) -- that pacing has nothing to do
+                    # with this player's own factual money count, so it
+                    # shouldn't delay it too.
+                    self._send_player_state(player)
                     self._broadcast_auction_update(action_result, status_card, player=player.username, max_bid=max_bid)
 
                 elif action_result == "quit":
@@ -411,6 +435,9 @@ class PlayGame():
                     record.add_event(player.username, "bid", max_bid,
                                       cards=[c.value for c in player.current_money_card_bids])
                     self.host.send_message(f"💰 {player.username} raised to {max_bid}.\n")
+                    # See the pass/fold branch above for why this goes
+                    # before the (self-pacing) broadcast, not after.
+                    self._send_player_state(player)
                     self._broadcast_auction_update("bid", status_card, player=player.username, max_bid=max_bid,
                                                     cards=[c.value for c in player.current_money_card_bids])
 
@@ -550,6 +577,15 @@ class PlayGame():
 
         # Settle bid money per the configured strategy (default: non-passers forfeit)
         self.disgrace_settlement.settle(self.players, loser_id)
+        # Unlike a normal auction (where each participant's money only ever
+        # changes on their own turn — already covered above), a disgrace
+        # auction's settlement can change *everyone's* money at once, for
+        # players who aren't the one currently acting (e.g. every raiser
+        # forfeiting under the default ForfeitSettlement). Refresh everyone
+        # rather than trying to know which settlement strategy touched whom.
+        for p in self.players:
+            if p.active:
+                self._send_player_state(p)
 
         # See the comment in normal_card_auction: current_bid_value read here,
         # after settlement but before reset_auction_attributes(), reflects
@@ -714,6 +750,14 @@ class PlayGame():
         LoggingManager.info("Game Started..")
         self.shuffle_players()
 
+        # Without this, a player's own money hand only ever appeared once
+        # they'd taken their first turn (the interactive bid prompt is the
+        # only other thing that ever populated it) — round 1 looked bare for
+        # anyone who wasn't first to act. This is what lets a client show it
+        # (read-only/greyed) from the very start instead.
+        for player in self.players:
+            self._send_player_state(player)
+
         num_green_cards = 0
         starting_player_id = random.randint(0, len(self.players) - 1) # random starting player id
         faux_pas_holder_id = None
@@ -739,12 +783,15 @@ class PlayGame():
                     # completely silent to players/spectators, who'd just
                     # see the game end with no explanation.
                     #
-                    # Deliberately NOT paced (contrast the <=3 branch above):
-                    # pacing exists to keep a following event from cutting
-                    # this one off before a human can read it, but nothing
-                    # else is ever broadcast after this — the game ends
-                    # right here. Waiting ~1.8s first would only delay the
-                    # results screen with no readability benefit.
+                    # This one IS paced (unlike the un-paced game_over
+                    # broadcast right after it, which really has nothing
+                    # after it to protect) precisely *because* something
+                    # important came immediately before it: the previous
+                    # auction's own result. Skipping the wait here let this
+                    # green-card overlay pop up over/before a human had
+                    # actually seen who won the last card and for how much —
+                    # the exact "it just happens too fast" complaint.
+                    self._pace_toast_event()
                     self.host.send_message(
                         f"🚨 {num_green_cards} green card(s) revealed — the game ends now!",
                         data={"event": "green_card_revealed", "count": num_green_cards, "is_final": True},

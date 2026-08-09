@@ -137,6 +137,13 @@ class GameRoom:
                              mode='network', game_id=self.game_id, seed=self.seed,
                              turn_duration=self.turn_time_limit)
             self.game = game
+            # A player who joined before someone else otherwise has no way
+            # to know that other seat exists until some in-auction event
+            # happens to name them by chance (see _send_opponent_roster) —
+            # tell everyone about the full, already-seated table up front.
+            for p in self.players:
+                if isinstance(p, NetworkPlayer):
+                    _send_opponent_roster(p, self)
             self.state = "in_progress"
             game.play_game()
             self.state = "finished"
@@ -660,6 +667,35 @@ def _run_player_session(player: NetworkPlayer, transport: WebSocketTransport, ro
         player.active = False
 
 
+def _send_opponent_roster(player: NetworkPlayer, room: "GameRoom") -> None:
+    """
+    Tells `player` about every other seat at the table right now — status
+    cards, active state, bot-ness — as a batch of synthetic
+    opponent_state_sync events (see app.js's GLOBAL_EVENT handler). Used
+    both for a reconnect catch-up (see _send_reconnect_catchup) and, just as
+    importantly, right as a fresh game starts: without this, a player who
+    joined *before* someone else had no way to find out that other seat was
+    filled until some in-auction event happened to name them by chance
+    (being the random starting player, or reaching their first turn) —
+    leaving an already-seated, real opponent looking like they didn't exist
+    yet for however long that took.
+    """
+    for other in room.players:
+        if other is player:
+            continue
+        player.send_message(
+            "", message_type="GLOBAL_EVENT",
+            data={
+                "event": "opponent_state_sync",
+                "username": other.username,
+                "name": other.name,
+                "is_bot": not isinstance(other, NetworkPlayer),
+                "active": other.active,
+                "status_cards": [summarize_card(c) for c in other.status_cards],
+            },
+        )
+
+
 def _send_reconnect_catchup(player: NetworkPlayer, room: "GameRoom") -> None:
     """
     A reconnecting browser starts from a completely blank client-side game
@@ -691,20 +727,7 @@ def _send_reconnect_catchup(player: NetworkPlayer, room: "GameRoom") -> None:
             },
         )
 
-    for other in room.players:
-        if other is player:
-            continue
-        player.send_message(
-            "", message_type="GLOBAL_EVENT",
-            data={
-                "event": "opponent_state_sync",
-                "username": other.username,
-                "name": other.name,
-                "is_bot": not isinstance(other, NetworkPlayer),
-                "active": other.active,
-                "status_cards": [summarize_card(c) for c in other.status_cards],
-            },
-        )
+    _send_opponent_roster(player, room)
 
 
 def _handle_player_reconnect(ws, room: "GameRoom", rejoin_token: str) -> None:

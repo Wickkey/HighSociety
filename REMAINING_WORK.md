@@ -5,35 +5,21 @@ not a wishlist. Every item below was verified against the actual source (grepped
 not assumed). Written 2026-08-02, after the CLI fix pass, network protocol rewrite, seed/record/
 replay system, and Transport/protocol modularity refactor.
 
-## Explicitly stubbed / defined-but-dead code
 
-- ~~**Auction history isn't tracked.**~~ **Fixed and designed for bot consumption specifically**
-  (per product decision — this is the primary interface an external bot-building competition would
-  read). `auction_information.py` was redesigned as clean `BidEvent`/`AuctionRecord` dataclasses;
-  `normal_card_auction`/`disgrace_card_auction` now populate `PlayGame.auction_rounds` as they run.
-  Two ways to read it: `PlayGame.get_auction_history()` (local/embedded bots) or the `AUCTION_RESULT`
-  message broadcast to every player/spectator right after each auction concludes (remote bots —
-  see `BOT_API.md`). Along the way, also added an explicit `move_type` field (`"bid"` vs
-  `"discard_painting"`) to `PLAYER_MOVE` messages, since a bot previously had no way to tell a bid
-  prompt from a FauxPas discard prompt without parsing human-readable text (confirmed by writing
-  BOT_API.md's example bot and watching it hang on a discard prompt before the fix). Verified live
-  against a real two-bot game over real sockets, not just unit tests.
-- **`RefundAllSettlement` isn't reachable from outside a test.** The pluggable disgrace-auction
-  settlement strategy (`disgrace_settlement.py`) has two implementations, but `PlayGame` defaults
-  to `ForfeitSettlement` and neither `main.py` nor `network_server.py` expose a flag to choose the
-  other. If you want the "official rules" refund-everyone behavior available to a real user, it
-  needs a `--settlement` flag or config entry.
-- ~~**Spectator `CHAT` messages don't go anywhere.**~~ **Fixed.** Spectators now get a receiver
-  thread and a per-connection chat-relay thread (`network_server.py::_spectator_chat_listener`).
-  `network_spectator_client.py` sends typed input as chat: plain text → `target="all"` (players +
-  other spectators), `/spectators <message>` → `target="spectators"` only. Never echoed back to the
-  sender; a mismatched `game_id` on an incoming chat message is dropped (reusing the validation
-  pattern from the earlier `game_id` fix). Players can now receive `CHAT` too (`protocol.py`'s
-  `PLAYER_MESSAGE_TYPES` gained it). Tests:
-  `test_end_to_end_socket.py::test_spectator_chat_to_all_reaches_players_and_other_spectators_not_sender`,
-  `::test_spectator_chat_to_spectators_only_does_not_reach_players`,
-  `::test_spectator_chat_with_mismatched_game_id_is_dropped`.
+# To be resolved now: 
+- In all these, make sure to implement in appropriate color palette and theme. Don't deviate from the current theme.
+- when a user resigns, instead of showing a popup, can you show like in screen dialog box like chess.com: Are you sure you want to resign: cancel, yes boxes.
+- The same is applicable if the user presses the HighSociety button in middle of a game. Right now there is a popup. Instead of that, a box with these texts would be better UI.
+- Player should be able to edit their username and display name by clicking: Playing as {player} box on top left corner also.
+- If possible, just show Vignesh instead of {playing as Vignesh}. Cause that's little confusing. by default, keep it like, "guest" or something like that. So that user knows it's editable. also, it's kinda small. So, people won't know it's editable. Is there a way to make it look better. In chess.com, it's in bottom left. In social media, I think profile name stuff will be on right. Whatever you think is the right call and reasonable size, do it. But it should be understandable that's where all profile related stuff resides. 
 
+- Currently when I save the link as a bookmark, there is no thumbnail. Would prefer a Sleek thumb nail. Potential Idea: the spade symbol you have kept in the game page. Another: stylized text "HS". implement this if possible.
+
+- Very important, remember. Make sure to implement in appropriate color palette and theme. Don't deviate from the current theme.
+
+
+
+# To be resolved later.
 ## Config values that are silently ignored
 
 - **A recording doesn't pin the config it was made under.** `SessionRecorder` saves the seed, but
@@ -41,65 +27,32 @@ replay system, and Transport/protocol modularity refactor.
   etc. change before you replay, the replay could silently diverge from the original game (or hit
   a `ReplayMismatch`) with no clear "your config changed" error message.
 
-## Networking robustness gaps
-
-- **No reconnection support.** Once a `NetworkPlayer`'s transport disconnects (`active` flips to
-  `False`), there's no path back in — same effect as quitting. If a player's WiFi blips mid-game,
-  they're permanently out, not just paused. This matters more once `web_server.py` is
-  publicly hosted (open WiFi/mobile connections drop far more often than a LAN) than it did for
-  `network_server.py`'s original trusted-LAN use case.
-- **One game per server process — `network_server.py` only.** `start_server()` runs exactly one
-  `PlayGame` and exits; there's no lobby/matchmaking layer for hosting multiple concurrent games
-  from one running `network_server.py` process. `web_server.py` no longer has this limitation: it
-  keeps a `_rooms` dict keyed by room code (public or private, listed via `/api/rooms` or joined by
-  code), each running its own independent `PlayGame`, with a background reaper thread dropping idle
-  lobbies and old finished games. See `web_server.py`'s `GameRoom`/`_create_room`/`_reap_stale_rooms`.
 
 ## Bigger unbuilt capabilities
 
-- **No bot/AI player.** Every "bot" that's existed so far (in this conversation's manual testing,
-  and conceptually as future training-data consumer) has been ad hoc test code, never a real
-  `BotPlayer` class implementing `BasePlayer`. If you want a fill-empty-seats or practice-against-
-  the-computer mode, that's unwritten.
 - **No mid-crash resume.** Record/replay reproduces a game from scratch, decision by decision — it
   doesn't snapshot in-progress state, so a server crash mid-game loses that game permanently (the
   recording file, if `--record` was on, only has *decisions made so far*, not a resumable state).
-- ~~**No web client / `WebSocketTransport`.**~~ **Built.** `web_server.py` + `WebSocketTransport`
-  (`network/transport.py`) — an in-browser lobby (host configures seats/bots in the page, no CLI
-  flags) on top of the exact same `NetworkPlayer`/`NetworkSpectator`/`PlayGame` the socket path
-  uses, now with public/private multi-room support (see the gap above) so many games can run at
-  once instead of one per process. See README.md's architecture section and `PLAYING.md`'s "Play in
-  a browser". Still no reconnection (see the gap above) — that limitation is shared with
-  `network_server.py`, not new here. Deployable to a managed hosting service (Render/Railway/
-  Fly.io-style) via the `Procfile` (`gunicorn -k eventlet -w 1 web_server:app`); still a single
-  process/worker since room state lives in memory, not a database.
-- **No authentication.** Anyone who can reach the port can connect and claim any username; no
-  reconnection tokens, no spoofing protection. Fine for a trusted LAN/friends game, not fine for
-  anything more exposed.
 
 ## Missing test coverage
 
-- No tests for the connection-acceptance edge cases above (partial handshake failure, heartbeat
-  timeout actually kicking a stale player, concurrent connection races).
+- No tests for the connection-acceptance edge cases above (heartbeat timeout actually kicking a
+  stale player, concurrent connection races).
 - No load/stress testing (many concurrent spectators, rapid reconnect attempts).
-- `AuctionInformation`/`auction_rounds` has no tests, consistent with being unused.
 
-## Minor polish (not correctness bugs)
 
-- Per-turn time display is a single "Time left: Xs" message, not a live ticking countdown.
-- ~~No colorized/formatted CLI output.~~ **Fixed.** `common/utils/terminal_colors.py` provides
-  ANSI helpers that auto-disable when not attached to a real terminal (respects `NO_COLOR`/
-  `FORCE_COLOR`), wired into `CLIPlayer` (by `message_type`), `CLIHost`/`network_client.py`/
-  `network_spectator_client.py` (broadcast text, by the emoji markers `gameplay.py` already uses).
-  Verified escape codes appear under `FORCE_COLOR=1` and are completely absent otherwise (piped/
-  test output unaffected — confirmed 0 occurrences without it).
-- `highsociety/HSConfig.json`'s `abs_root_dir` is still a hardcoded absolute path (used for the log
-  directory) — `get_all_configurations()` itself was made portable, but this one field wasn't.
 
-## Explicitly *not* gaps (already-settled design decisions — don't re-litigate these)
+Real-life game:
+- if a player is passed, make a [pass] mark in opponents tile in the game play. 
+- in the very first round, let the money be visible (but greyed) even if its' not the player's chance.
+- in the very first bid, I can't see the player who joined in the opponents tab. But the moment the second person bids, I can see the person. I can see other bots who have joined tho. Fix that. 
+- After the auction ends, Let's say A wins the auction, but B bidded till end but passed. When the second round starts, A starts the round. But B is unable to see her cash that should have refunded when it's greyed out. But the moment her turn comes, it's back to normal. So, the game implementation is correct, but UI is incorrect and makes her doubtful suddenly. 
 
-- Disgrace auctions: non-passers forfeit their money by default (`ForfeitSettlement`) — decided,
-  see the settlement-strategy section above for how to switch it, not whether to.
-- Points/money exact ties: declared as an explicit tie, no further tiebreaker — decided.
-- The green-card limit ending a game before the deck is exhausted — intentional, documented in
-  `HSConfig.json`'s own comments.
+- The review my friend said: At the end of each auction, the event stream should be a little more slow: like say who got which card should be visible for a bit longer. And then the new card should be announced. So that it's more understandable. Especially, when the auction ends and the 4th green card is revealed, it just happens too fast. she doesn't understand who took the previous card, spent how much and what was the 4th green card that got revealed. And suddenly the end page comes. I think after every auction ends, it should be clear who is getting the card for how much and then only the next card comes. By this way, this could be avoided. 
+
+- Capitalize the first name of the bot's name in the config file. it should be "Marble" and not "marble"
+
+- write the total calculation clearly. Like -5 happens before multiplying in how to play guide. 
+
+
+

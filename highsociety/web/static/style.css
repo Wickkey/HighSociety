@@ -729,6 +729,14 @@ button.secondary.standalone { margin-top: 0.9rem; display: inline-block; }
 .chip.money.selected { background: var(--chip-money-selected); border-color: #fff; transform: translateY(-2px); }
 .chip.neutral { background: var(--card-neutral); color: #fff; }
 .chip.neutral.selected { background: var(--accent); border-color: #fff; transform: translateY(-2px); }
+/* The sidebar's always-visible money display (see app.js's
+   renderMyMoneyDisplay/applyPlayerState) — same chip look as the
+   interactive bid-selection ones, just visibly inert: no hover lift, no
+   pointer cursor, dimmed like any other "not your turn right now" state
+   elsewhere (.standing-row.inactive uses the same filter:opacity trick). */
+.chip.money.readonly { cursor: default; filter: opacity(0.55); }
+.chip.money.readonly:hover { filter: opacity(0.55); }
+.money-display-label { margin: 0.7rem 0 0; }
 
 /* status cards */
 .status-card {

@@ -127,17 +127,24 @@ function cardBackEl() {
 const eventQueue = { game: [], spec: [] };
 const eventQueueBusy = { game: false, spec: false };
 const TOAST_DURATION_MS = 1500; // long enough to actually read before it clears
+// "X bought Y for Z" / "X is stuck with Y" packs in more to actually read
+// (who, what card, how much) than a routine bid/pass update — this was
+// specifically called out as feeling rushed for someone new to the game,
+// so it gets noticeably longer before the next auction's own toast can
+// claim the slot.
+const RESULT_TOAST_DURATION_MS = 3000;
 
 function enqueueEvent(isSpectator, text, tone) {
   const key = isSpectator ? 'spec' : 'game';
-  eventQueue[key].push({ text, tone });
+  const duration = (tone === 'buy' || tone === 'disgrace') ? RESULT_TOAST_DURATION_MS : TOAST_DURATION_MS;
+  eventQueue[key].push({ text, tone, duration });
   pumpEventQueue(key);
 }
 
 function pumpEventQueue(key) {
   if (eventQueueBusy[key] || eventQueue[key].length === 0) return;
   eventQueueBusy[key] = true;
-  const { text, tone } = eventQueue[key].shift();
+  const { text, tone, duration } = eventQueue[key].shift();
   const toast = $(key === 'spec' ? 'spec-event-toast' : 'event-toast');
   toast.textContent = text;
   toast.className = `event-toast tone-${tone}`;
@@ -148,7 +155,7 @@ function pumpEventQueue(key) {
       eventQueueBusy[key] = false;
       pumpEventQueue(key);
     }, 250); // let the fade-out clear before the next toast claims the slot
-  }, TOAST_DURATION_MS);
+  }, duration);
 }
 
 function ordinal(n) {
@@ -1167,6 +1174,7 @@ function handlePlayerMessage(msg) {
       hide($('move-panel'));
       renderAuctionPanel(false);
       renderMyPanel();
+      renderMyMoneyDisplay([]);
       ensureGameScreenVisible(false);
       fetchJSON(`/api/status?room=${encodeURIComponent(currentRoomCode)}`).then((status) => {
         lastStatus = status;
@@ -1511,6 +1519,28 @@ function applyPlayerState(msg) {
   game.myPoints = d.points;
   game.myStatusCards = d.status_cards;
   renderMyPanel();
+  // The server now sends this at game start and after every action that
+  // changes this player's money (their own bid/pass/fold, or a disgrace
+  // auction's settlement) — see gameplay.py's _send_player_state call
+  // sites — specifically so this sidebar readout doesn't go stale between
+  // this player's own turns (it used to only ever get populated by the
+  // interactive bid prompt, which only fires on their actual turn).
+  if (Array.isArray(d.money_cards)) renderMyMoneyDisplay(d.money_cards);
+}
+
+// Always-visible, read-only echo of the interactive bid-selection chips
+// (#my-money-cards inside the move panel, which only exists while it's
+// actually this player's turn) — same numbers, just inert, so a player can
+// see what they're holding regardless of whose turn it is right now.
+function renderMyMoneyDisplay(values) {
+  const row = $('my-money-display');
+  row.innerHTML = '';
+  values.slice().sort((a, b) => a - b).forEach((value) => {
+    const chip = document.createElement('span');
+    chip.className = 'chip money readonly';
+    chip.textContent = value;
+    row.appendChild(chip);
+  });
 }
 
 function applyPlayerMove(msg) {
@@ -1744,7 +1774,14 @@ function renderOpponents(isSpectator) {
     row.className = classes.join(' ');
 
     const ptsLabel = game.revealCards ? `Points: ${computePoints(o.statusCards)}` : `${o.statusCards.length} card${o.statusCards.length === 1 ? '' : 's'}`;
-    row.querySelector('.name').textContent = `${o.name}${o.active === false ? ' (out)' : ''}`;
+    // "(out)" (quit/disconnected — permanent) takes priority over
+    // "(passed)" (just folded this one auction, still very much in the
+    // game) — the dimmed/greyscale .out-of-auction styling alone wasn't a
+    // clear enough signal on its own for what state a tile was actually in.
+    let statusSuffix = '';
+    if (o.active === false) statusSuffix = ' (out)';
+    else if (o.outOfAuction) statusSuffix = ' (passed)';
+    row.querySelector('.name').textContent = `${o.name}${statusSuffix}`;
     row.querySelector('.pts').textContent = ptsLabel;
 
     const chips = row.querySelector('.chip-row');
