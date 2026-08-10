@@ -158,6 +158,101 @@ def test_get_bid_accepts_a_message_with_no_game_id(player_and_peer):
     assert result == "pass"
 
 
+def test_get_bid_does_not_crash_on_a_response_without_prompt(player_and_peer):
+    """
+    Regression test for a web-server crash: a browser client that sends a
+    RESPONSE with no `prompt` field (e.g. `{"message_type": "RESPONSE"}`) used
+    to raise KeyError inside get_bid(), killing the daemon game thread and
+    stranding the room in "in_progress" forever. A missing prompt is invalid
+    input, not a crash — send INPUT_ERROR and return None so the caller
+    (gameplay.py's _handle_player_turn) re-prompts.
+    """
+    player, peer = player_and_peer
+    reader = _LineReader(peer)
+
+    def answer():
+        for _ in range(10):
+            msg = reader.next()
+            if msg.get("message_type") == "PLAYER_MOVE":
+                break
+        send_json(peer, {"message_type": "RESPONSE"})  # no prompt field at all
+        for _ in range(10):
+            msg = reader.next()
+            if msg.get("message_type") == "INPUT_ERROR":
+                break
+
+    t = threading.Thread(target=answer, daemon=True)
+    t.start()
+    result = player.get_bid(timeout=5.0)
+    t.join(timeout=5.0)
+
+    assert result is None  # invalid input, no exception
+    # The caller re-prompts and a well-formed answer is then accepted normally.
+    _send_response(peer, "1")
+    assert player.get_bid(timeout=2.0) == [1]
+
+
+def test_get_bid_does_not_crash_on_a_non_string_prompt(player_and_peer):
+    """
+    Regression test for a web-server crash: a RESPONSE whose `prompt` is a JSON
+    list (not a string) used to raise AttributeError on `.lower()`/`.startswith()`.
+    Treat it as invalid input and return None (caller re-prompts) instead of
+    crashing the game thread.
+    """
+    player, peer = player_and_peer
+    reader = _LineReader(peer)
+
+    def answer():
+        for _ in range(10):
+            msg = reader.next()
+            if msg.get("message_type") == "PLAYER_MOVE":
+                break
+        send_json(peer, {"message_type": "RESPONSE", "prompt": [1, 2]})
+        for _ in range(10):
+            msg = reader.next()
+            if msg.get("message_type") == "INPUT_ERROR":
+                break
+
+    t = threading.Thread(target=answer, daemon=True)
+    t.start()
+    result = player.get_bid(timeout=5.0)
+    t.join(timeout=5.0)
+
+    assert result is None
+    _send_response(peer, "1")
+    assert player.get_bid(timeout=2.0) == [1]
+
+
+def test_choose_painting_to_discard_does_not_crash_on_a_non_string_prompt(player_and_peer):
+    """
+    Regression test for a web-server crash: a non-string discard choice (a JSON
+    list) used to raise AttributeError on `.strip()`. Re-prompt instead.
+    """
+    player, peer = player_and_peer
+    player.add_status_card(Painting(value=5))
+    reader = _LineReader(peer)
+
+    def answer():
+        for _ in range(10):
+            msg = reader.next()
+            if msg.get("message_type") == "PLAYER_MOVE":
+                break
+        send_json(peer, {"message_type": "RESPONSE", "prompt": [7]})
+        for _ in range(10):
+            msg = reader.next()
+            if msg.get("message_type") == "INPUT_ERROR":
+                break
+        send_json(peer, {"message_type": "RESPONSE", "prompt": "5"})
+
+    t = threading.Thread(target=answer, daemon=True)
+    t.start()
+    chosen = player.choose_painting_to_discard()
+    t.join(timeout=5.0)
+
+    assert isinstance(chosen, Painting)
+    assert chosen.value == 5
+
+
 def test_choose_painting_to_discard_ignores_a_message_with_mismatched_game_id(player_and_peer):
     player, peer = player_and_peer
     player.add_status_card(Painting(value=5))
