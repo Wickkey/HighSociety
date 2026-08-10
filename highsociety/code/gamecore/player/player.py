@@ -264,7 +264,29 @@ class BasePlayer(BotInterface):
         self.__current_bid_value = 0
         self.__current_participation_in_auction = True
 
-    
+    def reset_for_new_game(self) -> None:
+        """
+        Restores this exact object to the same blank state __init__ leaves
+        it in — fresh money cards, no status cards, 0 points — without
+        creating a new instance. This is what lets a rematch (see
+        web_server.py's _maybe_start_rematch) start a brand new PlayGame
+        with the *same* player objects instead of the previous game's final
+        hand/score bleeding into the next one: a fresh NetworkPlayer would
+        fix the state but silently break anything already holding a
+        reference to the old object by identity (e.g. the per-connection
+        session loop that tracks a player's liveness for as long as the
+        WebSocket stays open, across however many rematches happen).
+        """
+        self.__money_card_manager = MoneyCardManager()
+        self.__status_cards = []
+        self.__points = 0
+        self.__current_money_card_bids = []
+        self.__current_bid_value = 0
+        self.__current_participation_in_auction = True
+        self.__holds_faux_pas = False
+        self.__has_discarded_card = False
+
+
     def __repr__(self) -> str:
         return f"Player(name={self.name}, username={self.username}, points = {self.points})"
     
