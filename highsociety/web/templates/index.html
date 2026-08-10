@@ -316,7 +316,6 @@
                 <div class="button-row">
                   <button id="btn-place-bid" class="primary">Place Bid</button>
                   <button id="btn-pass" class="secondary">Pass</button>
-                  <button id="btn-resign" class="danger">Resign</button>
                 </div>
                 <p id="move-error" class="error hidden"></p>
               </div>
@@ -349,8 +348,9 @@
             <h3>You - <span id="my-username-label"></span></h3>
             <div>Points: <strong id="my-points">0</strong></div>
             <div id="my-status-cards" class="chip-row small"></div>
-            <p class="hint money-display-label">Money</p>
-            <div id="my-money-display" class="chip-row small"></div>
+            <div class="you-panel-footer">
+              <button id="btn-resign" class="danger" disabled>Resign</button>
+            </div>
           </div>
 
           <div class="card panel">

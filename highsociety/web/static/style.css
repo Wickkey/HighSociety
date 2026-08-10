@@ -740,6 +740,17 @@ button.secondary.standalone { margin-top: 0.9rem; display: inline-block; }
   gap: 0.5rem;
   margin-bottom: 0.7rem;
 }
+
+/* Resign lives here now (moved out of the move-panel's button row -- see
+   index.html -- so it's reachable regardless of whose turn it is) — tucked
+   in this panel's bottom-right corner rather than competing with Points/
+   status cards above for attention. Same .danger button + confirm dialog
+   as before (see app.js's onResign); only its position changed. */
+.you-panel-footer {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 0.9rem;
+}
 .panel-header-row h3 { margin: 0; }
 
 .reveal-toggle {
@@ -841,14 +852,6 @@ button.secondary.standalone { margin-top: 0.9rem; display: inline-block; }
 .chip.money.selected { background: var(--chip-money-selected); border-color: #fff; transform: translateY(-2px); }
 .chip.neutral { background: var(--card-neutral); color: #fff; }
 .chip.neutral.selected { background: var(--accent); border-color: #fff; transform: translateY(-2px); }
-/* The sidebar's always-visible money display (see app.js's
-   renderMyMoneyDisplay/applyPlayerState) — same chip look as the
-   interactive bid-selection ones, just visibly inert: no hover lift, no
-   pointer cursor, dimmed like any other "not your turn right now" state
-   elsewhere (.standing-row.inactive uses the same filter:opacity trick). */
-.chip.money.readonly { cursor: default; filter: opacity(0.55); }
-.chip.money.readonly:hover { filter: opacity(0.55); }
-.money-display-label { margin: 0.7rem 0 0; }
 
 /* status cards */
 .status-card {

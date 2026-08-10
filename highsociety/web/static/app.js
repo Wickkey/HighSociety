@@ -1203,9 +1203,11 @@ function handlePlayerMessage(msg) {
       // countdown_to_start). Force it to reflect the fresh, empty state
       // immediately instead of flashing the old game's numbers first.
       hide($('move-panel'));
+      $('move-panel').classList.remove('pending');
       renderAuctionPanel(false);
       renderMyPanel();
-      renderMyMoneyDisplay([]);
+      renderMoneyChips([]);
+      $('btn-resign').disabled = true;
       ensureGameScreenVisible(false);
       fetchJSON(`/api/status?room=${encodeURIComponent(currentRoomCode)}`).then((status) => {
         lastStatus = status;
@@ -1550,28 +1552,29 @@ function applyPlayerState(msg) {
   game.myPoints = d.points;
   game.myStatusCards = d.status_cards;
   renderMyPanel();
-  // The server now sends this at game start and after every action that
+  // The server sends this at game start and after every action that
   // changes this player's money (their own bid/pass/fold, or a disgrace
-  // auction's settlement) — see gameplay.py's _send_player_state call
-  // sites — specifically so this sidebar readout doesn't go stale between
-  // this player's own turns (it used to only ever get populated by the
-  // interactive bid prompt, which only fires on their actual turn).
-  if (Array.isArray(d.money_cards)) renderMyMoneyDisplay(d.money_cards);
-}
-
-// Always-visible, read-only echo of the interactive bid-selection chips
-// (#my-money-cards inside the move panel, which only exists while it's
-// actually this player's turn) — same numbers, just inert, so a player can
-// see what they're holding regardless of whose turn it is right now.
-function renderMyMoneyDisplay(values) {
-  const row = $('my-money-display');
-  row.innerHTML = '';
-  values.slice().sort((a, b) => a - b).forEach((value) => {
-    const chip = document.createElement('span');
-    chip.className = 'chip money readonly';
-    chip.textContent = value;
-    row.appendChild(chip);
-  });
+  // auction's settlement) — see gameplay.py's _send_player_state call sites
+  // — specifically so the money-card panel doesn't go stale between this
+  // player's own turns. It used to only ever get rebuilt by the live
+  // PLAYER_MOVE prompt (their actual turn), so everyone else's actions in
+  // between left it showing whatever was true as of this player's *last*
+  // turn — e.g. still greyed-out and missing money that had since been
+  // refunded from a pass/fold. Reusing renderMoneyChips (rather than a
+  // separate read-only copy) is safe even while the panel is pending/
+  // greyed: .move-panel.pending's pointer-events:none already blocks any
+  // click on the buttons this rebuilds.
+  if (Array.isArray(d.money_cards)) {
+    renderMoneyChips(d.money_cards);
+    // First call ever (game just started, before this player's first
+    // turn) — show the panel now, in its usual "not your turn" greyed
+    // state, instead of leaving it hidden until their first real prompt.
+    const movePanel = $('move-panel');
+    if (movePanel.classList.contains('hidden')) {
+      movePanel.classList.remove('hidden');
+      movePanel.classList.add('pending');
+    }
+  }
 }
 
 function applyPlayerMove(msg) {
@@ -1591,6 +1594,11 @@ function applyPlayerMove(msg) {
     // clear out any leftover countdown from this player's last bidding turn
     // rather than leaving a stale/wrong number showing.
     clearMoveTimer();
+    // Resign (see the .you-panel-footer button, moved out of bid-controls)
+    // answers this exact same PLAYER_MOVE prompt on the wire (see onResign)
+    // -- it only means anything while one is actually outstanding for this
+    // player, same as before it was ever visible during a discard prompt.
+    $('btn-resign').disabled = true;
   } else {
     // Deliberately NOT clearing #move-error here: this same branch is what
     // renders the very next bid prompt immediately after a rejected bid (see
@@ -1605,6 +1613,7 @@ function applyPlayerMove(msg) {
     game.selectedBid = new Set();
     renderMoneyChips(msg.constraints.allowed_money_cards);
     updateBidStatus();
+    $('btn-resign').disabled = false; // a live bid prompt is the one moment resigning is actually valid
   }
 }
 
@@ -1706,6 +1715,7 @@ function playUrgentDoubleBeep() {
 function setMovePending() {
   clearMoveTimer(); // acted — no need to keep counting down what's already submitted
   $('move-panel').classList.add('pending');
+  $('btn-resign').disabled = true; // already acted (or timed out) -- no live prompt left to answer with "quit"
 }
 
 // ------------------------------------------------------------- rendering --
