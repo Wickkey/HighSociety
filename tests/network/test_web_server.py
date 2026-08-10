@@ -833,6 +833,82 @@ def test_resigning_permanently_forfeits_the_seat_unlike_a_dropped_connection(run
     alice.close()
 
 
+def test_out_of_turn_resign_does_not_hang_the_game(running_web_server):
+    """
+    End-to-end confirmation of the "Resign works anytime" feature over the
+    real WebSocket protocol: unlike the in-turn "RESPONSE: quit" path (see
+    the test above, which answers a live PLAYER_MOVE prompt), the web UI's
+    Resign button now sends an out-of-band RESIGN message that must take
+    effect even when it's some *other* player's turn (see
+    WebSocketTransport's RESIGN handling and web_server.py's on_resign).
+
+    The actual hang this was built to prevent — a resigning player being
+    skipped forever without ever being subtracted from an auction's
+    remaining-player count, leaving the real remaining bidder re-prompted
+    indefinitely — is precisely (and deterministically) covered by
+    TestOutOfTurnDeparture in tests/game_manager/test_gameplay.py, not here:
+    a real end-to-end scenario can't reliably reproduce that specific race,
+    since a scripted/human client's own eventual response to a redundant
+    re-prompt would just look like an (incorrect) game outcome rather than a
+    literal hang. This test instead confirms the wire mechanism itself
+    works correctly end-to-end: the game reaches "finished" without
+    erroring, the resigning player ends up correctly excluded, and other
+    connected players are told about it live.
+    """
+    port = running_web_server
+    room_code = web_server.app.test_client().post(
+        "/api/create_game", json={"seats": 3, "bot_mix": ["pass"], "seed": 1, "bot_think_time": 0}
+    ).get_json()["room_code"]
+
+    alice = ScriptedWSClient(_ws_url(port, f"/ws?room={room_code}"), "alice")
+    alice.handshake()
+    alice.start()
+    bob = ScriptedWSClient(_ws_url(port, f"/ws?room={room_code}"), "bob")
+    bob.handshake()
+    # Deliberately not bob.start() -- ScriptedWSClient's background _loop()
+    # would auto-answer any PLAYER_MOVE bob receives (e.g. if bob happens to
+    # be next in turn order), racing against the explicit RESIGN sent below
+    # from this thread. A real human doesn't compete against their own
+    # in-flight bid this way; this keeps the test deterministic without
+    # exercising a client-harness-only race that has nothing to do with the
+    # actual fix under test.
+
+    # Wait for the first auction to genuinely be underway (alice actually
+    # prompted for a move) before bob resigns -- this specifically targets
+    # the "goes inactive *mid*-auction" transition (bob was still counted as
+    # active when this auction's player count was taken), not just "already
+    # inactive before any auction ever started" (a much easier case that
+    # doesn't need the counted_player_ids fix at all).
+    deadline = time.time() + 10
+    while time.time() < deadline and not alice.messages_of_type("PLAYER_MOVE"):
+        threading.Event().wait(0.1)
+    assert alice.messages_of_type("PLAYER_MOVE"), "test setup failed: alice was never prompted"
+
+    # Resign -- regardless of whose turn it happens to be when this lands,
+    # which is exactly the point: it must work either way.
+    bob._send({"message_type": "RESIGN"})
+
+    room = web_server._rooms[room_code]
+    deadline = time.time() + 30
+    while time.time() < deadline and room.state != "finished":
+        threading.Event().wait(0.2)
+    assert room.state == "finished", "game hung instead of finishing after an out-of-turn resign"
+
+    status = web_server.app.test_client().get(f"/api/status?room={room_code}").get_json()
+    bob_standing = next(s for s in status["final_standings"] if s["username"] == "bob")
+    assert bob_standing["active"] is False
+
+    # Other players are told about it live (not just left to infer it from
+    # bob quietly never taking another turn) -- see web_server.py's
+    # _handle_out_of_turn_resign.
+    resign_events = [m for m in alice.messages_of_type("GLOBAL_EVENT")
+                      if (m.get("data") or {}).get("event") == "player_resigned"]
+    assert any(e["data"]["player"] == "bob" for e in resign_events)
+
+    alice.close()
+    bob.close()
+
+
 def test_single_player_rematch_reuses_the_connection_for_a_fresh_game(running_web_server):
     """
     With only one human at the table, requesting a rematch auto-accepts (the

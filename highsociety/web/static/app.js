@@ -1207,7 +1207,10 @@ function handlePlayerMessage(msg) {
       renderAuctionPanel(false);
       renderMyPanel();
       renderMoneyChips([]);
-      $('btn-resign').disabled = true;
+      // Resign works anytime once in a game (see onResign) -- re-enable it
+      // for the fresh game immediately rather than waiting for its first
+      // PLAYER_STATE/PLAYER_MOVE.
+      $('btn-resign').disabled = false;
       ensureGameScreenVisible(false);
       fetchJSON(`/api/status?room=${encodeURIComponent(currentRoomCode)}`).then((status) => {
         lastStatus = status;
@@ -1386,6 +1389,17 @@ function applyGameMessage(msg, isSpectator) {
           o.active = d.active;
           o.statusCards = d.status_cards;
           renderOpponents(isSpectator);
+        }
+      } else if (d && d.event === 'player_resigned') {
+        // An out-of-turn resign (see web_server.py's on_resign) -- unlike
+        // the in-turn quit path (an AUCTION_UPDATE "kind":"quit", handled in
+        // applyAuctionUpdate), this can happen at any moment, so it's its
+        // own plain event rather than tied to a specific card's auction.
+        if (d.player !== game.myUsername) {
+          const o = ensureOpponent(d.player);
+          o.active = false;
+          renderOpponents(isSpectator);
+          enqueueEvent(isSpectator, `${d.player} resigned`, 'quit');
         }
       } else if (d && d.event === 'countdown') {
         showCountdownOverlay(isSpectator);
@@ -1594,11 +1608,6 @@ function applyPlayerMove(msg) {
     // clear out any leftover countdown from this player's last bidding turn
     // rather than leaving a stale/wrong number showing.
     clearMoveTimer();
-    // Resign (see the .you-panel-footer button, moved out of bid-controls)
-    // answers this exact same PLAYER_MOVE prompt on the wire (see onResign)
-    // -- it only means anything while one is actually outstanding for this
-    // player, same as before it was ever visible during a discard prompt.
-    $('btn-resign').disabled = true;
   } else {
     // Deliberately NOT clearing #move-error here: this same branch is what
     // renders the very next bid prompt immediately after a rejected bid (see
@@ -1613,7 +1622,6 @@ function applyPlayerMove(msg) {
     game.selectedBid = new Set();
     renderMoneyChips(msg.constraints.allowed_money_cards);
     updateBidStatus();
-    $('btn-resign').disabled = false; // a live bid prompt is the one moment resigning is actually valid
   }
 }
 
@@ -1715,7 +1723,6 @@ function playUrgentDoubleBeep() {
 function setMovePending() {
   clearMoveTimer(); // acted — no need to keep counting down what's already submitted
   $('move-panel').classList.add('pending');
-  $('btn-resign').disabled = true; // already acted (or timed out) -- no live prompt left to answer with "quit"
 }
 
 // ------------------------------------------------------------- rendering --
@@ -1944,8 +1951,11 @@ async function onResign() {
   hide($('move-error'));
   hasResigned = true;
   clearRejoinInfo(currentRoomCode);
-  // Wire command stays "quit" (shared with CLI/network play, see
-  // gameplay.py) — "Resign" is just the web UI's label for it.
-  ws.send(JSON.stringify({ message_type: 'RESPONSE', prompt: 'quit' }));
+  // A dedicated out-of-band message, not a RESPONSE to whatever prompt
+  // happens to be live -- resigning needs to work regardless of whose turn
+  // it is (see WebSocketTransport's RESIGN handling and web_server.py's
+  // on_resign), unlike a bid/pass/discard answer.
+  ws.send(JSON.stringify({ message_type: 'RESIGN' }));
   setMovePending();
+  $('btn-resign').disabled = true; // already resigned -- nothing left to submit twice
 }

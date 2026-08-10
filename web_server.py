@@ -581,6 +581,37 @@ def _relay_player_chat(username: str, room: GameRoom, msg: dict) -> None:
             s.send_message(formatted, message_type="CHAT", from_user=username)
 
 
+def _handle_out_of_turn_resign(username: str, room: GameRoom) -> None:
+    """
+    WebSocketTransport's on_resign callback (see its docstring) — fires the
+    instant a RESIGN message arrives, regardless of whose turn it currently
+    is. If it happens to already be this player's live turn, the transport
+    also queues a synthetic "quit" RESPONSE, so the normal in-turn quit
+    handling in gameplay.py runs as usual (setting these same flags again is
+    a harmless no-op by the time it gets there) — this covers the far more
+    common case: nothing in the engine would otherwise notice a resignation
+    until this player's turn *would* naturally have come up again, which
+    could be many other players' turns away. Mirrors _relay_player_chat's
+    shape (same background-reader-thread call site, same "loop over
+    room.players/spectators directly" pattern) rather than reaching into
+    PlayGame's own broadcast machinery, which expects a live StatusCard
+    object this out-of-band path has no access to.
+    """
+    player = next((p for p in room.players if isinstance(p, NetworkPlayer) and p.username == username), None)
+    if player is None or player.resigned:
+        return
+    player.resigned = True
+    player.active = False
+    formatted = f"❌ {username} resigned."
+    data = {"event": "player_resigned", "player": username}
+    for p in list(room.players):
+        if isinstance(p, NetworkPlayer) and p.username != username and p.active:
+            p.send_message(formatted, message_type="GLOBAL_EVENT", data=data)
+    for s in list(room.spectators):
+        if s.active:
+            s.send_message(formatted, message_type="GLOBAL_EVENT", data=data)
+
+
 def _rematch_eligible_players(room: "GameRoom") -> list[NetworkPlayer]:
     """
     The humans a rematch can actually reuse: still marked active (so neither
@@ -828,6 +859,7 @@ def _handle_player_reconnect(ws, room: "GameRoom", rejoin_token: str) -> None:
     transport = WebSocketTransport(
         ws, label=f"{username}@web-reconnect",
         on_chat=lambda msg: _relay_player_chat(username, room, msg),
+        on_resign=lambda msg: _handle_out_of_turn_resign(username, room),
     )
     player.reattach(transport)
     room.touch()
@@ -875,6 +907,7 @@ def ws_player(ws):
         transport = WebSocketTransport(
             ws, label=f"{username}@web",
             on_chat=lambda msg: _relay_player_chat(username, room, msg),
+            on_resign=lambda msg: _handle_out_of_turn_resign(username, room),
         )
         transport.start()
         player = NetworkPlayer(name=name, username=username, transport=transport, game_id=game_id)

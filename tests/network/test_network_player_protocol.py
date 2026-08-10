@@ -125,6 +125,28 @@ def test_choose_painting_to_discard_reprompts_on_invalid_choice(player_and_peer)
     assert chosen.value == 5
 
 
+def test_choose_painting_to_discard_recognizes_quit_and_returns_none(player_and_peer):
+    """
+    Regression test for a hang: an out-of-turn resign (see web_server.py's
+    on_resign) queues a synthetic {"prompt": "quit"} RESPONSE in case this
+    exact discard prompt happened to be live at the time (see
+    WebSocketTransport._reader_loop). Before this, "quit" wasn't a
+    recognized command here at all (unlike get_bid) — it fell through to
+    int(choice_text), raised ValueError, and re-prompted with
+    self.transport.receive(timeout=None), which blocks forever once this
+    player is gone and never sends anything else again, freezing the whole
+    game for every other connected player too.
+    """
+    player, peer = player_and_peer
+    player.add_status_card(Painting(value=5))
+
+    _send_response(peer, "quit")
+    chosen = player.choose_painting_to_discard()
+
+    assert chosen is None
+    assert player.resigned is True
+
+
 def test_get_bid_returns_quit_when_connection_closes_while_inactive(player_and_peer):
     player, peer = player_and_peer
     peer.close()  # triggers the receiver thread to mark the player inactive

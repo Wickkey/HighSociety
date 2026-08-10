@@ -253,6 +253,18 @@ class NetworkPlayer(BasePlayer):
                 if not choice_text:
                     self.send_message("⚠️ Empty input. Please enter a valid number.", message_type="INPUT_ERROR")
                     continue
+                if choice_text.lower() == "quit":
+                    # Mirrors get_bid()'s "quit" handling — without this, an
+                    # out-of-turn resign's synthetic "quit" RESPONSE (see
+                    # WebSocketTransport._reader_loop, queued in case this
+                    # exact discard prompt happened to be live when the
+                    # resign arrived) would fall through to int(choice_text)
+                    # below, raise ValueError, and re-prompt with
+                    # self.transport.receive(timeout=None) — which blocks
+                    # forever once this player is gone and never sends
+                    # anything else, freezing the whole game for everyone.
+                    self.resigned = True
+                    return None
 
                 choice_value = int(choice_text.strip())
                 painting = paintings.get(choice_value)

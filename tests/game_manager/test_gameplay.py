@@ -81,6 +81,104 @@ class TestNormalCardAuction:
         assert p2.current_participation_in_auction is True
 
 
+class TestOutOfTurnDeparture:
+    """
+    A player can go inactive asynchronously — an out-of-turn resign (see
+    web_server.py's on_resign) or a mid-auction disconnect — which never
+    goes through their own get_bid()/choose_painting_to_discard() return
+    value at all, unlike every other way a player leaves an auction. Without
+    accounting for this, such a player gets skipped forever without ever
+    being subtracted from the auction's remaining-player count — and once
+    they're one of only two players left, the real remaining bidder ends up
+    re-prompted forever with no one left to actually out-bid.
+    """
+
+    def test_normal_auction_ends_correctly_when_a_third_player_goes_inactive_mid_auction(self, make_player):
+        painting = Painting(value=5)
+        a = make_player("A", actions=[[4], "pass"])
+        b = make_player("B")  # never takes a real turn -- goes inactive out from under the loop
+        c = make_player("C", actions=["pass"])
+        game = make_game([a, b, c])
+
+        # Simulates an out-of-turn resign landing right as A takes their
+        # first turn — B never answers a prompt of their own at all.
+        original_get_bid = a.get_bid
+
+        def get_bid_and_deactivate_b(timeout=None):
+            b.active = False
+            a.get_bid = original_get_bid  # only deactivate once
+            return original_get_bid(timeout=timeout)
+
+        a.get_bid = get_bid_and_deactivate_b
+
+        winner_id = game.normal_card_auction(painting, starting_player_id=0)
+
+        assert winner_id == 0  # A: B never competes (inactive), C passes
+        assert painting in a.status_cards
+
+    def test_normal_auction_does_not_double_count_a_player_already_inactive_before_it_starts(self, make_player):
+        """
+        Regression test for a related bug found while fixing the above:
+        current_participation_in_auction gets reset to True for *every*
+        player ahead of each new auction, active or not — so a player who
+        was already inactive before this specific auction even began must
+        NOT be treated as "just went inactive" the first time the loop
+        reaches their slot (that would double-subtract someone
+        _count_active_auction_players() had already correctly excluded,
+        ending the auction early before the real remaining players ever got
+        a turn).
+        """
+        painting = Painting(value=5)
+        a = make_player("A", actions=["pass"])
+        b = make_player("B")
+        already_gone = make_player("Gone")
+        already_gone.active = False
+        game = make_game([a, b, already_gone])
+
+        winner_id = game.normal_card_auction(painting, starting_player_id=0)
+
+        assert winner_id == 1  # B, after A's real pass -- not ended prematurely
+
+    def test_disgrace_auction_ends_correctly_when_a_third_player_goes_inactive_mid_auction(self, make_player):
+        card = FauxPas()
+        a = make_player("A", actions=[[4]])
+        b = make_player("B")  # never takes a real turn -- goes inactive out from under the loop
+        c = make_player("C", actions=["pass"])
+        game = make_game([a, b, c])
+
+        original_get_bid = a.get_bid
+
+        def get_bid_and_deactivate_b(timeout=None):
+            b.active = False
+            a.get_bid = original_get_bid
+            return original_get_bid(timeout=timeout)
+
+        a.get_bid = get_bid_and_deactivate_b
+
+        loser_id = game.disgrace_card_auction(current_player_id=0, status_card=card)
+
+        # Quitting a disgrace auction always means losing it immediately
+        # (see the in-turn "quit" branch) — same rule, just triggered
+        # asynchronously: B loses the instant their departure is noticed,
+        # regardless of whether A/C were still competing.
+        assert loser_id == 1
+        assert card in b.status_cards
+
+    def test_disgrace_auction_does_not_double_count_a_player_already_inactive_before_it_starts(self, make_player):
+        card = Passe()
+        a = make_player("A", actions=["pass"])
+        b = make_player("B")
+        already_gone = make_player("Gone")
+        already_gone.active = False
+        game = make_game([a, b, already_gone])
+
+        # Starting turn order points at the already-departed player first,
+        # so the very first loop iteration exercises the skip branch.
+        loser_id = game.disgrace_card_auction(current_player_id=2, status_card=card)
+
+        assert loser_id == 0  # A's own real pass -- "Gone" must not be misattributed as an immediate loss
+
+
 class TestDisgraceCardAuction:
     def test_first_player_to_pass_takes_the_card(self, make_player):
         card = Passe()
@@ -244,6 +342,26 @@ class TestFauxPasPenalty:
 
         assert game.handle_faux_pas_penalty(0) is False
         assert len(player.status_cards) == 1
+
+    def test_returns_true_immediately_for_an_inactive_player_without_blocking(self, make_player):
+        """
+        handle_faux_pas_penalty is re-called every remaining round for as
+        long as its target keeps not discarding (see play_game()'s main
+        loop) — a real NetworkPlayer's choose_painting_to_discard() has no
+        timeout, so re-entering it for a player who's gone for good
+        (resigned out of turn, or disconnected) would block forever. Proves
+        the guard short-circuits *before* ever attempting that call.
+        """
+        p = make_player("P")
+        p.add_status_card(Painting(value=5))
+        p.active = False
+
+        def _should_not_be_called():
+            raise AssertionError("choose_painting_to_discard() must not be called for an inactive player")
+        p.choose_painting_to_discard = _should_not_be_called
+
+        game = make_game([p, make_player("Other")])
+        assert game.handle_faux_pas_penalty(0) is True
 
 
 class TestDetermineWinner:

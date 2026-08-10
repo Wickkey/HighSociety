@@ -202,10 +202,11 @@ class WebSocketTransport(Transport):
     sees a CHAT message compete with a real move response.
     """
 
-    def __init__(self, ws, label: str = "ws-transport", on_chat=None):
+    def __init__(self, ws, label: str = "ws-transport", on_chat=None, on_resign=None):
         self._ws = ws
         self._label = label
         self._on_chat = on_chat
+        self._on_resign = on_resign
         self._queue = queue.Queue()
         self._reader_thread = None
         self._reader_running = False
@@ -236,6 +237,21 @@ class WebSocketTransport(Transport):
                 continue
             if msg.get("message_type") == "CHAT":
                 self._on_chat(msg)
+                continue
+            if msg.get("message_type") == "RESIGN":
+                # Out-of-band: unlike a bid/discard answer, this must take
+                # effect even when it's not this player's turn (see
+                # web_server.py's on_resign for why "answer whatever prompt
+                # you're currently blocked on" doesn't cover that case).
+                # Also queue a synthetic "quit" RESPONSE, in case
+                # get_bid()/choose_painting_to_discard() *is* genuinely
+                # blocked waiting on this exact player right now — lets the
+                # normal in-turn quit handling in gameplay.py run unchanged
+                # for that case instead of leaving that call hanging until
+                # a timeout (if any) elapses.
+                if self._on_resign is not None:
+                    self._on_resign(msg)
+                self._queue.put({"message_type": "RESPONSE", "prompt": "quit"})
                 continue
             self._queue.put(msg)
         try:

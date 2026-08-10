@@ -393,11 +393,38 @@ class PlayGame():
         num_players_in_auction = self._count_active_auction_players()
         current_player_id = starting_player_id
         max_bid = 0
+        # Exactly who's actually included in the count above (active AND
+        # still participating as of right now) — reset_auction_attributes()
+        # unconditionally sets current_participation_in_auction back to True
+        # for *every* player ahead of each new auction, active or not, so
+        # that flag alone can't tell "already inactive before this auction
+        # even started" (already correctly excluded above; must not be
+        # subtracted again) apart from "still counted a moment ago, but just
+        # went inactive mid-loop" (see the skip branch below, which needs
+        # exactly this distinction).
+        counted_player_ids = {i for i, p in enumerate(self.players)
+                               if p.active and p.current_participation_in_auction}
 
         while (num_players_in_auction > 1):
             player = self.players[current_player_id]
 
             if player.active == False or player.current_participation_in_auction == False:
+                if player.active == False and current_player_id in counted_player_ids:
+                    # Went inactive asynchronously since the count above was
+                    # taken (e.g. an out-of-turn resign — see web_server.py's
+                    # on_resign — or a mid-auction disconnect), rather than
+                    # through their own turn's pass/fold/quit branch below.
+                    # Account for their departure now, exactly once (removed
+                    # from counted_player_ids, so a later skip of the same
+                    # player can't re-decrement) — otherwise they'd be
+                    # skipped forever without ever being subtracted, and once
+                    # they're one of only two players left, the real
+                    # remaining bidder would be re-prompted forever with no
+                    # one left to actually out-bid.
+                    counted_player_ids.discard(current_player_id)
+                    num_players_in_auction -= 1
+                    if num_players_in_auction <= 1:
+                        break
                 current_player_id = self.get_next_player_id(current_player_id)
                 continue
 
@@ -499,6 +526,14 @@ class PlayGame():
 
         max_bid = 0
         loser_id = -1
+        # Exactly who's actually "in" this disgrace auction right now (see
+        # normal_card_auction's identical counted_player_ids for why
+        # current_participation_in_auction alone can't tell "already
+        # inactive before this auction even started" apart from "just went
+        # inactive mid-loop" — reset_auction_attributes() blindly sets it
+        # back to True for everyone, active or not, ahead of every auction).
+        counted_player_ids = {i for i, p in enumerate(self.players)
+                               if p.active and p.current_participation_in_auction}
 
         self.host.send_message(f"\n💀 Disgrace Auction started for: {status_card}: {status_card.description}")
         self.host.send_message("Each turn, you must bid higher than the previous bid. First to pass takes the disgrace card.")
@@ -513,6 +548,22 @@ class PlayGame():
 
             # skip inactive players
             if not player.active:
+                if current_player_id in counted_player_ids:
+                    # Went inactive asynchronously (e.g. an out-of-turn
+                    # resign — see web_server.py's on_resign — or a
+                    # mid-auction disconnect) rather than through their own
+                    # turn's "quit" branch below. Quitting a disgrace
+                    # auction always means losing it immediately (see that
+                    # branch) regardless of who else is still bidding —
+                    # same rule, just triggered asynchronously. Without
+                    # this they'd just be skipped forever and whoever's
+                    # left would keep being asked to bid against no one.
+                    counted_player_ids.discard(current_player_id)
+                    loser_id = current_player_id
+                    record.add_event(player.username, "quit")
+                    self.host.send_message(f"❌ {player.username} quit.")
+                    self._broadcast_auction_update("quit", status_card, player=player.username, max_bid=max_bid)
+                    break
                 current_player_id = self.get_next_player_id(current_player_id)
                 continue
 
@@ -625,6 +676,16 @@ class PlayGame():
         False if player doesn't have paintings and hence hasn't discarded yet.
         """
         player = self.players[player_id]
+        if not player.active:
+            # Gone for good (resigned out of turn — see web_server.py's
+            # on_resign — or disconnected) — nothing left to ask them, and
+            # this gets called again every remaining round for as long as
+            # faux_pas_holder_id stays set (see play_game()'s main loop), so
+            # without this it would keep re-entering choose_painting_to_discard()
+            # and blocking on it forever (it has no timeout). Treat it as
+            # resolved so the game doesn't wait on a player who's never
+            # coming back.
+            return True
         paintings = [card for card in player.status_cards if isinstance(card, Painting)]
 
         if paintings:
