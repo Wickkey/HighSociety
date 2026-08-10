@@ -16,6 +16,7 @@ existing Transport interface. See README.md's "Architecture: adding a new
 frontend" section, which called this out as the intended extension point.
 """
 import argparse
+import datetime
 import json
 import os
 import random
@@ -30,6 +31,7 @@ from flask import Flask, jsonify, render_template, request
 from flask_sock import Sock
 
 from highsociety.code.ai import BOT_TYPES, create_bot_players
+from highsociety.code.common.db import game_history
 from highsociety.code.common.logger_module.logger.logging_manager import LoggingManager, LogType
 from highsociety.code.common.utils.network_utility import get_local_ip
 from highsociety.code.common.utils.utility import (
@@ -55,6 +57,11 @@ app = Flask(__name__, template_folder=os.path.join(WEB_DIR, "templates"),
 # custom PING-message convention or a heartbeat-monitor thread here.
 app.config['SOCK_SERVER_OPTIONS'] = {"ping_interval": 20}
 sock = Sock(app)
+
+# No-op unless DATABASE_URL is set (see game_history's module docstring) —
+# safe to call unconditionally on every process start, including once per
+# gunicorn worker in production.
+game_history.ensure_schema()
 
 
 class GameRoom:
@@ -133,6 +140,7 @@ class GameRoom:
 
     def run_game(self) -> None:
         def _run():
+            started_at = datetime.datetime.now(datetime.timezone.utc)
             game = PlayGame(players=self.players, spectators=self.spectators,
                              mode='network', game_id=self.game_id, seed=self.seed,
                              turn_duration=self.turn_time_limit)
@@ -148,6 +156,7 @@ class GameRoom:
             game.play_game()
             self.state = "finished"
             self.touch()  # start the reaper's finished-room retention window from now
+            _record_game_history(self, game, started_at)
             # Unlike before, human players' connections are deliberately left
             # open here instead of closed — a rematch (see
             # _start_rematch_request/_maybe_start_rematch) reuses the same
@@ -165,6 +174,41 @@ class GameRoom:
                 s.close()
 
         threading.Thread(target=_run, daemon=True, name=f"Game-{self.game_id}").start()
+
+
+def _record_game_history(room: "GameRoom", game: PlayGame, started_at: datetime.datetime) -> None:
+    """Translates this finished game into the plain-dict shape game_history
+    expects (see its own docstring for the schema/rationale), then hands off
+    to its fire-and-forget writer — cheap to call even when no database is
+    configured, since is_configured() short-circuits before touching a
+    network connection."""
+    if not game_history.is_configured():
+        return
+    winner_usernames = {w.username for w in (game.winners or [])}
+    players_by_username = {p.username: p for p in room.players}
+    participants = []
+    for standing in game.final_standings:
+        player = players_by_username.get(standing["username"])
+        if player is None:
+            continue
+        is_bot = not isinstance(player, NetworkPlayer)
+        participants.append({
+            "is_bot": is_bot,
+            "username": None if is_bot else player.username,
+            "name": player.name,
+            "points": standing["points"],
+            "money_left": standing["money_left"],
+            "is_winner": standing["username"] in winner_usernames,
+            "eliminated": standing["eliminated"],
+        })
+    game_history.record_finished_game_async(
+        room_code=room.room_code,
+        seats=room.seats,
+        bot_mix=room.bot_mix,
+        started_at=started_at,
+        finished_at=datetime.datetime.now(datetime.timezone.utc),
+        participants=participants,
+    )
 
 
 # Excludes 0/O and 1/I — a room code is meant to be read aloud or typed by a

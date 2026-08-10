@@ -2,9 +2,11 @@ import itertools
 import json
 import threading
 import time
+from unittest.mock import MagicMock
 
 import pytest
 
+from highsociety.code.common.db import game_history
 from highsociety.code.gamecore.card_manager.money_card_manager import MoneyCardManager
 
 # CLI/socket play has zero third-party dependencies (see README.md); only the
@@ -339,6 +341,53 @@ def test_full_game_over_websockets_against_a_bot(running_web_server):
     assert status["state"] == "finished"
     assert status["winners"] is not None
     assert len(status["final_standings"]) == 2
+
+    player.close()
+
+
+def test_finished_game_is_recorded_when_a_database_is_configured(running_web_server, monkeypatch):
+    """Exercises the real _record_game_history translation (web_server.py)
+    against a real finished game, with only the database connection itself
+    faked out — see tests/common/test_game_history.py for game_history's own
+    unit tests, which this deliberately doesn't re-duplicate."""
+    port = running_web_server
+    monkeypatch.setenv("DATABASE_URL", "postgresql://user:pass@localhost/testdb")
+    game_history._schema_ready = True  # skip the real DDL round-trip for this test
+    conn = MagicMock()
+    cursor = MagicMock()
+    ids = iter(range(1, 1000))
+    cursor.fetchone.side_effect = lambda: (next(ids),)
+    conn.cursor.return_value.__enter__.return_value = cursor
+    conn.__enter__.return_value = conn
+    monkeypatch.setattr(game_history, "_connect", lambda: conn)
+    # Run synchronously so the test doesn't have to race a background thread
+    # for a database write that, in production, is deliberately fire-and-forget.
+    monkeypatch.setattr(game_history, "record_finished_game_async",
+                         lambda **kwargs: game_history.record_finished_game(**kwargs))
+
+    resp = web_server.app.test_client().post(
+        "/api/create_game", json={"seats": 2, "bot_mix": ["pass"], "seed": 42, "bot_think_time": 0}
+    )
+    room_code = resp.get_json()["room_code"]
+    player = ScriptedWSClient(_ws_url(port, f"/ws?room={room_code}"), "alice")
+    player.handshake()
+    player.start()
+
+    room = web_server._rooms[room_code]
+    deadline = time.time() + 30
+    while time.time() < deadline and room.state != "finished":
+        threading.Event().wait(0.2)
+    assert room.state == "finished"
+
+    queries = [call.args[0] for call in cursor.execute.call_args_list]
+    assert any("INSERT INTO games" in q for q in queries)
+    player_games_calls = [c for c in cursor.execute.call_args_list if "INSERT INTO player_games" in c.args[0]]
+    assert len(player_games_calls) == 2  # alice + the pass bot
+
+    # One row per participant: the bot has no player_id (params[1]), the
+    # human does -- see the player_xor_bot schema constraint.
+    player_ids = sorted((c.args[1][1] is None) for c in player_games_calls)
+    assert player_ids == [False, True]
 
     player.close()
 

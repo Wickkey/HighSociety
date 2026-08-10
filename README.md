@@ -93,6 +93,35 @@ Game rules (starting cash, painting values, disgrace card types, player limits, 
 limit, etc.) live in `highsociety/HSConfig.json` — see `highsociety/code/HSConfig.md` for a
 field-by-field description.
 
+## Game history database (optional)
+
+`web_server.py` can persist every finished game (room, seats, bot mix, and each participant's
+final points/money/win-or-loss — see `highsociety/code/common/db/game_history.py`'s docstring for
+the exact schema) to a Postgres database. This is entirely optional and off by default: unless the
+`DATABASE_URL` environment variable is set, nothing here is ever touched (no import, no connection
+attempt), so the app runs exactly as before without a database configured.
+
+To turn it on, using [Supabase](https://supabase.com)'s free tier (chosen because it's Postgres —
+a natural fit for "map players to their past games" — and its optional Google-sign-in auth product
+means the same free project can cover a later real-accounts feature too, without switching
+providers):
+
+1. Create a free Supabase account and a new project.
+2. In the project dashboard, go to **Project Settings → Database → Connection string** and copy
+   the URI (the "Session pooler" or direct connection string both work).
+3. Set it as an environment variable before starting the server:
+   `export DATABASE_URL="postgresql://..."` (locally), or as a secret/environment variable in
+   whatever hosting service ends up running this (Render, Railway, etc.).
+4. Start the app as usual. The three tables (`players`, `games`, `player_games`) are created
+   automatically on first startup if they don't already exist — no manual migration step.
+
+A player's identity is keyed by their `username` today (there's no login system yet), but the
+schema already has nullable `google_id`/`email` columns on `players` so a future Google Sign-In
+can attach a real identity to an existing player's row without any schema change or data migration.
+A database write happening slowly or failing outright never affects gameplay — it happens
+fire-and-forget on a background thread after a game has already fully finished (see
+`record_finished_game_async`).
+
 ## Status
 
 CLI, networked, and browser play are all functional, covered by the test suite under `tests/`
