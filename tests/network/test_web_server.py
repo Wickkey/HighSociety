@@ -411,6 +411,45 @@ def test_malformed_response_does_not_strand_the_room_in_progress(running_web_ser
         ScriptedWSClient._send = original_send
 
 
+def test_game_thread_crash_marks_the_room_finished_and_closes_connections(running_web_server, monkeypatch):
+    """
+    Covers the *other* half of the malformed-RESPONSE fix: NetworkPlayer now
+    turns that specific malformed input into a re-prompt instead of a crash
+    (see test_malformed_response_does_not_strand_the_room_in_progress above),
+    but GameRoom.run_game also gained a broader safety net for any other
+    unexpected exception in the game thread — without it, the room would
+    stay "in_progress" forever (the reaper only reclaims "lobby"/"finished"
+    rooms). Unlike a clean finish, a crashed game has no sane
+    final_standings/winners to offer a rematch from, so connections are
+    closed outright rather than left open.
+    """
+    port = running_web_server
+    monkeypatch.setattr(web_server.PlayGame, "play_game",
+                         lambda self: (_ for _ in ()).throw(RuntimeError("simulated game-thread crash")))
+
+    room_code = web_server.app.test_client().post(
+        "/api/create_game", json={"seats": 2, "bot_mix": ["pass"], "seed": 42, "bot_think_time": 0}
+    ).get_json()["room_code"]
+
+    player = ScriptedWSClient(_ws_url(port, f"/ws?room={room_code}"), "alice")
+    player.handshake()
+    player.start()
+
+    room = web_server._rooms[room_code]
+    deadline = time.time() + 10
+    while time.time() < deadline and room.state != "finished":
+        threading.Event().wait(0.1)
+    assert room.state == "finished"
+
+    alice = next(p for p in room.players if isinstance(p, web_server.NetworkPlayer))
+    deadline = time.time() + 5
+    while time.time() < deadline and alice.active:
+        threading.Event().wait(0.1)
+    assert alice.active is False
+
+    player.close()
+
+
 def test_spectator_sees_the_game_live(running_web_server):
     port = running_web_server
     room_code = web_server.app.test_client().post(
