@@ -250,6 +250,23 @@ body {
   box-shadow: var(--shadow);
 }
 
+/* -------------------------------------------------------- 404 page -------------------------------------------------------- */
+.error-page { display: flex; justify-content: center; }
+.error-panel {
+  max-width: 440px;
+  margin: 4rem auto;
+  box-shadow: var(--shadow);
+  text-align: center;
+}
+.error-page-glyph { font-size: 2.6rem; margin: 0; color: var(--accent); line-height: 1; }
+.error-page-code {
+  font-size: 4rem;
+  font-weight: 700;
+  margin: 0.2rem 0 0.6rem;
+  letter-spacing: 0.05em;
+  color: var(--accent-strong);
+}
+
 h2 { margin-top: 0; font-size: 1.35rem; }
 h3 { margin: 0 0 0.7rem; font-size: 1rem; letter-spacing: 0.01em; }
 .muted { color: var(--muted); font-size: 0.9rem; }
@@ -342,6 +359,25 @@ button.danger:hover { background: var(--danger); color: #fff; }
 button:disabled { opacity: 0.5; cursor: default; transform: none; }
 
 button.secondary.standalone { margin-top: 0.9rem; display: inline-block; }
+
+/* Same visual language as button.primary, for the rare case a "button" is
+   actually a plain navigation link (the 404 page's "Back to the lobby" —
+   see 404.html) rather than a JS-driven action, so it works with no script
+   at all. */
+.btn-link {
+  display: inline-block;
+  font-size: 0.95rem;
+  padding: 0.65rem 1.3rem;
+  border-radius: var(--radius-sm);
+  font-weight: 600;
+  text-decoration: none;
+  transition: transform 0.08s ease, filter 0.15s ease;
+  margin-top: 0.5rem;
+  background: var(--accent);
+  color: #fff;
+}
+.btn-link:hover { filter: brightness(1.08); }
+.btn-link:active { transform: translateY(1px); }
 
 .button-row {
   display: flex;

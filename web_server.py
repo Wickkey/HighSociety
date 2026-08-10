@@ -317,6 +317,11 @@ def index():
     return render_template("index.html")
 
 
+@app.errorhandler(404)
+def not_found(_error):
+    return render_template("404.html"), 404
+
+
 @app.route("/api/config")
 def api_config():
     return jsonify(get_game_setting_configurations() or {})
