@@ -162,6 +162,16 @@ body {
 .profile-chip.editable .profile-chip-icon { display: inline-block; }
 .profile-chip:focus-visible { outline: 2px solid var(--accent-light); outline-offset: 2px; }
 
+/* Passive "this still needs you" cue on the chip itself, active for as long
+   as no profile has ever been saved (see app.js's renderProfileChip) — a
+   slow, gentle pulse since it's just a standing reminder, not an urgent
+   prompt. Cleared the instant a profile exists, for good. */
+.profile-chip.needs-attention { animation: chip-glow-pulse 2.4s ease-in-out infinite; }
+@keyframes chip-glow-pulse {
+  0%, 100% { box-shadow: var(--shadow-sm), 0 0 0 1px var(--accent-light); }
+  50% { box-shadow: var(--shadow-sm), 0 0 10px 3px rgba(185, 138, 47, 0.55); }
+}
+
 .profile-popover {
   position: absolute;
   top: calc(100% + 0.6rem);
@@ -175,6 +185,20 @@ body {
      the standard panel text color here, since this popover has the usual
      light .panel background despite living inside the dark header. */
   color: var(--text);
+}
+
+/* Active nudge: applied to the username field only when a host/join click
+   was intercepted for having no saved profile yet (see app.js's
+   ensureProfileSet) — a faster, brighter pulse than the passive chip glow
+   above, since this is "fix this right now" rather than a standing
+   reminder. Cleared on the field's first input or when the popover closes. */
+.profile-popover input.needs-attention {
+  animation: field-glow-pulse 1s ease-in-out infinite;
+  border-color: var(--accent-light);
+}
+@keyframes field-glow-pulse {
+  0%, 100% { box-shadow: 0 0 0 2px var(--accent-light), 0 0 6px 1px rgba(185, 138, 47, 0.25); }
+  50% { box-shadow: 0 0 0 3px var(--accent-light), 0 0 16px 5px rgba(185, 138, 47, 0.5); }
 }
 
 /* ------------- confirm modal (resign, leaving mid-game) ------------- */

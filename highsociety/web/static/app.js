@@ -62,6 +62,7 @@ function setBadge(text) {
   // "edit" target for as long as this text describes a session (see
   // renderProfileChip, which re-enables it once back at the idle state).
   badge.classList.remove('editable');
+  badge.classList.remove('needs-attention');
   closeProfilePopover();
 }
 
@@ -372,9 +373,12 @@ let joinIdentityOverridden = false;
 function renderProfileChip() {
   const badge = $('connection-badge');
   const profile = loadProfile();
-  $('connection-badge-text').textContent = profile ? profile.name : 'Guest';
+  $('connection-badge-text').textContent = profile ? profile.name : 'Username';
   badge.classList.remove('hidden');
   badge.classList.add('editable');
+  // Glows until a real profile is saved (see ensureProfileSet/onSaveProfileClick)
+  // -- a passive "this still needs you" cue, gone for good the moment one exists.
+  badge.classList.toggle('needs-attention', !profile);
   closeProfilePopover();
   applyJoinIdentityDefaults();
 }
@@ -389,6 +393,31 @@ function openProfilePopover() {
 
 function closeProfilePopover() {
   hide($('profile-popover'));
+  $('profile-username').classList.remove('needs-attention');
+}
+
+// Guards the "Host Game" / "Join" actions on the home screen: if this
+// browser has never saved a profile, a click would otherwise silently go
+// through under the generic "Username" placeholder (see renderProfileChip).
+// Opens the popover and glows the username field instead of proceeding, so
+// a first-time visitor gets one clear nudge before their first game starts.
+// Purely a client-side check against the already-cached profile (see
+// loadProfile) -- no network round-trip, so it adds no latency/backend load
+// to the host/join request it's guarding. Returns true if the action should
+// be aborted (popover opened) so callers can `if (ensureProfileSet(event)) return;`.
+// Takes the triggering click event so it can stop it from bubbling up to
+// the document-level "click outside the chip closes the popover" listener
+// below -- without this, that same click (button, then document, in one
+// synchronous dispatch) would close the popover the instant it opens.
+function ensureProfileSet(event) {
+  if (loadProfile()) return false;
+  if (event) event.stopPropagation();
+  openProfilePopover();
+  const input = $('profile-username');
+  input.classList.add('needs-attention');
+  input.focus();
+  input.addEventListener('input', () => input.classList.remove('needs-attention'), { once: true });
+  return true;
 }
 
 function onProfileChipClick() {
@@ -545,7 +574,8 @@ async function fetchJSON(url, opts) {
 // and letting the generic !status.exists path bounce back) so a mistyped
 // room code gets a clear error right on the home screen instead of silently
 // doing nothing.
-async function enterRoom(roomCode) {
+async function enterRoom(roomCode, event) {
+  if (ensureProfileSet(event)) return;
   let status;
   try {
     status = await fetchJSON(`/api/status?room=${encodeURIComponent(roomCode)}`);
@@ -648,7 +678,7 @@ function renderRoomsList(rooms) {
     btn.type = 'button';
     btn.className = 'secondary';
     btn.textContent = 'Join';
-    btn.addEventListener('click', () => enterRoom(r.room_code));
+    btn.addEventListener('click', (event) => enterRoom(r.room_code, event));
     row.appendChild(label);
     row.appendChild(btn);
     container.appendChild(row);
@@ -1007,7 +1037,8 @@ function wireStaticHandlers() {
   });
 }
 
-async function onCreateGame() {
+async function onCreateGame(event) {
+  if (ensureProfileSet(event)) return;
   hide($('host-error'));
   const seats = parseInt($('host-seats').value, 10);
   const counts = {
@@ -1049,11 +1080,11 @@ async function onCreateGame() {
   }
 }
 
-function onJoinByCode() {
+function onJoinByCode(event) {
   hide($('host-error'));
   const code = $('join-room-code').value.trim().toUpperCase();
   if (!code) { showError($('host-error'), 'Enter a room code.'); return; }
-  enterRoom(code);
+  enterRoom(code, event);
 }
 
 // ------------------------------------------------------------- join flow --
