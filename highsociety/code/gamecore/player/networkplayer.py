@@ -119,6 +119,16 @@ class NetworkPlayer(BasePlayer):
         if not self._belongs_to_this_game(bid):
             return None  # discard silently; caller will re-poll for the real input
 
+        # A bid response is user-supplied text from a remote client (a browser
+        # tab, another socket client, a bot). It must be a string — a client
+        # that sends a non-string or missing `prompt` (e.g. a JSON list, a
+        # number, or nothing at all) is malformed, not a valid bid. Treat it
+        # as invalid input rather than crashing the game thread with a
+        # KeyError/AttributeError on the shape it wasn't expecting.
+        if not isinstance(bid.get("prompt"), str):
+            self.send_message("⚠️ Invalid response. Please enter a valid number, list, or command.", message_type="INPUT_ERROR")
+            return None
+
         if bid["prompt"] == "":
             self.send_message("⚠️ Empty input. Please enter a valid number, list, or command.", message_type="INPUT_ERROR")
             return None
@@ -194,6 +204,9 @@ class NetworkPlayer(BasePlayer):
                     continue  # discard silently; keep waiting for the real input
 
                 choice_text = choice.get("prompt", "")
+                if not isinstance(choice_text, str):
+                    self.send_message("⚠️ Invalid input. Try again.", message_type="INPUT_ERROR")
+                    continue
                 if not choice_text:
                     self.send_message("⚠️ Empty input. Please enter a valid number.", message_type="INPUT_ERROR")
                     continue

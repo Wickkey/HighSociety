@@ -125,14 +125,25 @@ class GameRoom:
                              turn_duration=self.turn_time_limit)
             self.game = game
             self.state = "in_progress"
-            game.play_game()
-            self.state = "finished"
-            self.touch()  # start the reaper's finished-room retention window from now
-            for p in self.players:
-                if isinstance(p, NetworkPlayer):
-                    p.close()
-            for s in self.spectators:
-                s.close()
+            try:
+                game.play_game()
+            except Exception:
+                # A crash in the game thread must not strand the room in
+                # "in_progress" forever: _reap_stale_rooms only reaps "lobby"
+                # and "finished" rooms, so an unhandled exception here would
+                # leak the room and hang every connected player/spectator with
+                # no way out. Log it, close the connections so clients see a
+                # clean disconnect, and still mark the room finished so the
+                # reaper can reclaim it.
+                LoggingManager.exception("Game thread crashed; closing the room's connections")
+            finally:
+                self.state = "finished"
+                self.touch()  # start the reaper's finished-room retention window from now
+                for p in self.players:
+                    if isinstance(p, NetworkPlayer):
+                        p.close()
+                for s in self.spectators:
+                    s.close()
 
         threading.Thread(target=_run, daemon=True, name=f"Game-{self.game_id}").start()
 

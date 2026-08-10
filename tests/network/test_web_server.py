@@ -309,6 +309,74 @@ def test_full_game_over_websockets_against_a_bot(running_web_server):
     player.close()
 
 
+def test_malformed_response_does_not_strand_the_room_in_progress(running_web_server):
+    """
+    Regression test for a crash found by driving the protocol by hand: a player
+    connection answering a bid prompt with a RESPONSE that has no `prompt` field
+    used to raise KeyError inside NetworkPlayer.get_bid(), killing the daemon
+    game thread. The room stayed "in_progress" forever (the reaper only reclaims
+    "lobby"/"finished" rooms), leaking the room and hanging every player and
+    spectator. The parser now treats a missing/non-string prompt as invalid input
+    and re-prompts, and the game thread guards against any other crash by closing
+    connections and marking the room finished either way.
+    """
+    port = running_web_server
+    room_code = web_server.app.test_client().post(
+        "/api/create_game", json={"seats": 2, "bot_mix": ["pass"], "seed": 42, "bot_think_time": 0}
+    ).get_json()["room_code"]
+
+    class MalformedOnceClient(ScriptedWSClient):
+        """Answers like ScriptedWSClient, but the very first bid answer is a
+        RESPONSE with no `prompt` field — the exact malformed message that used
+        to crash the game thread. Falls back to normal pass answers after."""
+
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self._malformed_sent = False
+            self._malformed_seen = threading.Event()
+
+        def _answer(self, payload):
+            if not self._malformed_sent:
+                self._malformed_sent = True
+                self._malformed_seen.set()
+                return None  # None means "send the malformed RESPONSE", see _loop
+            return super()._answer(payload)
+
+    # _loop sends {"message_type": "RESPONSE", "prompt": self._answer(payload)}
+    # for every PLAYER_MOVE. Patch the send to drop the prompt when the answer
+    # is None, reproducing the malformed payload exactly.
+    original_send = ScriptedWSClient._send
+
+    def _send_maybe_malformed(self, payload):
+        if payload.get("prompt") is None:
+            payload = {"message_type": "RESPONSE"}
+        original_send(self, payload)
+
+    ScriptedWSClient._send = _send_maybe_malformed
+    try:
+        player = MalformedOnceClient(_ws_url(port, f"/ws?room={room_code}"), "alice")
+        player.handshake()
+        player.start()
+
+        assert player._malformed_seen.wait(timeout=15), "test setup failed: the malformed message was never sent"
+
+        # The game must still run to completion despite the malformed message,
+        # and the room must reach "finished" (never left stranded "in_progress").
+        deadline = time.time() + 30
+        room_obj = web_server._rooms[room_code]
+        while time.time() < deadline and room_obj.state != "finished":
+            threading.Event().wait(0.2)
+        assert room_obj.state == "finished"
+
+        status = web_server.app.test_client().get(f"/api/status?room={room_code}").get_json()
+        assert status["state"] == "finished"
+        assert len(status["final_standings"]) == 2
+
+        player.close()
+    finally:
+        ScriptedWSClient._send = original_send
+
+
 def test_spectator_sees_the_game_live(running_web_server):
     port = running_web_server
     room_code = web_server.app.test_client().post(
