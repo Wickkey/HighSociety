@@ -39,6 +39,18 @@ def test_run_simulations_is_reproducible_with_the_same_seed():
     assert dict(stats_a) == dict(stats_b)
 
 
+def test_run_simulations_with_multiple_workers_matches_sequential_aggregate_shape():
+    """Parallel execution (see ProcessPoolExecutor in run_simulations) must
+    produce the same *shape* of aggregate result as sequential -- summed
+    stats can't depend on which worker process happened to finish a given
+    game, only on how many games were actually played."""
+    stats = run_simulations(["greedy", "greedy", "pass"], num_simulations=4, think_time=0,
+                             seed=1, progress=False, workers=2)
+    assert stats["greedy"]["matches"] == 8
+    assert stats["pass"]["matches"] == 4
+    assert stats["greedy"]["wins"] + stats["pass"]["wins"] == 4
+
+
 def test_ranked_rows_sorts_most_wins_first_then_best_average_rank():
     stats = {
         "underdog": {"matches": 10, "wins": 1, "rank_sum": 8.0},

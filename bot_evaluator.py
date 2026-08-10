@@ -21,9 +21,11 @@ Usage:
 import argparse
 import contextlib
 import csv
+import os
 import sys
 import time
 from collections import defaultdict
+from concurrent.futures import ProcessPoolExecutor, as_completed
 
 from highsociety.code.ai import BOT_TYPES, create_bot_players
 from highsociety.code.common.utils.utility import validate_player_count
@@ -82,41 +84,84 @@ def compute_ranks(final_standings: list[dict]) -> list[int]:
     return ranks
 
 
+def _simulate_one_game(bot_mix: list[str], think_time: float, game_seed) -> tuple:
+    """
+    Plays exactly one full game and returns (usernames, winner_usernames,
+    ranks) -- plain, picklable data (no PlayGame/player objects), which is
+    what makes this safe to hand to ProcessPoolExecutor: a worker process
+    only ever needs to ship this small result back, never a live game
+    object. Must stay a module-level function (not a closure) for the same
+    reason -- ProcessPoolExecutor pickles the function reference itself to
+    send the work to a worker.
+    """
+    with _no_pacing_sleep():
+        players = create_bot_players(bot_mix, think_time=think_time)
+        # mode="network" + no spectators means nothing is ever printed to
+        # the terminal per-decision (NetworkHost only forwards to
+        # players/spectators, and bot players' own send_message() doesn't
+        # print) -- CLI mode would otherwise narrate every single bid.
+        game = PlayGame(players=players, spectators=[], mode="network", seed=game_seed)
+        game.play_game()
+
+        winner_usernames = {w.username for w in (game.winners or [])}
+        ranks = compute_ranks(game.final_standings)
+        usernames = [p.username for p in players]
+    return usernames, winner_usernames, ranks
+
+
 def run_simulations(bot_mix: list[str], num_simulations: int, think_time: float,
-                     seed: int = None, progress: bool = True) -> dict:
+                     seed: int = None, progress: bool = True, workers: int = 1) -> dict:
     """
     Plays num_simulations full games with one seat per entry of bot_mix and
     returns per-bot-type aggregate stats:
         {bot_type: {"matches": int, "wins": int, "rank_sum": float}}
     rank_sum accumulates rank/num_players per seat-instance, so dividing by
     "matches" afterward gives that bot's average normalized rank.
+
+    workers: how many games to run concurrently, each in its own OS process
+    (this is CPU-bound work -- an MCTS bot's search is real computation, not
+    I/O -- so threads wouldn't help; Python's GIL would just serialize them
+    right back). 1 (the default) runs sequentially in this process, which
+    is what every existing caller/test still gets unless it opts in --
+    process-pool overhead isn't worth it for a handful of simulations, and
+    determinism/ordering stays exactly as before. main() below defaults the
+    *CLI* to os.cpu_count() instead, since a real bulk run is exactly where
+    this matters.
     """
     stats = defaultdict(lambda: {"matches": 0, "wins": 0, "rank_sum": 0.0})
     num_players = len(bot_mix)
 
-    with _no_pacing_sleep():
+    def _record(usernames, winner_usernames, ranks) -> None:
+        for bot_type, username, rank in zip(bot_mix, usernames, ranks):
+            s = stats[bot_type]
+            s["matches"] += 1
+            s["rank_sum"] += rank / num_players
+            if username in winner_usernames:
+                s["wins"] += 1
+
+    if workers <= 1:
         for sim in range(num_simulations):
             if progress:
                 print(f"\rSimulating game {sim + 1}/{num_simulations}...", end="", flush=True)
-
-            players = create_bot_players(bot_mix, think_time=think_time)
             game_seed = None if seed is None else seed + sim
-            # mode="network" + no spectators means nothing is ever printed to
-            # the terminal per-decision (NetworkHost only forwards to
-            # players/spectators, and bot players' own send_message() doesn't
-            # print) -- CLI mode would otherwise narrate every single bid.
-            game = PlayGame(players=players, spectators=[], mode="network", seed=game_seed)
-            game.play_game()
-
-            winner_usernames = {w.username for w in (game.winners or [])}
-            ranks = compute_ranks(game.final_standings)
-
-            for bot_type, player, rank in zip(bot_mix, players, ranks):
-                s = stats[bot_type]
-                s["matches"] += 1
-                s["rank_sum"] += rank / num_players
-                if player.username in winner_usernames:
-                    s["wins"] += 1
+            _record(*_simulate_one_game(bot_mix, think_time, game_seed))
+    else:
+        completed = 0
+        with ProcessPoolExecutor(max_workers=workers) as executor:
+            futures = [
+                executor.submit(_simulate_one_game, bot_mix, think_time,
+                                 None if seed is None else seed + sim)
+                for sim in range(num_simulations)
+            ]
+            # Recorded as each game finishes, not in submission order -- the
+            # sum stats accumulate into doesn't care about order, only the
+            # per-game seed (fixed at submission time, independent of which
+            # worker/when it happens to complete) affects reproducibility.
+            for future in as_completed(futures):
+                _record(*future.result())
+                completed += 1
+                if progress:
+                    print(f"\rSimulating game {completed}/{num_simulations}...", end="", flush=True)
 
     if progress:
         print()  # move past the in-place progress line
@@ -176,21 +221,29 @@ def main():
     parser.add_argument("--output", type=str, default="bot_evaluator_results.csv",
                          help="CSV file to write results to (default: bot_evaluator_results.csv)")
     parser.add_argument("--quiet", action="store_true", help="Suppress the per-game progress line")
+    parser.add_argument("--workers", type=int, default=os.cpu_count() or 1,
+                         help="How many games to run concurrently, each in its own process -- this is "
+                              "CPU-bound work (an MCTS bot's search is real computation), so more workers "
+                              "only help up to your machine's core count. 1 forces strictly sequential "
+                              "(default: your CPU count, %(default)s on this machine)")
     args = parser.parse_args()
 
     bot_mix = [b.strip() for b in args.bots.split(",") if b.strip()]
     error = validate_player_count(len(bot_mix))
     if error:
         parser.error(f"--bots has {len(bot_mix)} entries: {error}")
+    if args.workers < 1:
+        parser.error("--workers must be at least 1")
     unknown = sorted(set(bot_mix) - set(BOT_TYPES))
     if unknown:
         parser.error(f"Unknown bot type(s) {unknown}; choose from {list(BOT_TYPES)}")
     if args.num_simulations < 1:
         parser.error("--num-simulations must be at least 1")
 
-    print(f"Running {args.num_simulations} simulation(s) with bots: {bot_mix}")
+    print(f"Running {args.num_simulations} simulation(s) with bots: {bot_mix} "
+          f"({args.workers} worker{'s' if args.workers != 1 else ''})")
     stats = run_simulations(bot_mix, args.num_simulations, args.think_time, args.seed,
-                             progress=not args.quiet)
+                             progress=not args.quiet, workers=args.workers)
 
     write_csv(stats, args.output)
     print_summary(stats)
