@@ -109,9 +109,11 @@ providers):
 1. Create a free Supabase account and a new project.
 2. In the project dashboard, go to **Project Settings → Database → Connection string** and copy
    the URI (the "Session pooler" or direct connection string both work).
-3. Set it as an environment variable before starting the server:
-   `export DATABASE_URL="postgresql://..."` (locally), or as a secret/environment variable in
-   whatever hosting service ends up running this (Render, Railway, etc.).
+3. Copy `.env.example` to `.env` and paste it in as `DATABASE_URL=postgresql://...` — `.env` is
+   gitignored, so it never gets committed. `web_server.py` loads it automatically at startup (via
+   `python-dotenv`), so no manual `export` is needed locally. A real hosting service (Render,
+   Railway, etc.) has no `.env` file to find, so there you'd set `DATABASE_URL` as a secret/
+   environment variable in its own dashboard instead.
 4. Start the app as usual. The three tables (`players`, `games`, `player_games`) are created
    automatically on first startup if they don't already exist — no manual migration step.
 

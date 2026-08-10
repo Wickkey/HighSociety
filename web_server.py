@@ -27,6 +27,7 @@ import time
 import uuid
 from typing import Optional
 
+from dotenv import load_dotenv
 from flask import Flask, jsonify, render_template, request
 from flask_sock import Sock
 
@@ -57,6 +58,12 @@ app = Flask(__name__, template_folder=os.path.join(WEB_DIR, "templates"),
 # custom PING-message convention or a heartbeat-monitor thread here.
 app.config['SOCK_SERVER_OPTIONS'] = {"ping_interval": 20}
 sock = Sock(app)
+
+# Pulls DATABASE_URL (and anything else in a local .env file) into the
+# environment before ensure_schema() below reads it — a no-op if no .env
+# file exists, which is exactly the case on a real host that sets env vars
+# its own way (Render/Railway/etc.), so this only ever matters for local dev.
+load_dotenv()
 
 # No-op unless DATABASE_URL is set (see game_history's module docstring) —
 # safe to call unconditionally on every process start, including once per
