@@ -146,9 +146,9 @@
         <fieldset class="bot-mix">
           <legend>Fill seats with bots (optional)</legend>
           <div class="bot-row">
-            <label>Pass bot <input type="number" id="bot-pass" min="0" max="4" value="0"></label>
-            <label>Greedy bot <input type="number" id="bot-greedy" min="0" max="4" value="1"></label>
-            <label>Capped-greedy bot <input type="number" id="bot-capped" min="0" max="4" value="0"></label>
+            <label>Easy <input type="number" id="bot-easy" min="0" max="4" value="0"></label>
+            <label>Medium <input type="number" id="bot-medium" min="0" max="4" value="1"></label>
+            <label>Hard <input type="number" id="bot-hard" min="0" max="4" value="0"></label>
           </div>
           <p class="hint">At least one seat must be left for a human (you).</p>
         </fieldset>
@@ -232,9 +232,9 @@
           <p>✅ You're in! Waiting for the rest of the table…</p>
           <div class="button-row">
             <select id="waiting-bot-type">
-              <option value="pass">Pass bot</option>
-              <option value="greedy" selected>Greedy bot</option>
-              <option value="capped">Capped-greedy bot</option>
+              <option value="easy">Easy</option>
+              <option value="medium" selected>Medium</option>
+              <option value="hard">Hard</option>
             </select>
             <button id="btn-add-bot" class="secondary">Fill an empty seat with a bot</button>
           </div>
@@ -461,9 +461,9 @@
             <fieldset class="bot-mix">
               <legend>Bot seats for the rematch</legend>
               <div class="bot-row">
-                <label>Pass bot <input type="number" id="rematch-bot-pass" min="0" max="4" value="0"></label>
-                <label>Greedy bot <input type="number" id="rematch-bot-greedy" min="0" max="4" value="0"></label>
-                <label>Capped-greedy bot <input type="number" id="rematch-bot-capped" min="0" max="4" value="0"></label>
+                <label>Easy <input type="number" id="rematch-bot-easy" min="0" max="4" value="0"></label>
+                <label>Medium <input type="number" id="rematch-bot-medium" min="0" max="4" value="0"></label>
+                <label>Hard <input type="number" id="rematch-bot-hard" min="0" max="4" value="0"></label>
               </div>
               <p id="rematch-bot-hint" class="hint"></p>
             </fieldset>

@@ -919,11 +919,11 @@ function renderRematchPanel() {
 }
 
 function fillRematchBotForm(mix) {
-  const counts = { pass: 0, greedy: 0, capped: 0 };
+  const counts = { easy: 0, medium: 0, hard: 0 };
   mix.forEach((b) => { if (counts[b] !== undefined) counts[b] += 1; });
-  $('rematch-bot-pass').value = counts.pass;
-  $('rematch-bot-greedy').value = counts.greedy;
-  $('rematch-bot-capped').value = counts.capped;
+  $('rematch-bot-easy').value = counts.easy;
+  $('rematch-bot-medium').value = counts.medium;
+  $('rematch-bot-hard').value = counts.hard;
   $('rematch-bot-hint').textContent = rematchBotSeats
     ? `${rematchBotSeats} bot seat${rematchBotSeats === 1 ? '' : 's'} to fill — same as last time by default, but changeable.`
     : 'No bot seats this time — every seat is a returning player.';
@@ -946,9 +946,9 @@ function onCancelRematchForm() {
 
 function onSendRematchRequest() {
   const counts = {
-    pass: parseInt($('rematch-bot-pass').value || '0', 10),
-    greedy: parseInt($('rematch-bot-greedy').value || '0', 10),
-    capped: parseInt($('rematch-bot-capped').value || '0', 10),
+    easy: parseInt($('rematch-bot-easy').value || '0', 10),
+    medium: parseInt($('rematch-bot-medium').value || '0', 10),
+    hard: parseInt($('rematch-bot-hard').value || '0', 10),
   };
   const botMix = [];
   for (const [type, n] of Object.entries(counts)) for (let i = 0; i < n; i += 1) botMix.push(type);
@@ -1042,9 +1042,9 @@ async function onCreateGame(event) {
   hide($('host-error'));
   const seats = parseInt($('host-seats').value, 10);
   const counts = {
-    pass: parseInt($('bot-pass').value || '0', 10),
-    greedy: parseInt($('bot-greedy').value || '0', 10),
-    capped: parseInt($('bot-capped').value || '0', 10),
+    easy: parseInt($('bot-easy').value || '0', 10),
+    medium: parseInt($('bot-medium').value || '0', 10),
+    hard: parseInt($('bot-hard').value || '0', 10),
   };
   const botMix = [];
   for (const [type, n] of Object.entries(counts)) for (let i = 0; i < n; i += 1) botMix.push(type);
