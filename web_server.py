@@ -145,7 +145,29 @@ class GameRoom:
                 if isinstance(p, NetworkPlayer):
                     _send_opponent_roster(p, self)
             self.state = "in_progress"
-            game.play_game()
+            try:
+                game.play_game()
+            except Exception:
+                # A crash in the game thread must not strand the room
+                # "in_progress" forever: _reap_stale_rooms only reaps "lobby"
+                # and "finished" rooms, so an unhandled exception here would
+                # leak the room and hang every connected player/spectator with
+                # no way out (see the RESPONSE-parsing hardening in
+                # NetworkPlayer.get_bid/choose_painting_to_discard, added
+                # alongside this guard as the first known way to trigger it).
+                # Unlike a clean finish below, final_standings/winners may
+                # never have been populated at all, so there's no sane state
+                # left to offer a rematch from — close every connection
+                # instead of leaving them open.
+                LoggingManager.exception("Game thread crashed; closing the room's connections")
+                self.state = "finished"
+                self.touch()
+                for p in self.players:
+                    if isinstance(p, NetworkPlayer):
+                        p.close()
+                for s in self.spectators:
+                    s.close()
+                return
             self.state = "finished"
             self.touch()  # start the reaper's finished-room retention window from now
             # Unlike before, human players' connections are deliberately left
