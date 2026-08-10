@@ -10,3 +10,15 @@ flask-sock
 # practice — see the hosting platform's own gunicorn error if this ever
 # regresses).
 gunicorn
+# Optional: only imported/needed once DATABASE_URL is set (see
+# highsociety/code/common/db/game_history.py) — the app runs fine without a
+# database configured at all, this just needs to be installed for when one
+# is. "-binary" ships a prebuilt wheel so this doesn't need Postgres's own
+# dev headers/build toolchain on whatever machine/host installs it.
+psycopg2-binary
+# Loads a local .env file (e.g. DATABASE_URL) into the environment at
+# startup (see web_server.py's load_dotenv() call) — a convenience for local
+# dev so you don't have to `export` secrets by hand every terminal session.
+# A real host (Render/Railway/etc.) sets env vars its own way and simply has
+# no .env file to find, so this is a no-op there.
+python-dotenv
