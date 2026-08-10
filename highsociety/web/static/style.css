@@ -531,7 +531,14 @@ button.secondary.standalone { margin-top: 0.9rem; display: inline-block; }
 }
 .bid-readout { margin-top: 0.9rem; font-size: 1.05rem; }
 
-.auction-stage { position: relative; }
+/* Column layout so the toast gets its own reserved strip above the card
+   (see .event-toast below) instead of floating centered on top of it. */
+.auction-stage {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
 
 .auction-card-slot {
   display: flex;
@@ -542,20 +549,26 @@ button.secondary.standalone { margin-top: 0.9rem; display: inline-block; }
 }
 
 /* ---------------- transient event toast (RAISE/PASS/BUY/etc.) ----------------
-   Centered over the auction stage — the "shared game state" underneath
-   (card, bid, whose turn) never dims or changes because of this; it's a
-   brief, separate announcement layer, not a modal. See app.js's event
-   queue (enqueueEvent/processEventQueue) for the timing/sequencing. */
+   A reserved strip above the card, not an overlay on top of it — the
+   "shared game state" underneath (card, bid, whose turn) never dims or
+   changes because of this; it's a brief, separate announcement layer, not a
+   modal. min-height reserves the toast's own space permanently so it never
+   overlaps or shifts the card when it fades in/out (previously
+   position:absolute + centered transform sat it directly over the card
+   face). See app.js's event queue (enqueueEvent/processEventQueue) for the
+   timing/sequencing. */
 .event-toast {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%) scale(0.85);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 2.6rem;
+  margin-bottom: 0.3rem;
+  transform: scale(0.85);
   background: var(--text);
   color: var(--panel-bg);
   font-size: 0.95rem;
   font-weight: 700;
-  padding: 0.6rem 1.1rem;
+  padding: 0.5rem 1.1rem;
   border-radius: 999px;
   border: 2px solid rgba(255, 255, 255, 0.5);
   box-shadow: var(--shadow);
@@ -568,7 +581,7 @@ button.secondary.standalone { margin-top: 0.9rem; display: inline-block; }
   text-overflow: ellipsis;
   transition: opacity 0.15s ease, transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
-.event-toast.show { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+.event-toast.show { opacity: 1; transform: scale(1); }
 .event-toast.tone-bid { background: var(--chip-money); }
 .event-toast.tone-pass { background: #6b6b6b; }
 .event-toast.tone-buy { background: var(--accent); color: #fff; }
@@ -604,14 +617,20 @@ button.secondary.standalone { margin-top: 0.9rem; display: inline-block; }
   inset: 0;
   background: radial-gradient(circle, rgba(17, 68, 48, 0.5) 0%, rgba(11, 52, 39, 0.85) 100%);
 }
+/* .card.panel (see index.html) supplies the actual parchment background —
+   the same material every other panel/modal in the app uses — so this
+   moment reads as "this app, at its most dramatic" rather than a one-off
+   novelty color scheme. A gold border/glow (matching .profile-chip,
+   .opponent-row.current-turn, etc.) stands in for the old green gradient;
+   the green-card motif still comes through via the actual .status-card.big
+   green card face inside (see .final-green-card below), not the whole
+   banner being painted green. */
 .final-green-banner {
   position: relative;
-  background: linear-gradient(160deg, var(--accent-highlight) 0%, var(--green-dot) 55%, var(--chip-money) 100%);
-  border: 3px solid rgba(255, 255, 255, 0.65);
-  border-radius: var(--radius);
+  border: 2px solid var(--accent-light);
   padding: 1.6rem 2.6rem;
   text-align: center;
-  box-shadow: var(--shadow), 0 0 0 6px rgba(47, 168, 79, 0.25);
+  box-shadow: var(--shadow), 0 0 0 6px var(--accent-soft);
   transform: scale(0.4) rotate(-6deg);
   opacity: 0;
 }
@@ -625,19 +644,22 @@ button.secondary.standalone { margin-top: 0.9rem; display: inline-block; }
   100% { transform: scale(1) rotate(0deg); opacity: 1; }
 }
 @keyframes final-green-glow {
-  0%, 100% { box-shadow: var(--shadow), 0 0 0 6px rgba(47, 168, 79, 0.25); }
-  50% { box-shadow: var(--shadow), 0 0 0 14px rgba(47, 168, 79, 0.45); }
+  0%, 100% { box-shadow: var(--shadow), 0 0 0 6px var(--accent-soft); }
+  50% { box-shadow: var(--shadow), 0 0 0 14px rgba(185, 138, 47, 0.4); }
 }
-.final-green-icon { font-size: 2.4rem; line-height: 1; }
+/* The actual green status-card face (.status-card.big.green, same visual
+   used everywhere a green card appears in-game) stands in for a generic
+   icon — ties this specific moment to the exact card that triggered it
+   instead of an unrelated emoji/glyph. */
+.final-green-card { margin: 0 auto 0.7rem; }
 .final-green-title {
   font-size: 1.4rem;
   font-weight: 800;
-  color: #163923;
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
+  color: var(--accent-strong);
+  letter-spacing: 0.02em;
   margin: 0.35rem 0 0.2rem;
 }
-.final-green-sub { font-size: 0.95rem; font-weight: 600; color: #1c2b1f; }
+.final-green-sub { font-size: 0.95rem; font-weight: 600; color: var(--muted); }
 
 /* ------------- game-starting overlay: a quiet "starting soon…" moment,
    not an event to celebrate — chess.com-style understated messaging (plain
