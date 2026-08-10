@@ -21,12 +21,49 @@ class NetworkPlayer(BasePlayer):
         self.transport = transport
         self.active = True
         self.game_id: str = game_id
+        # True only for a genuine, explicit "quit" command actually received
+        # from the client (see get_bid() below) — never set for a dropped
+        # connection, which also sets active=False but should still be
+        # reconnectable (see web_server.py's rejoin-token handling). This is
+        # what lets the web UI's "Resign" button permanently forfeit a seat,
+        # distinct from an accidental disconnect.
+        self.resigned = False
+
+    def reset_for_new_game(self) -> None:
+        """Extends BasePlayer.reset_for_new_game() with the two fields that
+        are NetworkPlayer's own (see web_server.py's _maybe_start_rematch,
+        the only caller) — both should already hold these values for any
+        player eligible for a rematch in the first place, but resetting
+        them explicitly is cheap insurance against relying on that."""
+        super().reset_for_new_game()
+        self.active = True
+        self.resigned = False
 
     def start_receiver_thread(self) -> None:
         """Begin receiving messages in the background. Kept as an explicit,
         separately-timed step (rather than starting in __init__) to match
         network_server.py, which finishes accepting all players before
         starting anyone's receiver."""
+        self.transport.start()
+
+    def reattach(self, transport: Transport) -> None:
+        """
+        Swaps in a fresh transport after a reconnect (see web_server.py's
+        rejoin-token handling) and marks the player active again.
+
+        This does NOT retroactively fix whatever was happening at the exact
+        moment they disconnected: if get_bid()/choose_painting_to_discard()
+        was already blocked waiting on the old (now-dead) transport when it
+        died, that call already resolved (typically as an auto-"quit" for
+        that one decision — see get_bid()'s is_connected check) before this
+        ever runs. What reattach() actually restores is everything from
+        their *next* decision onward — the turn loop's own `if not
+        player.active` check (gameplay.py's _handle_player_turn) stops
+        short-circuiting them into an automatic pass once self.active is
+        True again, so normal play resumes.
+        """
+        self.transport = transport
+        self.active = True
         self.transport.start()
 
     def stop_receiver_thread(self) -> None:
@@ -125,7 +162,13 @@ class NetworkPlayer(BasePlayer):
 
         # Handle special commands
         if bid["prompt"].lower() in ["pass", "fold", "quit"]:
-            return bid["prompt"].lower()
+            cmd = bid["prompt"].lower()
+            if cmd == "quit":
+                # A real "quit" command actually received from the client —
+                # not the disconnect fallback a few lines up, which also
+                # returns "quit" but must stay reconnectable.
+                self.resigned = True
+            return cmd
 
         # Parse list input like [1, 2, 3]
         if bid["prompt"].startswith("[") and bid["prompt"].endswith("]"):

@@ -11,7 +11,32 @@ function showScreen(id) {
 }
 
 function hide(el) { el.classList.add('hidden'); }
+function show(el) { el.classList.remove('hidden'); }
 function showError(el, text) { el.textContent = text; el.classList.remove('hidden'); }
+
+// In-page confirm dialog (resign, leaving mid-game — see onResign/
+// onHomeLinkClick) styled like every other panel in the app, replacing the
+// browser's own native confirm() popup. Promise-based so a call site just
+// reads `if (!(await confirmDialog(...))) return;`, same shape as the
+// native confirm() it replaces. Only one can be open at a time in this app
+// (both call sites are themselves mutually exclusive — you can't resign
+// and click the home link in the same instant), so a single pending
+// resolver is enough; no stacking/queueing needed.
+let _confirmDialogResolve = null;
+function confirmDialog(message, confirmLabel) {
+  return new Promise((resolve) => {
+    _confirmDialogResolve = resolve;
+    $('confirm-modal-message').textContent = message;
+    $('confirm-modal-confirm').textContent = confirmLabel;
+    show($('confirm-modal'));
+  });
+}
+function _resolveConfirmDialog(result) {
+  hide($('confirm-modal'));
+  const resolve = _confirmDialogResolve;
+  _confirmDialogResolve = null;
+  if (resolve) resolve(result);
+}
 
 // Usernames are entirely user-supplied and end up interpolated into a couple
 // of innerHTML strings (final standings, the turn indicator) — escape them
@@ -30,8 +55,15 @@ function wsUrl(path) {
 
 function setBadge(text) {
   const badge = $('connection-badge');
-  badge.textContent = text;
+  $('connection-badge-text').textContent = text;
   badge.classList.remove('hidden');
+  // A live room session's identity is already fixed — editing the *saved*
+  // profile wouldn't change the current seat, so the chip stops being an
+  // "edit" target for as long as this text describes a session (see
+  // renderProfileChip, which re-enables it once back at the idle state).
+  badge.classList.remove('editable');
+  badge.classList.remove('needs-attention');
+  closeProfilePopover();
 }
 
 // ---------------------------------------------------------------- cards --
@@ -96,17 +128,24 @@ function cardBackEl() {
 const eventQueue = { game: [], spec: [] };
 const eventQueueBusy = { game: false, spec: false };
 const TOAST_DURATION_MS = 1500; // long enough to actually read before it clears
+// "X bought Y for Z" / "X is stuck with Y" packs in more to actually read
+// (who, what card, how much) than a routine bid/pass update — this was
+// specifically called out as feeling rushed for someone new to the game,
+// so it gets noticeably longer before the next auction's own toast can
+// claim the slot.
+const RESULT_TOAST_DURATION_MS = 3000;
 
 function enqueueEvent(isSpectator, text, tone) {
   const key = isSpectator ? 'spec' : 'game';
-  eventQueue[key].push({ text, tone });
+  const duration = (tone === 'buy' || tone === 'disgrace') ? RESULT_TOAST_DURATION_MS : TOAST_DURATION_MS;
+  eventQueue[key].push({ text, tone, duration });
   pumpEventQueue(key);
 }
 
 function pumpEventQueue(key) {
   if (eventQueueBusy[key] || eventQueue[key].length === 0) return;
   eventQueueBusy[key] = true;
-  const { text, tone } = eventQueue[key].shift();
+  const { text, tone, duration } = eventQueue[key].shift();
   const toast = $(key === 'spec' ? 'spec-event-toast' : 'event-toast');
   toast.textContent = text;
   toast.className = `event-toast tone-${tone}`;
@@ -117,7 +156,7 @@ function pumpEventQueue(key) {
       eventQueueBusy[key] = false;
       pumpEventQueue(key);
     }, 250); // let the fade-out clear before the next toast claims the slot
-  }, TOAST_DURATION_MS);
+  }, duration);
 }
 
 function ordinal(n) {
@@ -134,14 +173,58 @@ function ordinal(n) {
 // the game ends here). Self-cleans visually the instant showScreen() hides
 // this screen for the finished screen, so no extra coordination is needed
 // between this timer and the screen transition.
+// Tracks when the final-green overlay last appeared, so the game_over
+// handler below can hold off switching to the results screen until it's
+// actually had time on screen — the game ending this way has nothing left
+// to broadcast afterward (see gameplay.py's comment on this being
+// deliberately unpaced), so game_over used to arrive right on its heels
+// and cut the overlay off before a human could read it.
+let finalGreenOverlayShownAt = null;
+
 function showFinalGreenOverlay(isSpectator, count) {
   const overlay = $(isSpectator ? 'spec-final-green-overlay' : 'final-green-overlay');
   overlay.querySelector('.final-green-title').textContent = `${ordinal(count)} Green Card Revealed!`;
   overlay.classList.remove('show');
   void overlay.offsetWidth; // restart the entrance animation even on a rapid repeat
   overlay.classList.add('show');
+  finalGreenOverlayShownAt = Date.now();
   clearTimeout(overlay._hideTimer);
   overlay._hideTimer = setTimeout(() => overlay.classList.remove('show'), 4000);
+}
+
+// The pre-game overlay is a quiet "Starting soon…" with a CSS-only animated
+// ellipsis (see .game-start-dots in style.css) — no per-tick number to
+// render, so unlike the old 3-2-1 version there's nothing that can flash by
+// too fast to read. The server still sends one 'countdown' event per second
+// (gameplay.py's countdown_to_start) plus a final 'countdown_finished', but
+// this only cares about the first and last: show once, hide once. The one
+// remaining timing risk — a slow/cold connection buffering the *entire*
+// countdown into a single burst, show immediately followed by hide — is
+// guarded by a minimum-visible floor so the overlay can't flash for less
+// than that even in the worst case.
+const countdownShownAt = { game: null, spec: null };
+const COUNTDOWN_MIN_VISIBLE_MS = 900;
+
+function showCountdownOverlay(isSpectator) {
+  const key = isSpectator ? 'spec' : 'game';
+  const overlay = $(key === 'spec' ? 'spec-game-start-overlay' : 'game-start-overlay');
+  if (overlay.classList.contains('show')) return;
+  countdownShownAt[key] = Date.now();
+  overlay.classList.add('show');
+}
+
+// The countdown's final tick — clear the overlay so the first real auction
+// underneath takes over immediately, no separate "Game Started!" message.
+function hideCountdownOverlay(isSpectator) {
+  const key = isSpectator ? 'spec' : 'game';
+  const overlay = $(key === 'spec' ? 'spec-game-start-overlay' : 'game-start-overlay');
+  const shownAt = countdownShownAt[key];
+  const elapsed = shownAt ? Date.now() - shownAt : COUNTDOWN_MIN_VISIBLE_MS;
+  const wait = Math.max(0, COUNTDOWN_MIN_VISIBLE_MS - elapsed);
+  setTimeout(() => {
+    overlay.classList.remove('show');
+    countdownShownAt[key] = null;
+  }, wait);
 }
 
 // Points formula mirrors BasePlayer.__calculate_points(): sum of values,
@@ -173,6 +256,243 @@ let game = null;
 let currentRoomCode = null;
 let roomsPollTimer = null;
 
+// Reconnection: if a refresh/dropped connection happens mid-game, the
+// server keeps your seat (see web_server.py's rejoin-token handling) —
+// this is what lets the browser find its way back to it. Stored per-room
+// (not just "the" token) so multiple rooms across tabs/history don't clash.
+// isReconnecting distinguishes "this IDENTIFY_SUCCESS is a fresh join" vs
+// "this is resuming an existing seat" for handlePlayerMessage; reconnectAttempted
+// guards against retrying a bad/expired token in a loop.
+let isReconnecting = false;
+let reconnectAttempted = false;
+// Set the moment the user clicks Resign — the client already knows this seat
+// is gone for good, so renderForStatus() should never try attemptReconnect()
+// for it. Waiting for the server's IDENTIFY_ERROR round-trip instead is
+// unreliable: the dev WebSocket server can write trailing bytes after closing
+// a just-rejected reconnect socket, which some browsers treat as a framing
+// error before the error message ever reaches onmessage.
+let hasResigned = false;
+
+// Rematch panel state on the finished screen: null while no vote is
+// underway, else {requestedBy, botMix, votes} mirroring web_server.py's
+// GameRoom.rematch shape (see REMATCH_UPDATE). rematchBotSeats/
+// rematchDefaultBotMix come from the /api/status payload (or a live status
+// refresh) each time the finished screen renders — the server, not this
+// file, owns how many bot seats are actually available and what they
+// default to (see _status_payload's "rematch_bot_seats"/
+// "rematch_default_bot_mix").
+let currentRematch = null;
+let rematchBotSeats = 0;
+let rematchDefaultBotMix = [];
+
+function rejoinStorageKey(roomCode) {
+  return `hs_rejoin_${roomCode}`;
+}
+function saveRejoinInfo(roomCode, token, username, name) {
+  localStorage.setItem(rejoinStorageKey(roomCode), JSON.stringify({ token, username, name }));
+}
+function loadRejoinInfo(roomCode) {
+  const raw = roomCode && localStorage.getItem(rejoinStorageKey(roomCode));
+  if (!raw) return null;
+  try {
+    const info = JSON.parse(raw);
+    return info && info.token && info.username ? info : null;
+  } catch (e) {
+    return null;
+  }
+}
+function clearRejoinInfo(roomCode) {
+  if (roomCode) localStorage.removeItem(rejoinStorageKey(roomCode));
+}
+
+// --------------------------------------------------------- saved identity --
+
+// A single persisted {username, name} — the same identity used across every
+// room this browser hosts/joins/spectates, so the join/spectate forms below
+// don't need to ask again each time (see renderProfileBar/
+// applyJoinIdentityDefaults). Deliberately one JSON blob under one key
+// rather than separate fields, so it's easy to grow later (e.g. a guestId,
+// once there's a real account/guest-login system to attach it to — this is
+// meant to become that anonymous identity's storage, not be replaced by it).
+// Mirrored into a cookie alongside localStorage: today that's just a second
+// place the identity survives (private-browsing tabs, a cleared
+// localStorage but not cookies, etc.), but it's also the one persistence
+// mechanism a server can read directly without any client JS running,
+// which matters the day this becomes a real session cookie.
+const PROFILE_STORAGE_KEY = 'hs_profile';
+
+function readCookie(key) {
+  const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const match = document.cookie.match(new RegExp(`(?:^|; )${escaped}=([^;]*)`));
+  return match ? decodeURIComponent(match[1]) : null;
+}
+
+function writeCookie(key, value, days) {
+  try {
+    const expires = new Date(Date.now() + days * 24 * 60 * 60 * 1000).toUTCString();
+    document.cookie = `${key}=${encodeURIComponent(value)}; expires=${expires}; path=/; samesite=lax`;
+  } catch (e) {
+    // Cookies disabled/blocked — localStorage (the primary copy) still works.
+  }
+}
+
+function loadProfile() {
+  let raw = null;
+  try { raw = localStorage.getItem(PROFILE_STORAGE_KEY); } catch (e) { /* private mode, etc. */ }
+  if (!raw) raw = readCookie(PROFILE_STORAGE_KEY);
+  if (!raw) return null;
+  try {
+    const profile = JSON.parse(raw);
+    return (profile && profile.username && profile.name) ? profile : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+function saveProfile(username, name) {
+  const value = JSON.stringify({ username, name });
+  try { localStorage.setItem(PROFILE_STORAGE_KEY, value); } catch (e) { /* fall through to the cookie */ }
+  writeCookie(PROFILE_STORAGE_KEY, value, 365);
+}
+
+// Whether the join/spectate screens' "not you?" link has been clicked since
+// the last time we landed on a fresh room — guards applyJoinIdentityDefaults
+// (called on every lobby status poll, not just once) from stomping over
+// someone's in-progress edit to their own name every 1.5s. Reset wherever a
+// genuinely new room is entered.
+let joinIdentityOverridden = false;
+
+// The top-right chip is the one persistent "profile area" (see
+// #profile-chip-wrap in index.html): whenever this browser isn't currently
+// locked into a room session, it shows the saved name (or "Guest" — a
+// placeholder that itself signals "click me to set this") and opens the
+// popover below on click. setBadge() below is what locks it during an
+// actual session (connecting/playing/spectating), where the joined
+// identity is already fixed and editing the *saved* profile wouldn't
+// change anything about the current seat anyway.
+function renderProfileChip() {
+  const badge = $('connection-badge');
+  const profile = loadProfile();
+  $('connection-badge-text').textContent = profile ? profile.name : 'Username';
+  badge.classList.remove('hidden');
+  badge.classList.add('editable');
+  // Glows until a real profile is saved (see ensureProfileSet/onSaveProfileClick)
+  // -- a passive "this still needs you" cue, gone for good the moment one exists.
+  badge.classList.toggle('needs-attention', !profile);
+  closeProfilePopover();
+  applyJoinIdentityDefaults();
+}
+
+function openProfilePopover() {
+  const profile = loadProfile();
+  $('profile-username').value = profile ? profile.username : '';
+  $('profile-display-name').value = profile ? profile.name : '';
+  hide($('profile-error'));
+  show($('profile-popover'));
+}
+
+function closeProfilePopover() {
+  hide($('profile-popover'));
+  $('profile-username').classList.remove('needs-attention');
+}
+
+// Guards the "Host Game" / "Join" actions on the home screen: if this
+// browser has never saved a profile, a click would otherwise silently go
+// through under the generic "Username" placeholder (see renderProfileChip).
+// Opens the popover and glows the username field instead of proceeding, so
+// a first-time visitor gets one clear nudge before their first game starts.
+// Purely a client-side check against the already-cached profile (see
+// loadProfile) -- no network round-trip, so it adds no latency/backend load
+// to the host/join request it's guarding. Returns true if the action should
+// be aborted (popover opened) so callers can `if (ensureProfileSet(event)) return;`.
+// Takes the triggering click event so it can stop it from bubbling up to
+// the document-level "click outside the chip closes the popover" listener
+// below -- without this, that same click (button, then document, in one
+// synchronous dispatch) would close the popover the instant it opens.
+function ensureProfileSet(event) {
+  if (loadProfile()) return false;
+  if (event) event.stopPropagation();
+  openProfilePopover();
+  const input = $('profile-username');
+  input.classList.add('needs-attention');
+  input.focus();
+  input.addEventListener('input', () => input.classList.remove('needs-attention'), { once: true });
+  return true;
+}
+
+function onProfileChipClick() {
+  if (!$('connection-badge').classList.contains('editable')) return; // locked into a room session
+  if ($('profile-popover').classList.contains('hidden')) {
+    openProfilePopover();
+  } else {
+    closeProfilePopover();
+  }
+}
+
+function onCancelProfileEdit() {
+  closeProfilePopover();
+}
+
+function onSaveProfileClick() {
+  hide($('profile-error'));
+  const username = $('profile-username').value.trim();
+  const name = $('profile-display-name').value.trim() || username;
+  if (!username) { showError($('profile-error'), 'Username is required.'); return; }
+  saveProfile(username, name);
+  renderProfileChip();
+}
+
+// Pre-fills the join screen's username/name fields from the saved profile
+// and collapses them behind a "Joining as X — not you?" line, so returning
+// to a room (or joining a new one) never re-asks for something already on
+// file. Safe to call repeatedly (renderLobby calls this on every status
+// poll) — a no-op past the first call unless the profile itself changes,
+// and never overwrites an in-progress "not you?" edit (see
+// joinIdentityOverridden).
+function applyJoinIdentityDefaults() {
+  if (joinIdentityOverridden) return;
+  const profile = loadProfile();
+  if (profile) {
+    $('join-username').value = profile.username;
+    $('join-name').value = profile.name;
+    $('join-as-name').textContent = profile.name;
+    show($('join-as-label'));
+    hide($('join-identity-fields'));
+  } else {
+    hide($('join-as-label'));
+    show($('join-identity-fields'));
+  }
+}
+
+function onChangeJoinIdentity() {
+  joinIdentityOverridden = true;
+  hide($('join-as-label'));
+  show($('join-identity-fields'));
+}
+
+// Spectating has no recurring-poll render path the way the join screen
+// does (screen-spectate-join is only ever shown once per click of "Watch as
+// a spectator instead"), so this doesn't need joinIdentityOverridden's
+// re-render guard — it just runs once, right when that screen is opened.
+function applySpectateIdentityDefaults() {
+  const profile = loadProfile();
+  if (profile) {
+    $('spectate-username').value = profile.username;
+    $('spectate-name').value = profile.name;
+    $('spectate-as-name').textContent = profile.name;
+    show($('spectate-as-label'));
+    hide($('spectate-identity-fields'));
+  } else {
+    hide($('spectate-as-label'));
+    show($('spectate-identity-fields'));
+  }
+}
+
+function onChangeSpectateIdentity() {
+  hide($('spectate-as-label'));
+  show($('spectate-identity-fields'));
+}
+
 // Whether opponents' actual won cards/points are shown, or kept hidden
 // behind card-backs, and whether the game-log panel is shown at all — both
 // are host-time settings (see host-reveal-cards/host-show-logs in the
@@ -193,6 +513,10 @@ function resetGameState(myUsername, status) {
     opponents: {}, // username -> {name, statusCards: [], active: true, outOfAuction: false}
     revealCards: status ? status.reveal_cards !== false : true,
     showLogs: status ? status.show_logs !== false : true,
+    // The room's fixed per-move timer (seconds, or null/undefined for no
+    // limit) — used only to scale the move-timer's "urgent" warning window
+    // (see urgentWindowSeconds), not re-sent per move.
+    turnTimeLimit: status ? status.turn_time_limit : null,
   };
   applyRoomDisplaySettings();
 }
@@ -226,6 +550,7 @@ function ensureOpponent(username) {
 
 document.addEventListener('DOMContentLoaded', () => {
   wireStaticHandlers();
+  renderProfileChip();
   currentRoomCode = new URLSearchParams(location.search).get('room');
   if (currentRoomCode) {
     refreshStatus();
@@ -249,7 +574,8 @@ async function fetchJSON(url, opts) {
 // and letting the generic !status.exists path bounce back) so a mistyped
 // room code gets a clear error right on the home screen instead of silently
 // doing nothing.
-async function enterRoom(roomCode) {
+async function enterRoom(roomCode, event) {
+  if (ensureProfileSet(event)) return;
   let status;
   try {
     status = await fetchJSON(`/api/status?room=${encodeURIComponent(roomCode)}`);
@@ -261,6 +587,7 @@ async function enterRoom(roomCode) {
     showError($('host-error'), `No game found with room code "${roomCode}".`);
     return;
   }
+  joinIdentityOverridden = false; // a genuinely new room — start from the saved profile again
   currentRoomCode = roomCode;
   history.replaceState(null, '', `?room=${encodeURIComponent(roomCode)}`);
   stopRoomsPolling();
@@ -269,12 +596,51 @@ async function enterRoom(roomCode) {
   startPolling();
 }
 
-function leaveToHome() {
+// clearRejoin is false only for the "clicked the High Society title mid-game"
+// path (see onHomeLinkClick) — that's meant to behave like closing the tab,
+// which stays reconnectable, not like clicking "Host a New Game" after the
+// game's already over, which has nothing left to reconnect to.
+function leaveToHome(clearRejoin = true) {
+  if (clearRejoin) clearRejoinInfo(currentRoomCode);
   currentRoomCode = null;
+  reconnectAttempted = false;
+  hasResigned = false;
+  joinIdentityOverridden = false;
   history.replaceState(null, '', location.pathname);
   stopPolling();
   showScreen('screen-host-setup');
+  renderProfileChip();
   startRoomsPolling();
+}
+
+// True once an actual seat is in play (not spectating, not still in the
+// lobby, not already looking at results) — the one condition under which
+// leaving should warn first, shared by the tab-close warning below and the
+// "High Society" home-link click.
+function isActivelyPlayingLiveGame() {
+  const gameIsOver = !$('screen-finished').classList.contains('hidden');
+  return !!(ws && ws.readyState === WebSocket.OPEN && game && game.round > 0 && !gameIsOver);
+}
+
+// The "High Society" wordmark doubles as a home link (most sites' logos
+// do) — most of the time that's a free action, but mid-game it needs the
+// same confirmation a browser's own "are you sure you want to leave"
+// would give, and it closes the socket itself first rather than leaving it
+// dangling while the UI has already moved on. Closing (rather than
+// resigning) is deliberate: this should behave exactly like closing the
+// tab would — recoverable via the room's own reconnect flow — not like
+// clicking Resign, which is permanent.
+async function onHomeLinkClick() {
+  const midGame = isActivelyPlayingLiveGame();
+  if (midGame) {
+    const ok = await confirmDialog(
+      'Leave this game and go back to the home screen? Your seat stays open to rejoin from this device.',
+      'Leave',
+    );
+    if (!ok) return;
+  }
+  if (ws) { ws.close(); ws = null; }
+  leaveToHome(!midGame);
 }
 
 function startRoomsPolling() {
@@ -312,7 +678,7 @@ function renderRoomsList(rooms) {
     btn.type = 'button';
     btn.className = 'secondary';
     btn.textContent = 'Join';
-    btn.addEventListener('click', () => enterRoom(r.room_code));
+    btn.addEventListener('click', (event) => enterRoom(r.room_code, event));
     row.appendChild(label);
     row.appendChild(btn);
     container.appendChild(row);
@@ -360,11 +726,20 @@ function renderForStatus(status) {
   }
   // starting / in_progress
   if (!ws) {
+    if (!hasResigned && !reconnectAttempted) {
+      reconnectAttempted = true;
+      if (attemptReconnect()) {
+        stopPolling();
+        return;
+      }
+    }
     stopPolling();
     showScreen('screen-join');
     $('join-form').classList.add('hidden');
     $('join-waiting').classList.add('hidden');
-    $('lobby-status').textContent = 'A game is already in progress — you can watch as a spectator.';
+    $('lobby-status').textContent = hasResigned
+      ? "You resigned from this game — you can watch as a spectator."
+      : 'A game is already in progress — you can watch as a spectator.';
   }
 }
 
@@ -428,6 +803,7 @@ function renderLobby(status) {
   showScreen('screen-join');
   $('join-form').classList.remove('hidden');
   $('join-waiting').classList.add('hidden');
+  applyJoinIdentityDefaults();
   const visibilityNote = status.visibility === 'private' ? ' (private — share this code with friends)' : ' (public)';
   $('room-code-display').textContent = `Room code: ${status.room_code}${visibilityNote}`;
   const names = status.joined.map((p) => `${p.name}${p.is_bot ? ' 🤖' : ''}`).join(', ') || 'nobody yet';
@@ -439,6 +815,7 @@ function renderLobby(status) {
 }
 
 function renderFinished(status) {
+  clearRejoinInfo(currentRoomCode); // game's over — nothing left to reconnect to
   showScreen('screen-finished');
   // The money-eliminated player (see gameplay.py's determine_winner —
   // distinct from simply "didn't have the highest score") was never in
@@ -486,22 +863,159 @@ function renderFinished(status) {
     </div>`;
   }).join('');
   $('standings-table').innerHTML = rows || '<p class="muted">No standings available.</p>';
+
+  currentRematch = status.rematch || null;
+  rematchBotSeats = status.rematch_bot_seats || 0;
+  rematchDefaultBotMix = status.rematch_default_bot_mix || [];
+  renderRematchPanel();
+}
+
+// ----------------------------------------------------------- rematch flow --
+
+// Only a still-connected player (as opposed to a spectator, or a player
+// viewing the results via a status poll with no live socket — see
+// connectSpectatorSocket's onclose, which nulls `ws` before this ever runs)
+// has a channel to actually request/vote on a rematch over, so this hides
+// the whole panel for anyone else rather than showing controls that
+// couldn't do anything.
+function renderRematchPanel() {
+  const panel = $('rematch-panel');
+  if (!ws || ws.readyState !== WebSocket.OPEN || !game.myUsername) {
+    hide(panel);
+    return;
+  }
+  show(panel);
+  hide($('rematch-error'));
+
+  const requestBtn = $('btn-request-rematch');
+  const form = $('rematch-bot-form');
+  const statusBox = $('rematch-status');
+  const voteActions = $('rematch-vote-actions');
+
+  if (!currentRematch) {
+    show(requestBtn);
+    hide(form);
+    hide(statusBox);
+    return;
+  }
+
+  hide(requestBtn);
+  hide(form);
+  show(statusBox);
+
+  const { requestedBy, votes } = currentRematch;
+  const iHaveAccepted = votes[game.myUsername] === true;
+  const waitingOn = Object.keys(votes).filter((n) => votes[n] !== true);
+
+  if (iHaveAccepted) {
+    hide(voteActions);
+    $('rematch-status-text').textContent = waitingOn.length
+      ? `Waiting on ${waitingOn.join(', ')} to accept the rematch…`
+      : 'Everyone accepted — starting the rematch…';
+  } else {
+    show(voteActions);
+    $('rematch-status-text').textContent = `${requestedBy} wants a rematch. Accept?`;
+  }
+}
+
+function fillRematchBotForm(mix) {
+  const counts = { pass: 0, greedy: 0, capped: 0 };
+  mix.forEach((b) => { if (counts[b] !== undefined) counts[b] += 1; });
+  $('rematch-bot-pass').value = counts.pass;
+  $('rematch-bot-greedy').value = counts.greedy;
+  $('rematch-bot-capped').value = counts.capped;
+  $('rematch-bot-hint').textContent = rematchBotSeats
+    ? `${rematchBotSeats} bot seat${rematchBotSeats === 1 ? '' : 's'} to fill — same as last time by default, but changeable.`
+    : 'No bot seats this time — every seat is a returning player.';
+}
+
+function onRequestRematchClick() {
+  if (rematchBotSeats > 0) {
+    fillRematchBotForm(rematchDefaultBotMix);
+    hide($('btn-request-rematch'));
+    show($('rematch-bot-form'));
+  } else {
+    sendRematchRequest([]);
+  }
+}
+
+function onCancelRematchForm() {
+  hide($('rematch-bot-form'));
+  show($('btn-request-rematch'));
+}
+
+function onSendRematchRequest() {
+  const counts = {
+    pass: parseInt($('rematch-bot-pass').value || '0', 10),
+    greedy: parseInt($('rematch-bot-greedy').value || '0', 10),
+    capped: parseInt($('rematch-bot-capped').value || '0', 10),
+  };
+  const botMix = [];
+  for (const [type, n] of Object.entries(counts)) for (let i = 0; i < n; i += 1) botMix.push(type);
+  if (botMix.length !== rematchBotSeats) {
+    showError($('rematch-error'), `Choose exactly ${rematchBotSeats} bot${rematchBotSeats === 1 ? '' : 's'} total.`);
+    return;
+  }
+  sendRematchRequest(botMix);
+}
+
+function sendRematchRequest(botMix) {
+  hide($('rematch-bot-form'));
+  ws.send(JSON.stringify({ message_type: 'REMATCH_REQUEST', data: { bot_mix: botMix } }));
+}
+
+function onAcceptRematch() {
+  ws.send(JSON.stringify({ message_type: 'REMATCH_VOTE', data: { accept: true } }));
+}
+
+function onDeclineRematch() {
+  ws.send(JSON.stringify({ message_type: 'REMATCH_VOTE', data: { accept: false } }));
+}
+
+function showRematchDeclinedNotice(declinedBy) {
+  show($('rematch-status'));
+  hide($('rematch-vote-actions'));
+  $('rematch-status-text').textContent = `${declinedBy} declined the rematch.`;
+  // The next real update (a fresh request, or none at all) re-renders this
+  // properly; this is just a few seconds of "here's what just happened"
+  // before falling back to the normal "Request Rematch" state.
+  setTimeout(() => { if (!currentRematch) renderRematchPanel(); }, 4000);
 }
 
 // ------------------------------------------------------------- host flow --
 
 function wireStaticHandlers() {
+  $('confirm-modal-cancel').addEventListener('click', () => _resolveConfirmDialog(false));
+  $('confirm-modal-confirm').addEventListener('click', () => _resolveConfirmDialog(true));
   $('btn-create-game').addEventListener('click', onCreateGame);
   $('btn-join-by-code').addEventListener('click', onJoinByCode);
   $('btn-add-bot').addEventListener('click', onAddBot);
   $('btn-join').addEventListener('click', onJoin);
-  $('btn-spectate-link').addEventListener('click', () => showScreen('screen-spectate-join'));
+  $('btn-spectate-link').addEventListener('click', () => {
+    applySpectateIdentityDefaults();
+    showScreen('screen-spectate-join');
+  });
   $('btn-back-to-join').addEventListener('click', () => { showScreen('screen-join'); refreshStatus(); });
   $('btn-spectate-join').addEventListener('click', onSpectateJoin);
-  $('btn-new-game').addEventListener('click', leaveToHome);
+  $('btn-new-game').addEventListener('click', () => leaveToHome());
+  $('connection-badge').addEventListener('click', onProfileChipClick);
+  $('btn-cancel-profile-edit').addEventListener('click', onCancelProfileEdit);
+  $('btn-save-profile').addEventListener('click', onSaveProfileClick);
+  // Standard popover UX: a click anywhere outside the chip/popover itself
+  // closes it, same as a browser's own menus.
+  document.addEventListener('click', (e) => {
+    if (!$('profile-chip-wrap').contains(e.target)) closeProfilePopover();
+  });
+  $('btn-change-join-identity').addEventListener('click', onChangeJoinIdentity);
+  $('btn-change-spectate-identity').addEventListener('click', onChangeSpectateIdentity);
+  $('home-link').addEventListener('click', onHomeLinkClick);
+  $('home-link').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onHomeLinkClick(); }
+  });
   $('btn-place-bid').addEventListener('click', onPlaceBid);
   $('btn-pass').addEventListener('click', onPass);
-  $('btn-quit').addEventListener('click', onQuit);
+  $('btn-resign').addEventListener('click', onResign);
+  $('btn-discard-painting').addEventListener('click', onDiscardPainting);
   $('btn-spec-chat-send').addEventListener('click', onSpecChatSend);
   $('spec-chat-input').addEventListener('keydown', (e) => { if (e.key === 'Enter') onSpecChatSend(); });
   $('spec-chat-target-toggle').addEventListener('change', (e) => {
@@ -509,16 +1023,22 @@ function wireStaticHandlers() {
   });
   $('btn-player-chat-send').addEventListener('click', onPlayerChatSend);
   $('player-chat-input').addEventListener('keydown', (e) => { if (e.key === 'Enter') onPlayerChatSend(); });
+  $('btn-request-rematch').addEventListener('click', onRequestRematchClick);
+  $('btn-cancel-rematch-form').addEventListener('click', onCancelRematchForm);
+  $('btn-send-rematch-request').addEventListener('click', onSendRematchRequest);
+  $('btn-accept-rematch').addEventListener('click', onAcceptRematch);
+  $('btn-decline-rematch').addEventListener('click', onDeclineRematch);
 
   window.addEventListener('beforeunload', (e) => {
-    if (ws && ws.readyState === WebSocket.OPEN && game && game.round > 0) {
+    if (isActivelyPlayingLiveGame()) {
       e.preventDefault();
       e.returnValue = 'Leaving now drops you from the game — there is no reconnect.';
     }
   });
 }
 
-async function onCreateGame() {
+async function onCreateGame(event) {
+  if (ensureProfileSet(event)) return;
   hide($('host-error'));
   const seats = parseInt($('host-seats').value, 10);
   const counts = {
@@ -529,12 +1049,13 @@ async function onCreateGame() {
   const botMix = [];
   for (const [type, n] of Object.entries(counts)) for (let i = 0; i < n; i += 1) botMix.push(type);
 
-  const seedRaw = $('host-seed').value;
   const turnTimeRaw = $('host-turn-time').value;
   const body = {
     seats,
     bot_mix: botMix,
-    seed: seedRaw ? parseInt(seedRaw, 10) : null,
+    // No seed field in the UI on purpose — a reproducible game is a
+    // developer/testing concern (real training/testing can go through the
+    // backend directly), not something a hosting player needs to see.
     bot_think_time: parseFloat($('host-think-time').value || '1.5'),
     visibility: $('host-visibility-private').checked ? 'private' : 'public',
     turn_time_limit: turnTimeRaw ? parseFloat(turnTimeRaw) : null,
@@ -548,6 +1069,7 @@ async function onCreateGame() {
       body: JSON.stringify(body),
     });
     stopRoomsPolling();
+    joinIdentityOverridden = false; // a genuinely new room — start from the saved profile again
     currentRoomCode = status.room_code;
     history.replaceState(null, '', `?room=${encodeURIComponent(status.room_code)}`);
     lastStatus = status;
@@ -558,11 +1080,11 @@ async function onCreateGame() {
   }
 }
 
-function onJoinByCode() {
+function onJoinByCode(event) {
   hide($('host-error'));
   const code = $('join-room-code').value.trim().toUpperCase();
   if (!code) { showError($('host-error'), 'Enter a room code.'); return; }
-  enterRoom(code);
+  enterRoom(code, event);
 }
 
 // ------------------------------------------------------------- join flow --
@@ -579,6 +1101,7 @@ function onJoin() {
   const name = $('join-name').value.trim() || username;
   if (!username) { showError($('join-error'), 'Username is required.'); return; }
   pendingJoin = { username, name };
+  saveProfile(username, name); // this device's identity going forward — see loadProfile
   stopPolling();
   resetGameState(username, lastStatus);
   if (lastStatus) seedOpponents(lastStatus, username);
@@ -592,21 +1115,105 @@ function connectPlayerSocket() {
   setBadge('connecting…');
 }
 
+// Called when the room turns out to already be starting/in_progress and we
+// have no open socket (fresh page load after a refresh, or the tab was just
+// sitting on some other screen when the game started) — see
+// renderForStatus. Returns true if a stored rejoin token existed and a
+// reconnect attempt was actually started (caller should stop polling and
+// wait for the result), false if there was nothing to try (falls through
+// to the normal "watch as a spectator" message).
+function attemptReconnect() {
+  const info = loadRejoinInfo(currentRoomCode);
+  if (!info) return false;
+
+  isReconnecting = true;
+  resetGameState(info.username, lastStatus);
+  if (lastStatus) seedOpponents(lastStatus, info.username);
+  ws = new WebSocket(wsUrl(
+    `/ws?room=${encodeURIComponent(currentRoomCode)}&rejoin_token=${encodeURIComponent(info.token)}`,
+  ));
+  ws.onmessage = (evt) => handlePlayerMessage(JSON.parse(evt.data));
+  ws.onclose = () => { ws = null; refreshStatus(); };
+  setBadge('reconnecting…');
+  return true;
+}
+
 function handlePlayerMessage(msg) {
   switch (msg.message_type) {
     case 'IDENTIFY':
       respondIdentify(ws, pendingJoin, msg);
       break;
     case 'IDENTIFY_ERROR':
-      pendingIdentifyError = msg.prompt;
-      ws.close();
+      if (isReconnecting) {
+        // Token was invalid/expired (e.g. resigned, the game finished in
+        // the meantime, or someone else already reconnected with it) — drop
+        // it and fall back to the normal "already in progress" message
+        // rather than retrying it forever. Show the server's actual reason
+        // when it gave one (e.g. "You resigned...") instead of always the
+        // generic fallback text.
+        isReconnecting = false;
+        clearRejoinInfo(currentRoomCode);
+        ws.close();
+        showScreen('screen-join');
+        $('join-form').classList.add('hidden');
+        $('join-waiting').classList.add('hidden');
+        $('lobby-status').textContent = msg.prompt || 'A game is already in progress — you can watch as a spectator.';
+      } else {
+        pendingIdentifyError = msg.prompt;
+        ws.close();
+      }
       break;
     case 'IDENTIFY_SUCCESS':
-      $('join-form').classList.add('hidden');
-      $('join-waiting').classList.remove('hidden');
-      setBadge(`playing as ${game.myUsername}`);
-      startWaitingRoomPolling();
+      if (isReconnecting) {
+        isReconnecting = false;
+        setBadge(`Playing as ${game.myUsername}`);
+        ensureGameScreenVisible(false);
+      } else {
+        $('join-form').classList.add('hidden');
+        $('join-waiting').classList.remove('hidden');
+        setBadge(`Playing as ${game.myUsername}`);
+        startWaitingRoomPolling();
+        if (msg.data && msg.data.rejoin_token) {
+          saveRejoinInfo(currentRoomCode, msg.data.rejoin_token, pendingJoin.username, pendingJoin.name);
+        }
+      }
       break;
+    // These three arrive only on the finished screen (see
+    // web_server.py's _broadcast_rematch_update/_maybe_start_rematch) —
+    // handled here rather than in applyGameMessage() so they skip its
+    // unconditional ensureGameScreenVisible() call, which would otherwise
+    // yank the screen back to the live game panel while a rematch is still
+    // just being voted on.
+    case 'REMATCH_UPDATE':
+      currentRematch = { requestedBy: msg.data.requested_by, botMix: msg.data.bot_mix, votes: msg.data.votes };
+      renderRematchPanel();
+      break;
+    case 'REMATCH_DECLINED':
+      currentRematch = null;
+      showRematchDeclinedNotice(msg.data.declined_by);
+      break;
+    case 'REMATCH_STARTING': {
+      currentRematch = null;
+      const myUsername = game.myUsername;
+      resetGameState(myUsername, lastStatus);
+      // resetGameState only resets the in-memory model — the DOM still shows
+      // whatever the *previous* game last rendered (final points, opponents'
+      // won cards, auction count) until the new game's first live event
+      // overwrites it, which can be a couple of seconds away (see
+      // countdown_to_start). Force it to reflect the fresh, empty state
+      // immediately instead of flashing the old game's numbers first.
+      hide($('move-panel'));
+      renderAuctionPanel(false);
+      renderMyPanel();
+      renderMyMoneyDisplay([]);
+      ensureGameScreenVisible(false);
+      fetchJSON(`/api/status?room=${encodeURIComponent(currentRoomCode)}`).then((status) => {
+        lastStatus = status;
+        seedOpponents(status, myUsername);
+        renderOpponents(false);
+      }).catch(() => {});
+      break;
+    }
     default:
       applyGameMessage(msg, false);
   }
@@ -620,6 +1227,7 @@ function onSpectateJoin() {
   const username = $('spectate-username').value.trim();
   if (!name || !username) { showError($('spectate-error'), 'Both fields are required.'); return; }
   pendingSpectate = { username, name };
+  saveProfile(username, name); // this device's identity going forward — see loadProfile
   stopPolling();
   resetGameState(null, lastStatus);
   fetchJSON(`/api/status?room=${encodeURIComponent(currentRoomCode)}`)
@@ -764,6 +1372,42 @@ function applyGameMessage(msg, isSpectator) {
         } else {
           enqueueEvent(isSpectator, `🟢 Green card revealed (${d.count})`, 'green');
         }
+      } else if (d && d.event === 'opponent_state_sync') {
+        // Reconnect catch-up only (see web_server.py's
+        // _send_reconnect_catchup): restores what this specific opponent's
+        // status-card panel should already show (built up over the whole
+        // game via individual AUCTION_RESULT broadcasts we missed while
+        // disconnected). Silent — no toast, no log line.
+        if (d.username !== game.myUsername) {
+          const o = ensureOpponent(d.username);
+          o.name = d.name;
+          o.active = d.active;
+          o.statusCards = d.status_cards;
+          renderOpponents(isSpectator);
+        }
+      } else if (d && d.event === 'countdown') {
+        showCountdownOverlay(isSpectator);
+      } else if (d && d.event === 'countdown_finished') {
+        hideCountdownOverlay(isSpectator);
+      } else if (d && d.event === 'game_over') {
+        // The connection is deliberately kept open past game-end now (see
+        // web_server.py's GameRoom.run_game — a rematch reuses it), so
+        // nothing closes this socket to trigger the old ws.onclose ->
+        // refreshStatus() transition to the results screen. This is that
+        // signal instead.
+        //
+        // If the game just ended via the 4th-green-card overlay, give it
+        // the same ~3.5s on screen it always intended to have (see
+        // showFinalGreenOverlay) before switching to results — otherwise
+        // this fires right on its heels and the overlay flashes past
+        // unread. A normal deck-exhaustion ending never showed that
+        // overlay, so this is a no-op wait there.
+        const elapsedSinceGreen = finalGreenOverlayShownAt ? Date.now() - finalGreenOverlayShownAt : Infinity;
+        const wait = Math.max(0, 3500 - elapsedSinceGreen);
+        setTimeout(() => {
+          finalGreenOverlayShownAt = null;
+          refreshStatus();
+        }, wait);
       }
       if (msg.prompt && !isDuplicateOfStructuredEvent(msg.prompt)) logLine(msg.prompt.trim(), isSpectator);
       break;
@@ -864,6 +1508,14 @@ function applyAuctionUpdate(msg, isSpectator) {
     }
     enqueueEvent(isSpectator, `${actorLabel(d.player)} quit`, 'quit');
     logLine(`❌ ${d.player} quit`, isSpectator);
+  } else if (d.kind === 'sync') {
+    // Reconnect catch-up only (see web_server.py's _send_reconnect_catchup)
+    // — a silent state restore, not a live event: no toast, no log line,
+    // and deliberately doesn't touch myAuctionBid/outOfAuction the way a
+    // real auction_start does, since we don't know whether we'd already
+    // committed part of a bid before dropping.
+    game.turnPlayer = d.turn_player;
+    if (d.turn_player && d.turn_player !== game.myUsername) ensureOpponent(d.turn_player);
   }
 
   renderAuctionPanel(isSpectator);
@@ -898,6 +1550,28 @@ function applyPlayerState(msg) {
   game.myPoints = d.points;
   game.myStatusCards = d.status_cards;
   renderMyPanel();
+  // The server now sends this at game start and after every action that
+  // changes this player's money (their own bid/pass/fold, or a disgrace
+  // auction's settlement) — see gameplay.py's _send_player_state call
+  // sites — specifically so this sidebar readout doesn't go stale between
+  // this player's own turns (it used to only ever get populated by the
+  // interactive bid prompt, which only fires on their actual turn).
+  if (Array.isArray(d.money_cards)) renderMyMoneyDisplay(d.money_cards);
+}
+
+// Always-visible, read-only echo of the interactive bid-selection chips
+// (#my-money-cards inside the move panel, which only exists while it's
+// actually this player's turn) — same numbers, just inert, so a player can
+// see what they're holding regardless of whose turn it is right now.
+function renderMyMoneyDisplay(values) {
+  const row = $('my-money-display');
+  row.innerHTML = '';
+  values.slice().sort((a, b) => a - b).forEach((value) => {
+    const chip = document.createElement('span');
+    chip.className = 'chip money readonly';
+    chip.textContent = value;
+    row.appendChild(chip);
+  });
 }
 
 function applyPlayerMove(msg) {
@@ -923,7 +1597,7 @@ function applyPlayerMove(msg) {
     // the INPUT_ERROR case above) — the server loops back and re-prompts
     // right away, far faster than a human can read the error. Leaving the
     // error up means a rejected bid stays visible until the player actually
-    // does something new (onPlaceBid/onPass/onQuit below each clear it
+    // does something new (onPlaceBid/onPass/onResign below each clear it
     // before sending), exactly matching the client-side "select at least
     // one money card" case.
     discardControls.classList.add('hidden');
@@ -943,10 +1617,10 @@ function applyPlayerMove(msg) {
 // never appears — the feature is a no-op unless a host opts in.
 let moveTimerInterval = null;
 let moveTimerDeadline = null;
-// Tracks the last whole-second value we've already beeped for, so the tick
-// fires once per second during the urgent window instead of every 250ms
-// poll (see updateMoveTimerDisplay).
-let moveTimerLastBeepSecond = null;
+// Whether the double-beep has already fired for the *current* move's urgent
+// window — set once on the transition into "urgent", not per second, so it
+// never repeats every tick (see updateMoveTimerDisplay).
+let moveTimerUrgentAnnounced = false;
 
 function startMoveTimer(secondsRemaining) {
   clearMoveTimer();
@@ -958,8 +1632,18 @@ function startMoveTimer(secondsRemaining) {
 function clearMoveTimer() {
   if (moveTimerInterval) { clearInterval(moveTimerInterval); moveTimerInterval = null; }
   moveTimerDeadline = null;
-  moveTimerLastBeepSecond = null;
+  moveTimerUrgentAnnounced = false;
   $('move-timer').classList.add('hidden');
+}
+
+// How many seconds before zero the clock should turn urgent — scaled to the
+// room's actual per-move limit rather than a flat 5s, since 5s left out of
+// a 20s move reads very differently than 5s left out of a 3-minute one.
+function urgentWindowSeconds() {
+  const limit = game && game.turnTimeLimit;
+  if (!limit || limit < 30) return 5;
+  if (limit <= 180) return 15; // >30s and up through 3 minutes
+  return 30; // beyond 3 minutes
 }
 
 function updateMoveTimerDisplay() {
@@ -968,35 +1652,49 @@ function updateMoveTimerDisplay() {
   const secondsLeft = Math.ceil(remaining);
   el.textContent = `⏰ ${secondsLeft}s left`;
   el.classList.remove('hidden');
-  const isUrgent = remaining > 0 && remaining <= 5;
+  const isUrgent = remaining > 0 && remaining <= urgentWindowSeconds();
   el.classList.toggle('urgent', isUrgent);
-  if (isUrgent && secondsLeft !== moveTimerLastBeepSecond) {
-    moveTimerLastBeepSecond = secondsLeft;
-    playTimerTick();
+  if (isUrgent && !moveTimerUrgentAnnounced) {
+    moveTimerUrgentAnnounced = true;
+    playUrgentDoubleBeep();
   }
-  if (remaining <= 0) clearMoveTimer();
+  if (remaining <= 0) {
+    // The server auto-passes on timeout (see gameplay.py's
+    // _handle_player_turn), but its broadcast of that — and whatever
+    // happens right after (bots can resolve their own turns near-
+    // instantly) — takes a moment to arrive. Marking the panel pending
+    // immediately, the same treatment a real submitted move already gets,
+    // avoids a stretch where the clock reads 0 but the bid controls still
+    // look live and clickable for a beat before the table visibly moves on.
+    setMovePending();
+  }
 }
 
-// A short synthesized "tick" (no audio file needed — fits this app's
-// zero-external-assets approach) played once per second while the move
-// timer is in its urgent (<=5s) state, chess.com-clock-style. Wrapped in
-// try/catch since some browsers block audio before any user gesture has
-// happened on the page — by the time a timer is running the player has
-// already clicked Join/a bid button, but this stays silent-safe regardless.
-let _timerTickAudioCtx = null;
-function playTimerTick() {
+// A single low-pitched double-beep (no audio file needed — fits this app's
+// zero-external-assets approach), played once right as the clock turns
+// urgent — not a tick repeated every second, which read as nagging rather
+// than a clear "heads up." Wrapped in try/catch since some browsers block
+// audio before any user gesture has happened on the page — by the time a
+// timer is running the player has already clicked Join/a bid button, but
+// this stays silent-safe regardless.
+let _timerBeepAudioCtx = null;
+function playUrgentDoubleBeep() {
   try {
-    _timerTickAudioCtx = _timerTickAudioCtx || new (window.AudioContext || window.webkitAudioContext)();
-    const ctx = _timerTickAudioCtx;
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    osc.type = 'sine';
-    osc.frequency.value = 880;
-    gain.gain.setValueAtTime(0.15, ctx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.12);
-    osc.connect(gain).connect(ctx.destination);
-    osc.start();
-    osc.stop(ctx.currentTime + 0.12);
+    _timerBeepAudioCtx = _timerBeepAudioCtx || new (window.AudioContext || window.webkitAudioContext)();
+    const ctx = _timerBeepAudioCtx;
+    const beepAt = (startTime) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = 220; // low pitch, deliberately not the shrill 880Hz tick this replaced
+      gain.gain.setValueAtTime(0.2, startTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, startTime + 0.1);
+      osc.connect(gain).connect(ctx.destination);
+      osc.start(startTime);
+      osc.stop(startTime + 0.1);
+    };
+    beepAt(ctx.currentTime);
+    beepAt(ctx.currentTime + 0.15); // fast-tempo second beep
   } catch (e) {
     // Silently skip — the visual countdown already conveys urgency.
   }
@@ -1019,8 +1717,9 @@ function renderAuctionPanel(isSpectator) {
   // has its own pulsing dot, and the auction panel otherwise represents
   // shared state (card, bid) that stays fully legible regardless of whose
   // turn it is, not something that dims/greys based on turn.
+  const turnText = game.turnPlayer === game.myUsername ? 'Your turn' : `${escapeHtml(game.turnPlayer)}'s turn`;
   $(`${prefix}turn-label`).innerHTML = game.turnPlayer
-    ? `<span class="turn-dot"></span>${escapeHtml(game.turnPlayer)}'s turn`
+    ? `<span class="turn-dot"></span>${turnText}`
     : '';
 
   const bidEl = $(`${prefix}max-bid`);
@@ -1106,7 +1805,14 @@ function renderOpponents(isSpectator) {
     row.className = classes.join(' ');
 
     const ptsLabel = game.revealCards ? `Points: ${computePoints(o.statusCards)}` : `${o.statusCards.length} card${o.statusCards.length === 1 ? '' : 's'}`;
-    row.querySelector('.name').textContent = `${o.name}${o.active === false ? ' (out)' : ''}`;
+    // "(out)" (quit/disconnected — permanent) takes priority over
+    // "(passed)" (just folded this one auction, still very much in the
+    // game) — the dimmed/greyscale .out-of-auction styling alone wasn't a
+    // clear enough signal on its own for what state a tile was actually in.
+    let statusSuffix = '';
+    if (o.active === false) statusSuffix = ' (out)';
+    else if (o.outOfAuction) statusSuffix = ' (passed)';
+    row.querySelector('.name').textContent = `${o.name}${statusSuffix}`;
     row.querySelector('.pts').textContent = ptsLabel;
 
     const chips = row.querySelector('.chip-row');
@@ -1164,20 +1870,38 @@ function updateSelectedBidTotal() {
   $('new-total-bid').textContent = game.myAuctionBid + addingTotal;
 }
 
+// Selecting a painting doesn't discard it immediately — a Faux Pas is
+// irreversible, and a bare click (unlike a bid, which shows its own
+// running total before submission) gave a hand slip no chance to be
+// noticed before it was already sent. Bots are unaffected: this is purely
+// this UI's own two-step confirmation on top of the same RESPONSE message
+// a single click always sent — the engine still just sees one answer.
+let selectedDiscardValue = null;
+
 function renderPaintingChoices(values) {
   const row = $('my-paintings');
   row.innerHTML = '';
+  selectedDiscardValue = null;
+  $('btn-discard-painting').disabled = true;
   values.forEach((value) => {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'chip neutral';
     btn.textContent = value;
     btn.addEventListener('click', () => {
-      ws.send(JSON.stringify({ message_type: 'RESPONSE', prompt: String(value) }));
-      setMovePending();
+      selectedDiscardValue = value;
+      row.querySelectorAll('button.chip').forEach((b) => b.classList.remove('selected'));
+      btn.classList.add('selected');
+      $('btn-discard-painting').disabled = false;
     });
     row.appendChild(btn);
   });
+}
+
+function onDiscardPainting() {
+  if (selectedDiscardValue === null) return;
+  ws.send(JSON.stringify({ message_type: 'RESPONSE', prompt: String(selectedDiscardValue) }));
+  setMovePending();
 }
 
 // ------------------------------------------------------------- controls --
@@ -1187,6 +1911,14 @@ function onPlaceBid() {
   const values = [...game.selectedBid];
   if (values.length === 0) { showError($('move-error'), 'Select at least one money card.'); return; }
   ws.send(JSON.stringify({ message_type: 'RESPONSE', prompt: JSON.stringify(values) }));
+  // Once sent, these chips are no longer "being added on top" — they're
+  // already part of the committed bid. Without clearing this, the server's
+  // own echo of this same bid (applyAuctionUpdate's "bid" kind, which
+  // updates game.myAuctionBid to the new committed total and re-renders)
+  // would add the just-submitted chips a *second* time on top of that new
+  // total, e.g. selecting 10 shows "10 → 20" instead of "0 → 10".
+  game.selectedBid.clear();
+  updateSelectedBidTotal();
   setMovePending();
 }
 
@@ -1196,9 +1928,14 @@ function onPass() {
   setMovePending();
 }
 
-function onQuit() {
-  if (!confirm('Quit the game? This cannot be undone.')) return;
+async function onResign() {
+  const ok = await confirmDialog('Are you sure you want to resign?', 'Resign');
+  if (!ok) return;
   hide($('move-error'));
+  hasResigned = true;
+  clearRejoinInfo(currentRoomCode);
+  // Wire command stays "quit" (shared with CLI/network play, see
+  // gameplay.py) — "Resign" is just the web UI's label for it.
   ws.send(JSON.stringify({ message_type: 'RESPONSE', prompt: 'quit' }));
   setMovePending();
 }

@@ -4,13 +4,65 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>High Society</title>
+  <meta name="description" content="An auction card game of wealth and reputation — host a room, invite friends or bots, and play free in your browser.">
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+CiAgPHJlY3Qgd2lkdGg9IjY0IiBoZWlnaHQ9IjY0IiByeD0iMTQiIGZpbGw9IiMwYjM0MjciLz4KICA8dGV4dCB4PSIzMiIgeT0iMzQiIGZvbnQtc2l6ZT0iNTYiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGRvbWluYW50LWJhc2VsaW5lPSJjZW50cmFsIiBmb250LWZhbWlseT0iJ0FyaWFsIFVuaWNvZGUgTVMnLCBBcmlhbCwgc2Fucy1zZXJpZiIgZmlsbD0iI2M4YTA0ZCI+JiM5ODI0OzwvdGV4dD4KPC9zdmc+Cg==">
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+
+  <!-- Social share preview (Open Graph + Twitter Card) — request.url_root
+       builds an absolute image URL from whatever host actually served this
+       page, so it works unchanged on localhost, a LAN IP, or the real
+       deployed domain without hardcoding any of them. -->
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="High Society">
+  <meta property="og:title" content="High Society">
+  <meta property="og:description" content="An auction card game of wealth and reputation — host a room, invite friends or bots, and play free in your browser.">
+  <meta property="og:image" content="{{ request.url_root }}static/og-image.png">
+  <meta property="og:url" content="{{ request.url_root }}">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="High Society">
+  <meta name="twitter:description" content="An auction card game of wealth and reputation — host a room, invite friends or bots, and play free in your browser.">
+  <meta name="twitter:image" content="{{ request.url_root }}static/og-image.png">
 </head>
 <body>
   <header class="topbar">
-    <h1>High&nbsp;Society</h1>
-    <span id="connection-badge" class="badge hidden"></span>
+    <h1 id="home-link" class="home-link" role="link" tabindex="0">High&nbsp;Society</h1>
+    <div id="profile-chip-wrap" class="profile-chip-wrap">
+      <button type="button" id="connection-badge" class="badge profile-chip">
+        <span id="connection-badge-text"></span>
+        <svg class="profile-chip-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/>
+        </svg>
+      </button>
+      <div id="profile-popover" class="profile-popover card panel hidden">
+        <label>Username <input type="text" id="profile-username" placeholder="e.g. alex" autocomplete="off"></label>
+        <label>Display name <input type="text" id="profile-display-name" placeholder="e.g. Alex" autocomplete="off"></label>
+        <div class="button-row">
+          <button type="button" id="btn-save-profile" class="primary">Save</button>
+          <button type="button" id="btn-cancel-profile-edit" class="secondary">Cancel</button>
+        </div>
+        <p id="profile-error" class="error hidden"></p>
+      </div>
+    </div>
   </header>
+
+  <a href="https://github.com/Wickkey/HighSociety" target="_blank" rel="noopener noreferrer"
+     class="github-link" title="View source on GitHub" aria-label="View source on GitHub">
+    <svg viewBox="0 0 16 16" width="30" height="30" fill="currentColor" aria-hidden="true">
+      <path d="M8 0c-4.42 0-8 3.58-8 8a8.013 8.013 0 0 0 5.47 7.59c.4.08.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"/>
+    </svg>
+  </a>
+
+  <!-- ===================== CONFIRM MODAL (resign, leave mid-game) ===================== -->
+  <div id="confirm-modal" class="modal-overlay hidden">
+    <div class="modal-box card panel">
+      <p id="confirm-modal-message"></p>
+      <div class="button-row modal-actions">
+        <button type="button" id="confirm-modal-cancel" class="secondary">Cancel</button>
+        <button type="button" id="confirm-modal-confirm" class="danger"></button>
+      </div>
+    </div>
+  </div>
 
   <main id="app">
 
@@ -72,6 +124,11 @@
           <input type="number" id="host-seats" min="2" max="5" value="3">
         </label>
 
+        <label>Time per move (seconds, optional)
+          <input type="number" id="host-turn-time" min="0" step="1" placeholder="no limit">
+        </label>
+        <p class="hint">Leave blank for no timer. If set, each player gets this many seconds per bid/pass before they're auto-passed.</p>
+
         <fieldset class="bot-mix">
           <legend>Who can join?</legend>
           <div class="bot-row">
@@ -98,20 +155,13 @@
 
         <details class="advanced">
           <summary>Advanced</summary>
-          <label>Seed (optional, for a reproducible game)
-            <input type="number" id="host-seed" placeholder="random">
-          </label>
           <label>Bot think time (seconds)
             <input type="number" id="host-think-time" min="0" step="0.1" value="1.5">
           </label>
-          <label>Time per move (seconds, optional)
-            <input type="number" id="host-turn-time" min="0" step="1" placeholder="no limit">
-          </label>
-          <p class="hint">Leave blank for no timer. If set, each player gets this many seconds per bid/pass before they're auto-passed.</p>
 
           <div class="bot-row">
             <label class="radio-label"><input type="checkbox" id="host-reveal-cards" checked> Reveal opponents' cards</label>
-            <label class="radio-label"><input type="checkbox" id="host-show-logs" checked> Show game log</label>
+            <label class="radio-label"><input type="checkbox" id="host-show-logs"> Show game log</label>
           </div>
           <p class="hint">These are fixed for the whole table once the game starts — set them here, not adjustable mid-game.</p>
         </details>
@@ -168,8 +218,12 @@
         <div id="lobby-status" class="lobby-status"></div>
 
         <div id="join-form">
-          <label>Username <input type="text" id="join-username" placeholder="e.g. alex" autocomplete="off"></label>
-          <label>Display name <input type="text" id="join-name" placeholder="e.g. Alex" autocomplete="off"></label>
+          <p id="join-as-label" class="hidden">Joining as <strong id="join-as-name"></strong> —
+            <button type="button" id="btn-change-join-identity" class="link-button">not you?</button></p>
+          <div id="join-identity-fields">
+            <label>Username <input type="text" id="join-username" placeholder="e.g. alex" autocomplete="off"></label>
+            <label>Display name <input type="text" id="join-name" placeholder="e.g. Alex" autocomplete="off"></label>
+          </div>
           <button id="btn-join" class="primary">Join Game</button>
           <p id="join-error" class="error hidden"></p>
         </div>
@@ -195,8 +249,12 @@
     <section id="screen-spectate-join" class="screen hidden">
       <div class="card panel">
         <h2>Watch this game</h2>
-        <label>Your name <input type="text" id="spectate-name" placeholder="e.g. Sam" autocomplete="off"></label>
-        <label>Username <input type="text" id="spectate-username" placeholder="e.g. sam" autocomplete="off"></label>
+        <p id="spectate-as-label" class="hidden">Watching as <strong id="spectate-as-name"></strong> —
+          <button type="button" id="btn-change-spectate-identity" class="link-button">not you?</button></p>
+        <div id="spectate-identity-fields">
+          <label>Your name <input type="text" id="spectate-name" placeholder="e.g. Sam" autocomplete="off"></label>
+          <label>Username <input type="text" id="spectate-username" placeholder="e.g. sam" autocomplete="off"></label>
+        </div>
         <button id="btn-spectate-join" class="primary">Watch</button>
         <p id="spectate-error" class="error hidden"></p>
         <button id="btn-back-to-join" class="secondary standalone">Back</button>
@@ -232,6 +290,11 @@
                   <div class="final-green-sub">The game ends now — final scores coming up</div>
                 </div>
               </div>
+              <div id="game-start-overlay" class="game-start-overlay">
+                <div class="game-start-banner card panel">
+                  <div class="game-start-title">Starting soon<span class="game-start-dots"><span>.</span><span>.</span><span>.</span></span></div>
+                </div>
+              </div>
             </div>
             <div class="bid-block">
               <span class="bid-label">Current Highest Bid</span>
@@ -253,13 +316,14 @@
                 <div class="button-row">
                   <button id="btn-place-bid" class="primary">Place Bid</button>
                   <button id="btn-pass" class="secondary">Pass</button>
-                  <button id="btn-quit" class="danger">Quit</button>
+                  <button id="btn-resign" class="danger">Resign</button>
                 </div>
                 <p id="move-error" class="error hidden"></p>
               </div>
               <div id="discard-controls" class="hidden">
                 <h3>Faux Pas — discard a painting</h3>
                 <div id="my-paintings" class="chip-row"></div>
+                <button type="button" id="btn-discard-painting" class="danger" disabled>Discard</button>
               </div>
             </div>
             <div class="move-panel-overlay">Waiting for other players…</div>
@@ -285,6 +349,8 @@
             <h3>You - <span id="my-username-label"></span></h3>
             <div>Points: <strong id="my-points">0</strong></div>
             <div id="my-status-cards" class="chip-row small"></div>
+            <p class="hint money-display-label">Money</p>
+            <div id="my-money-display" class="chip-row small"></div>
           </div>
 
           <div class="card panel">
@@ -325,6 +391,11 @@
                   <div class="final-green-icon">🟢</div>
                   <div class="final-green-title"></div>
                   <div class="final-green-sub">The game ends now — final scores coming up</div>
+                </div>
+              </div>
+              <div id="spec-game-start-overlay" class="game-start-overlay">
+                <div class="game-start-banner card panel">
+                  <div class="game-start-title">Starting soon<span class="game-start-dots"><span>.</span><span>.</span><span>.</span></span></div>
                 </div>
               </div>
             </div>
@@ -374,12 +445,43 @@
         <details class="advanced winner-rule-info">
           <summary>How is the winner decided?</summary>
           <p class="hint">
-            First, anyone with the least money left is eliminated from winning — unless there's a
-            tie for least, or only one player is left standing. Among whoever remains, the highest
-            total points wins (a painting's value, plus a Passe's −5, all multiplied together by
-            any Prestige/Scandale cards held). Ties are possible and are left as ties.
+            First, anyone with the least money left is eliminated from winning entirely. If two or
+            more players are tied for the least money, none of them are eliminated — everyone stays
+            in contention. Among whoever remains, the highest total points wins. That total is
+            calculated in two steps, in order: first add up the value of every painting you hold
+            plus a Passe's −5 (if you hold one); only then does any Prestige Card (×2) or Scandale
+            (½×) you hold multiply that whole total. Ties for the highest score are possible and
+            simply win together.
           </p>
         </details>
+
+        <div id="rematch-panel" class="rematch-panel hidden">
+          <button id="btn-request-rematch" class="primary">Request Rematch</button>
+          <div id="rematch-bot-form" class="hidden">
+            <fieldset class="bot-mix">
+              <legend>Bot seats for the rematch</legend>
+              <div class="bot-row">
+                <label>Pass bot <input type="number" id="rematch-bot-pass" min="0" max="4" value="0"></label>
+                <label>Greedy bot <input type="number" id="rematch-bot-greedy" min="0" max="4" value="0"></label>
+                <label>Capped-greedy bot <input type="number" id="rematch-bot-capped" min="0" max="4" value="0"></label>
+              </div>
+              <p id="rematch-bot-hint" class="hint"></p>
+            </fieldset>
+            <p id="rematch-error" class="error hidden"></p>
+            <div class="button-row">
+              <button id="btn-send-rematch-request" class="primary">Send Rematch Request</button>
+              <button id="btn-cancel-rematch-form" class="secondary">Cancel</button>
+            </div>
+          </div>
+          <div id="rematch-status" class="rematch-status hidden">
+            <p id="rematch-status-text"></p>
+            <div id="rematch-vote-actions" class="button-row hidden">
+              <button id="btn-accept-rematch" class="primary">Accept</button>
+              <button id="btn-decline-rematch" class="danger">Decline</button>
+            </div>
+          </div>
+        </div>
+
         <button id="btn-new-game" class="primary">Host a New Game</button>
       </div>
     </section>
