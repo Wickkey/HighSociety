@@ -523,13 +523,16 @@ function resetGameState(myUsername, status) {
 
 // Reflects the room's fixed reveal-cards/show-logs settings in the UI: a
 // read-only status label (there's no toggle anymore — see resetGameState)
-// and hiding the log panel entirely when the host turned it off.
+// and hiding the *player* log panel when the host turned it off. Spectators
+// always get the log regardless of that setting — they have no toasts/
+// opponent-panel context of their own to fall back on, so it's their main
+// way to follow what's happening, not an optional extra like it is for
+// players.
 function applyRoomDisplaySettings() {
   const label = game.revealCards ? 'Cards revealed' : 'Cards hidden';
   $('reveal-cards-status').textContent = label;
   $('spec-reveal-cards-status').textContent = label;
   $('game-log').closest('details').classList.toggle('hidden', !game.showLogs);
-  $('spec-game-log').closest('details').classList.toggle('hidden', !game.showLogs);
 }
 
 function seedOpponents(status, myUsername) {

@@ -2,6 +2,9 @@
 
 A Python implementation of the High Society card game backend.
 
+**Play it now:** [highsociety.onrender.com](https://highsociety.onrender.com/) — no install needed.
+Free-tier hosting, so the first load after a period of inactivity can take ~30-60s to wake up.
+
 ## Requirements
 
 Python 3.9+. No third-party packages needed for CLI or socket play. Playing in a browser needs
