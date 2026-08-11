@@ -76,6 +76,18 @@ game_history.ensure_schema()
 GA_MEASUREMENT_ID = os.environ.get("GA_MEASUREMENT_ID")
 
 
+def _compute_disconnect_grace_seconds(turn_time_limit: Optional[float]) -> float:
+    """
+    How long NetworkPlayer.get_bid()/choose_painting_to_discard() should wait
+    for a dropped connection to reconnect before falling back to an
+    auto-quit for that one decision (see NetworkPlayer._wait_for_reconnect).
+    20s flat for an untimed room; a fifth of the configured per-move timer
+    otherwise, since a long grace on a short-timer room would let a
+    disconnect eat most or all of everyone else's patience for that turn.
+    """
+    return 20.0 if turn_time_limit is None else turn_time_limit / 5
+
+
 class GameRoom:
     """
     All the state for one hosted game. Many of these can exist at once, kept
@@ -96,6 +108,7 @@ class GameRoom:
         self.bot_think_time = bot_think_time
         self.visibility = visibility  # "public" | "private"
         self.turn_time_limit = turn_time_limit  # seconds per move, or None for no limit
+        self.disconnect_grace_seconds = _compute_disconnect_grace_seconds(turn_time_limit)
         # Fixed for the whole table at creation time — the frontend has no
         # runtime toggle for either of these anymore (see app.js's
         # resetGameState), just a read-only status label reflecting whatever
@@ -908,6 +921,14 @@ def _handle_player_reconnect(ws, room: "GameRoom", rejoin_token: str) -> None:
           data={"rejoin_token": rejoin_token, "reconnected": True})
     _send_reconnect_catchup(player, room)
 
+    # Only now release a get_bid()/choose_painting_to_discard() that's been
+    # waiting in _wait_for_reconnect() since the old transport died -- see
+    # NetworkPlayer.finish_reconnect(). Doing this any earlier risks the
+    # game thread's own fresh re-prompt (a new "Enter your bid") racing
+    # ahead of IDENTIFY_SUCCESS/the catch-up messages above on this same
+    # transport, since it can start sending the instant something wakes it.
+    player.finish_reconnect()
+
     _run_player_session(player, transport, room)
 
 
@@ -950,7 +971,8 @@ def ws_player(ws):
             on_resign=lambda msg: _handle_out_of_turn_resign(username, room),
         )
         transport.start()
-        player = NetworkPlayer(name=name, username=username, transport=transport, game_id=game_id)
+        player = NetworkPlayer(name=name, username=username, transport=transport, game_id=game_id,
+                                disconnect_grace_seconds=room.disconnect_grace_seconds)
         room.players.append(player)
         rejoin_token = secrets.token_urlsafe(16)
         room.rejoin_tokens[rejoin_token] = username

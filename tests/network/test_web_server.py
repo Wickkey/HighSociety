@@ -150,6 +150,14 @@ def _ws_url(port, path):
     return f"ws://127.0.0.1:{port}{path}"
 
 
+def test_compute_disconnect_grace_seconds_defaults_to_20s_when_untimed():
+    assert web_server._compute_disconnect_grace_seconds(None) == 20.0
+
+
+def test_compute_disconnect_grace_seconds_is_timer_over_5_when_timed():
+    assert web_server._compute_disconnect_grace_seconds(50) == 10.0
+
+
 def test_create_status_and_config_endpoints(running_web_server):
     port = running_web_server
     client = web_server.app.test_client()
@@ -661,6 +669,14 @@ def test_player_can_reconnect_after_disconnecting_mid_game(running_web_server):
     had already finished. With three real sockets, whoever's turn it is
     next simply blocks until *something* answers it (no turn_time_limit is
     configured), giving this test full deterministic control over pacing.
+
+    An untimed room gets a ~20s disconnect grace period (see web_server.py's
+    _compute_disconnect_grace_seconds) — reconnecting promptly, as this test
+    does, means the disconnect never actually resolves as a quit at all (see
+    NetworkPlayer._wait_for_reconnect): `active` never flips False, and no
+    AUCTION_UPDATE("quit") is ever broadcast. See
+    test_reconnect_after_grace_period_still_quits_then_recovers for the slow
+    path where the grace period actually runs out.
     """
     port = running_web_server
     room_code = web_server.app.test_client().post(
@@ -703,20 +719,18 @@ def test_player_can_reconnect_after_disconnecting_mid_game(running_web_server):
 
     room = web_server._rooms[room_code]
     mover_player = next(p for p in room.players if p.username == mover_name)
-    deadline = time.time() + 10
-    while time.time() < deadline and mover_player.active:
-        threading.Event().wait(0.1)
-    assert not mover_player.active, "server never noticed the disconnect"
     assert mover_player in room.players, "mid-game disconnect must keep the seat, not remove it"
     assert room.state == "in_progress", "the other two haven't answered anything yet — nothing should have resolved"
 
-    # Reconnect with the same token/username and confirm the server marks
-    # them active again immediately, with catch-up state waiting for them.
+    # Reconnect with the same token/username, well inside the default grace
+    # period — confirm the server kept them active the whole time (the
+    # disconnect never resolved as a quit at all), with catch-up state
+    # waiting for them.
     reconnected = ReconnectingWSClient(
         _ws_url(port, f"/ws?room={room_code}&rejoin_token={token}"), mover_name,
     )
     reconnected.handshake()
-    assert mover_player.active, "reattach() should mark the player active again"
+    assert mover_player.active, "should have stayed active throughout — this reconnect is well within the grace period"
     reconnected.start()  # start collecting: the catch-up messages arrive right after IDENTIFY_SUCCESS
 
     deadline = time.time() + 5
@@ -738,6 +752,219 @@ def test_player_can_reconnect_after_disconnecting_mid_game(running_web_server):
     # Confirm the reconnected player genuinely got to act again post-reconnect
     # — not just marked active with no real turn ever coming their way.
     assert reconnected.messages_of_type("PLAYER_MOVE"), "never got another turn after reconnecting"
+
+    # A fast reconnect should be fully invisible to the rest of the table —
+    # no quit was ever broadcast for the disconnected player. WS delivery is
+    # ordered/buffered at the OS/library level, so this still holds even
+    # though these two clients only started actively draining their queue
+    # (via .start(), above) after the reconnect already happened.
+    for name, client in clients.items():
+        if name != mover_name:
+            quits = [m for m in client.messages_of_type("AUCTION_UPDATE")
+                     if (m.get("data") or {}).get("kind") == "quit"
+                     and (m.get("data") or {}).get("player") == mover_name]
+            assert not quits, f"{name} saw a quit broadcast for {mover_name} despite reconnecting within the grace period"
+
+    reconnected.close()
+    for name, client in clients.items():
+        if name != mover_name:
+            client.close()
+
+
+def test_reconnect_within_grace_period_on_a_timed_room_produces_no_quit_broadcast(running_web_server):
+    """
+    Pins the timed-room grace formula (turn_time_limit / 5, see
+    _compute_disconnect_grace_seconds) end-to-end, not just the untimed
+    default already covered by test_player_can_reconnect_after_disconnecting_mid_game
+    above. turn_time_limit=5 -> grace=1.0s; reconnecting well inside that
+    should behave identically to the untimed case: active never flips
+    False, no quit is ever broadcast.
+    """
+    port = running_web_server
+    room_code = web_server.app.test_client().post(
+        "/api/create_game", json={"seats": 3, "bot_mix": [], "seed": 1, "turn_time_limit": 5}
+    ).get_json()["room_code"]
+
+    clients = {
+        name: ScriptedWSClient(_ws_url(port, f"/ws?room={room_code}"), name)
+        for name in ("alice", "bob", "carol")
+    }
+    for client in clients.values():
+        client.handshake()
+
+    mover_name = None
+    deadline = time.time() + 10
+    while time.time() < deadline and mover_name is None:
+        for name, client in clients.items():
+            try:
+                raw = client.client.receive(timeout=0.2)
+            except ConnectionClosed:
+                continue
+            if raw is None:
+                continue
+            with client._lock:
+                client.received.append(json.loads(raw))
+            if json.loads(raw).get("message_type") == "PLAYER_MOVE":
+                mover_name = name
+                break
+    assert mover_name is not None, "nobody got a turn"
+
+    mover = clients[mover_name]
+    token = mover.rejoin_token()
+    assert token, "no rejoin_token issued at IDENTIFY_SUCCESS"
+    mover.client.close()  # simulate a dropped connection
+
+    room = web_server._rooms[room_code]
+    mover_player = next(p for p in room.players if p.username == mover_name)
+
+    # Reconnect well inside the 1.0s grace window.
+    threading.Event().wait(0.3)
+    reconnected = ReconnectingWSClient(
+        _ws_url(port, f"/ws?room={room_code}&rejoin_token={token}"), mover_name,
+    )
+    reconnected.handshake()
+    assert mover_player.active, "should have stayed active -- well within the timed room's grace window"
+
+    for name, client in clients.items():
+        if name != mover_name:
+            client.start()
+    threading.Event().wait(1.0)  # give any (unwanted) quit broadcast a chance to arrive
+
+    for name, client in clients.items():
+        if name != mover_name:
+            quits = [m for m in client.messages_of_type("AUCTION_UPDATE")
+                     if (m.get("data") or {}).get("kind") == "quit"
+                     and (m.get("data") or {}).get("player") == mover_name]
+            assert not quits, f"{name} saw a quit broadcast for {mover_name} despite reconnecting within the grace period"
+
+    reconnected.close()
+    for name, client in clients.items():
+        if name != mover_name:
+            client.close()
+
+
+def _drain_once(client):
+    """Pulls one waiting message (if any) straight into client.received,
+    without auto-answering anything the way ScriptedWSClient.start()'s
+    background responder would. Deliberately non-responsive: answering a
+    PLAYER_MOVE prompt would let the game keep advancing through everyone
+    else's turns for real, which (with pacing mocked to no-ops suite-wide)
+    can race clear through to the end of the deck in milliseconds --
+    exactly what test_reconnect_after_grace_period_still_quits_then_recovers_via_player_reconnected
+    needs to avoid, since it depends on the room still being "in_progress"
+    by the time it attempts the late reconnect."""
+    try:
+        raw = client.client.receive(timeout=0.2)
+    except ConnectionClosed:
+        return
+    if raw is None:
+        return
+    with client._lock:
+        client.received.append(json.loads(raw))
+
+
+def test_reconnect_after_grace_period_still_quits_then_recovers_via_player_reconnected(running_web_server):
+    """
+    The slow-reconnect path: once the grace window (1.0s here) genuinely
+    runs out with no reconnect, behavior must fall back to exactly today's
+    pre-feature shape -- a real quit fires, `active` goes False -- and only
+    then does the earlier-shipped player_reconnected broadcast (see
+    _handle_player_reconnect) become the thing that recovers the
+    disconnected player's UI tile for everyone else once they do eventually
+    reconnect.
+
+    Deliberately never calls .start() on alice/carol (unlike the happy-path
+    test above) -- its auto-responder would answer "pass" to literally
+    everything, and with this suite's pacing mocked to no-ops, that races
+    the game clear through to completion in milliseconds the instant
+    mover's quit clears their turn, finishing the room before this test
+    ever gets to attempt its own late reconnect. Draining passively via
+    _drain_once keeps the game frozen at whoever's turn comes right after
+    mover -- unanswered, but that's fine, this test doesn't need the game
+    to actually finish.
+    """
+    port = running_web_server
+    room_code = web_server.app.test_client().post(
+        "/api/create_game", json={"seats": 3, "bot_mix": [], "seed": 1, "turn_time_limit": 5}
+    ).get_json()["room_code"]
+
+    clients = {
+        name: ScriptedWSClient(_ws_url(port, f"/ws?room={room_code}"), name)
+        for name in ("alice", "bob", "carol")
+    }
+    for client in clients.values():
+        client.handshake()
+
+    mover_name = None
+    deadline = time.time() + 10
+    while time.time() < deadline and mover_name is None:
+        for name, client in clients.items():
+            try:
+                raw = client.client.receive(timeout=0.2)
+            except ConnectionClosed:
+                continue
+            if raw is None:
+                continue
+            with client._lock:
+                client.received.append(json.loads(raw))
+            if json.loads(raw).get("message_type") == "PLAYER_MOVE":
+                mover_name = name
+                break
+    assert mover_name is not None, "nobody got a turn"
+
+    mover = clients[mover_name]
+    token = mover.rejoin_token()
+    assert token, "no rejoin_token issued at IDENTIFY_SUCCESS"
+    mover.client.close()
+
+    room = web_server._rooms[room_code]
+    mover_player = next(p for p in room.players if p.username == mover_name)
+    others = [c for name, c in clients.items() if name != mover_name]
+
+    # Wait out the 1.0s grace window with no reconnect, passively draining
+    # the other two the whole time so nothing they receive gets lost.
+    deadline = time.time() + 5
+    while time.time() < deadline and mover_player.active:
+        for c in others:
+            _drain_once(c)
+        threading.Event().wait(0.1)
+    assert not mover_player.active, "grace period should have expired and quit them by now"
+    assert room.state == "in_progress", "the room must still be in progress for the late-reconnect check below"
+
+    deadline = time.time() + 5
+    quits_found = {name: [] for name in clients if name != mover_name}
+    while time.time() < deadline and not all(quits_found.values()):
+        for name, client in clients.items():
+            if name != mover_name:
+                _drain_once(client)
+                quits_found[name] = [m for m in client.messages_of_type("AUCTION_UPDATE")
+                                      if (m.get("data") or {}).get("kind") == "quit"
+                                      and (m.get("data") or {}).get("player") == mover_name]
+        threading.Event().wait(0.1)
+    for name, quits in quits_found.items():
+        assert quits, f"{name} never saw the expected quit broadcast for {mover_name} after grace expired"
+
+    # Reconnect (late) and confirm the player_reconnected recovery broadcast
+    # reaches the other clients.
+    reconnected = ReconnectingWSClient(
+        _ws_url(port, f"/ws?room={room_code}&rejoin_token={token}"), mover_name,
+    )
+    reconnected.handshake()
+    assert mover_player.active, "reattach() should mark the player active again"
+
+    deadline = time.time() + 5
+    found = False
+    while time.time() < deadline and not found:
+        for name, client in clients.items():
+            if name != mover_name:
+                _drain_once(client)
+                events = [m for m in client.messages_of_type("GLOBAL_EVENT")
+                          if (m.get("data") or {}).get("event") == "player_reconnected"
+                          and (m.get("data") or {}).get("player") == mover_name]
+                if events:
+                    found = True
+        threading.Event().wait(0.1)
+    assert found, "no player_reconnected broadcast reached the other clients after the late reconnect"
 
     reconnected.close()
     for name, client in clients.items():

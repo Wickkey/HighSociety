@@ -154,6 +154,141 @@ def test_get_bid_returns_quit_when_connection_closes_while_inactive(player_and_p
     assert result == "quit"
 
 
+def test_get_bid_with_no_disconnect_grace_configured_quits_almost_instantly(player_and_peer):
+    """Pins network_server.py's raw-socket default -- disconnect_grace_seconds
+    is left unset there (see NetworkPlayer.__init__), since a plain socket
+    client has no reconnect mechanism to ever recover through. A dropped
+    connection must still resolve immediately, not wait, matching today's
+    exact behavior before this feature existed."""
+    player, peer = player_and_peer
+    peer.close()
+    start = time.time()
+    result = player.get_bid(timeout=2.0)
+    elapsed = time.time() - start
+    assert result == "quit"
+    assert elapsed < 1.0, f"should quit near-instantly with no grace configured, took {elapsed}s"
+
+
+def _make_player_and_peer(disconnect_grace_seconds):
+    """Same shape as the player_and_peer fixture above, but with an explicit
+    disconnect_grace_seconds -- a plain helper (not a fixture) since the
+    grace-period tests below each need a different value."""
+    server_end, client_end = socket.socketpair()
+    transport = SocketTransport(server_end, label="alice")
+    player = NetworkPlayer(name="Alice", username="alice", transport=transport, game_id="g1",
+                            disconnect_grace_seconds=disconnect_grace_seconds)
+    player.start_receiver_thread()
+    return player, client_end
+
+
+def test_get_bid_returns_none_not_quit_when_reconnected_within_grace():
+    """A reconnect that lands inside the grace window must look like an
+    ordinary retry to the caller (None, not "quit") -- gameplay.py's own
+    `if bids is None: continue` is what turns that into a fresh prompt on
+    the reattached transport; this test only covers get_bid()'s own return
+    value, not that outer loop."""
+    player, peer = _make_player_and_peer(disconnect_grace_seconds=5.0)
+    new_client_end = None
+    try:
+        peer.close()  # simulate a dropped connection
+
+        def _reconnect_soon():
+            nonlocal new_client_end
+            threading.Event().wait(0.3)
+            new_server_end, new_client_end = socket.socketpair()
+            player.reattach(SocketTransport(new_server_end, label="alice-reconnected"))
+            player.finish_reconnect()
+
+        t = threading.Thread(target=_reconnect_soon, daemon=True)
+        t.start()
+        result = player.get_bid(timeout=None)
+        t.join(timeout=2.0)
+
+        assert result is None, "should retry (None), not quit, after reconnecting within the grace period"
+        assert player.active is True
+        assert player.resigned is False
+    finally:
+        player.close()
+        if new_client_end is not None:
+            new_client_end.close()
+
+
+def test_get_bid_quits_after_grace_expires_with_no_reconnect():
+    player, peer = _make_player_and_peer(disconnect_grace_seconds=0.2)
+    try:
+        peer.close()
+        start = time.time()
+        result = player.get_bid(timeout=None)
+        elapsed = time.time() - start
+        assert result == "quit"
+        assert player.active is False
+        assert player.resigned is False, "a grace-expired quit must stay reconnectable, unlike a real resign"
+        assert elapsed >= 0.2
+    finally:
+        player.close()
+
+
+def test_get_bid_grace_is_bounded_by_remaining_turn_time():
+    """A disconnect must never grant more time than the turn timer already
+    promised everyone else -- grace here (5s configured) should get capped
+    down to the ~0.2s actually left on this decision, not run the full 5s."""
+    player, peer = _make_player_and_peer(disconnect_grace_seconds=5.0)
+    try:
+        peer.close()
+        start = time.time()
+        result = player.get_bid(timeout=0.2)
+        elapsed = time.time() - start
+        assert result == "quit"
+        assert elapsed < 1.0, f"grace should have been capped to ~0.2s, took {elapsed}s"
+    finally:
+        player.close()
+
+
+def test_get_bid_grace_uncapped_when_no_turn_timer():
+    player, peer = _make_player_and_peer(disconnect_grace_seconds=0.3)
+    try:
+        peer.close()
+        start = time.time()
+        result = player.get_bid(timeout=None)  # no turn timer -- nothing should cap the configured grace
+        elapsed = time.time() - start
+        assert result == "quit"
+        assert elapsed >= 0.3, f"grace should not have been capped away by a None turn timeout, took only {elapsed}s"
+    finally:
+        player.close()
+
+
+def test_choose_painting_to_discard_reconnects_within_grace():
+    """Symmetry with get_bid() -- unlike get_bid(), this method's retry loop
+    is internal to itself (not an outer caller's loop), so a successful
+    in-grace reconnect can return a real answer within the same call, once
+    it re-prompts on the freshly reattached transport."""
+    player, peer = _make_player_and_peer(disconnect_grace_seconds=5.0)
+    player.add_status_card(Painting(value=5))
+    new_client_end = None
+    try:
+        peer.close()
+
+        def _reconnect_and_answer():
+            nonlocal new_client_end
+            threading.Event().wait(0.3)
+            new_server_end, new_client_end = socket.socketpair()
+            player.reattach(SocketTransport(new_server_end, label="alice-reconnected"))
+            player.finish_reconnect()
+            _send_response(new_client_end, "5")
+
+        t = threading.Thread(target=_reconnect_and_answer, daemon=True)
+        t.start()
+        result = player.choose_painting_to_discard()
+        t.join(timeout=2.0)
+
+        assert result is not None and result.value == 5
+        assert player.active is True
+    finally:
+        player.close()
+        if new_client_end is not None:
+            new_client_end.close()
+
+
 def test_get_bid_ignores_a_message_with_mismatched_game_id(player_and_peer):
     """
     A message tagged with a *different, present* game_id must not be treated

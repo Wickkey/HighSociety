@@ -1,3 +1,4 @@
+import threading
 from socket import error as SocketError
 from typing import Union
 from typing import Optional
@@ -16,7 +17,8 @@ class NetworkPlayer(BasePlayer):
     knowledge of its own, so a future transport (e.g. WebSockets for a
     browser client) plugs in here unchanged.
     """
-    def __init__(self, name: str, username: str, transport: Transport, game_id: str):
+    def __init__(self, name: str, username: str, transport: Transport, game_id: str,
+                 disconnect_grace_seconds: Optional[float] = None):
         super().__init__(name, username)
         self.transport = transport
         self.active = True
@@ -28,6 +30,15 @@ class NetworkPlayer(BasePlayer):
         # what lets the web UI's "Resign" button permanently forfeit a seat,
         # distinct from an accidental disconnect.
         self.resigned = False
+        # How long get_bid()/choose_painting_to_discard() will wait for a
+        # dropped connection to reattach() before giving up and quitting that
+        # one decision (see _wait_for_reconnect below) — None (the default,
+        # what network_server.py's raw-socket path leaves it at) means no
+        # wait at all, preserving the original instant-quit behavior for a
+        # transport with no reconnect mechanism to ever recover through.
+        # web_server.py computes and passes a real value per-room.
+        self.disconnect_grace_seconds = disconnect_grace_seconds
+        self._reconnected_event = threading.Event()
 
     def reset_for_new_game(self) -> None:
         """Extends BasePlayer.reset_for_new_game() with the two fields that
@@ -51,20 +62,60 @@ class NetworkPlayer(BasePlayer):
         Swaps in a fresh transport after a reconnect (see web_server.py's
         rejoin-token handling) and marks the player active again.
 
-        This does NOT retroactively fix whatever was happening at the exact
-        moment they disconnected: if get_bid()/choose_painting_to_discard()
-        was already blocked waiting on the old (now-dead) transport when it
-        died, that call already resolved (typically as an auto-"quit" for
-        that one decision — see get_bid()'s is_connected check) before this
-        ever runs. What reattach() actually restores is everything from
-        their *next* decision onward — the turn loop's own `if not
-        player.active` check (gameplay.py's _handle_player_turn) stops
-        short-circuiting them into an automatic pass once self.active is
-        True again, so normal play resumes.
+        Deliberately does NOT wake a blocked get_bid()/choose_painting_to_discard()
+        call yet — see finish_reconnect() for why that's a separate step, not
+        folded into this one. From this point on, the new transport is live
+        and can receive messages the caller sends on it (e.g. web_server.py's
+        own IDENTIFY_SUCCESS + reconnect catch-up), but nothing already
+        blocked waiting on the *old* transport resumes until finish_reconnect()
+        explicitly says so.
         """
         self.transport = transport
         self.active = True
         self.transport.start()
+
+    def finish_reconnect(self) -> None:
+        """
+        Wakes a get_bid()/choose_painting_to_discard() call that's been
+        sitting in _wait_for_reconnect() since the old transport died,
+        letting it resume immediately instead of waiting out the rest of
+        its grace period.
+
+        Split out from reattach() on purpose: the moment this fires, the
+        (separate, blocked) game thread can immediately start sending its
+        own messages on the newly-attached transport again (a fresh
+        "Enter your bid" re-prompt, typically) — call this only once the
+        caller is done sending anything of its own that has to land first
+        (web_server.py's IDENTIFY_SUCCESS + catch-up state), or those two
+        message streams can interleave out of order on the wire. Only
+        matters if the wait was ever actually entered; a harmless no-op
+        otherwise (nothing is blocked on a fresh/never-disconnected player).
+        """
+        self._reconnected_event.set()
+
+    def _wait_for_reconnect(self, remaining_turn_time: Optional[float]) -> bool:
+        """
+        Blocks the calling (game) thread up to disconnect_grace_seconds
+        waiting for reattach() to run, waking immediately if it does rather
+        than sitting out the full wait. Capped by remaining_turn_time (the
+        time actually left on this decision's own deadline, if any) so a
+        disconnect can never grant more time than the configured turn timer
+        already promised everyone else at the table — also closes off
+        dropping the connection right before your timer expires as a way to
+        stall for free extra time. Returns True iff a reconnect landed
+        before the wait ran out; disconnect_grace_seconds=None (see
+        __init__) skips the wait entirely and returns False immediately,
+        which is what keeps a transport with no reconnect mechanism (plain
+        socket play via network_server.py) from ever hanging with no way to
+        recover.
+        """
+        if self.disconnect_grace_seconds is None:
+            return False
+        grace = self.disconnect_grace_seconds
+        if remaining_turn_time is not None:
+            grace = max(0.0, min(grace, remaining_turn_time))
+        self._reconnected_event.clear()
+        return self._reconnected_event.wait(timeout=grace)
 
     def stop_receiver_thread(self) -> None:
         self.transport.stop()
@@ -147,8 +198,16 @@ class NetworkPlayer(BasePlayer):
         bid = self.transport.receive(timeout=timeout)
 
         if bid is None:
-            # Timed out waiting, or the transport has disconnected for good.
+            # Timed out waiting, or the transport has disconnected.
             if not self.transport.is_connected:
+                if self._wait_for_reconnect(timeout):
+                    # Reconnected within the grace period -- None (not
+                    # "quit") tells the caller's `if bids is None: continue`
+                    # (gameplay.py's _handle_player_turn) to just re-poll,
+                    # which re-sends the prompt on the fresh transport. No
+                    # gameplay.py change needed: this is exactly the same
+                    # retry path a plain queue timeout already uses below.
+                    return None
                 self.active = False
                 return "quit"
             return None
@@ -239,7 +298,12 @@ class NetworkPlayer(BasePlayer):
                 choice = self.transport.receive(timeout=None)
 
                 if choice is None:
-                    # Connection closed or receiver stopped
+                    # Connection closed or receiver stopped. No per-move
+                    # timer on this prompt, so the grace period is always
+                    # uncapped (remaining_turn_time=None) -- mirrors
+                    # get_bid()'s handling above, for the same reason.
+                    if self._wait_for_reconnect(None):
+                        continue  # re-sends "Choose one to discard" on the fresh transport
                     self.active = False
                     return None
 
