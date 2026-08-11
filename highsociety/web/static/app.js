@@ -684,6 +684,7 @@ async function refreshRoomsList() {
 }
 
 function renderRoomsList(rooms) {
+  updateJoinTileLiveBadge(rooms.length);
   const container = $('public-rooms-list');
   if (!rooms.length) {
     container.innerHTML = '<p class="muted">No public games open right now — host one below!</p>';
@@ -704,6 +705,27 @@ function renderRoomsList(rooms) {
     row.appendChild(btn);
     container.appendChild(row);
   });
+}
+
+// Surfaces live public-game activity right on the home screen's "Join a
+// Game" tile (a small corner badge + swapped subtitle) instead of a
+// separate banner element -- reuses the same /api/rooms poll that already
+// drives the full list inside the tile's own panel (see refreshRoomsList),
+// so this is purely a read of data already being fetched, not a new source.
+const HOME_TILE_JOIN_SUB_DEFAULT = 'Public games or a room code';
+function updateJoinTileLiveBadge(count) {
+  const badge = $('home-tile-live-badge');
+  const sub = $('home-tile-join-sub');
+  if (count > 0) {
+    badge.textContent = `${count} live`;
+    show(badge);
+    sub.textContent = `${count} public game${count === 1 ? '' : 's'} right now`;
+    sub.classList.add('has-live');
+  } else {
+    hide(badge);
+    sub.textContent = HOME_TILE_JOIN_SUB_DEFAULT;
+    sub.classList.remove('has-live');
+  }
 }
 
 async function refreshStatus() {
