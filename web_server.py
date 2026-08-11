@@ -70,6 +70,11 @@ load_dotenv()
 # gunicorn worker in production.
 game_history.ensure_schema()
 
+# Optional, same opt-in-via-env-var pattern as DATABASE_URL above: unset (the
+# default, e.g. every local dev run) means index.html/404.html render with no
+# gtag.js snippet at all, so local testing never pollutes real GA4 traffic.
+GA_MEASUREMENT_ID = os.environ.get("GA_MEASUREMENT_ID")
+
 
 class GameRoom:
     """
@@ -387,12 +392,12 @@ def _identify(ws, game_id: str, first_prompt: str, second_prompt: str):
 
 @app.route("/")
 def index():
-    return render_template("index.html")
+    return render_template("index.html", ga_measurement_id=GA_MEASUREMENT_ID)
 
 
 @app.errorhandler(404)
 def not_found(_error):
-    return render_template("404.html"), 404
+    return render_template("404.html", ga_measurement_id=GA_MEASUREMENT_ID), 404
 
 
 @app.route("/api/config")

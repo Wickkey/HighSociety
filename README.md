@@ -127,6 +127,13 @@ A database write happening slowly or failing outright never affects gameplay —
 fire-and-forget on a background thread after a game has already fully finished (see
 `record_finished_game_async`).
 
+## Analytics (optional)
+
+`web_server.py` renders a GA4 (`gtag.js`) snippet on every page if the `GA_MEASUREMENT_ID`
+environment variable is set (same opt-in pattern as `DATABASE_URL` above) — copy `.env.example` to
+`.env` and fill it in, or set it as a secret/environment variable on your hosting platform. Unset
+(the default), and no analytics script is ever rendered — nothing is tracked.
+
 ## Status
 
 CLI, networked, and browser play are all functional, covered by the test suite under `tests/`

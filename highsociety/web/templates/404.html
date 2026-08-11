@@ -7,6 +7,17 @@
   <meta name="robots" content="noindex">
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+CiAgPHJlY3Qgd2lkdGg9IjY0IiBoZWlnaHQ9IjY0IiByeD0iMTQiIGZpbGw9IiMwYjM0MjciLz4KICA8dGV4dCB4PSIzMiIgeT0iMzQiIGZvbnQtc2l6ZT0iNTYiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGRvbWluYW50LWJhc2VsaW5lPSJjZW50cmFsIiBmb250LWZhbWlseT0iJ0FyaWFsIFVuaWNvZGUgTVMnLCBBcmlhbCwgc2Fucy1zZXJpZiIgZmlsbD0iI2M4YTA0ZCI+JiM5ODI0OzwvdGV4dD4KPC9zdmc+Cg==">
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+
+  {% if ga_measurement_id %}
+  <!-- Google tag (gtag.js) -- opt-in via GA_MEASUREMENT_ID env var, see web_server.py -->
+  <script async src="https://www.googletagmanager.com/gtag/js?id={{ ga_measurement_id }}"></script>
+  <script>
+    window.dataLayer = window.dataLayer || [];
+    function gtag(){dataLayer.push(arguments);}
+    gtag('js', new Date());
+    gtag('config', '{{ ga_measurement_id }}');
+  </script>
+  {% endif %}
 </head>
 <body>
   <header class="topbar">

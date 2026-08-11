@@ -22,6 +22,17 @@
   <meta name="twitter:title" content="High Society">
   <meta name="twitter:description" content="An auction card game of wealth and reputation — host a room, invite friends or bots, and play free in your browser.">
   <meta name="twitter:image" content="{{ request.url_root }}static/og-image.png">
+
+  {% if ga_measurement_id %}
+  <!-- Google tag (gtag.js) -- opt-in via GA_MEASUREMENT_ID env var, see web_server.py -->
+  <script async src="https://www.googletagmanager.com/gtag/js?id={{ ga_measurement_id }}"></script>
+  <script>
+    window.dataLayer = window.dataLayer || [];
+    function gtag(){dataLayer.push(arguments);}
+    gtag('js', new Date());
+    gtag('config', '{{ ga_measurement_id }}');
+  </script>
+  {% endif %}
 </head>
 <body>
   <header class="topbar">
