@@ -560,6 +560,7 @@ document.addEventListener('DOMContentLoaded', () => {
     startPolling();
   } else {
     showScreen('screen-host-setup');
+    showHomeTiles();
     startRoomsPolling();
   }
 });
@@ -599,9 +600,25 @@ async function enterRoom(roomCode, event) {
   startPolling();
 }
 
+// The home screen ("screen-host-setup") is a picker of three tiles (Join /
+// Host / Rules) rather than dumping all three panels on screen at once —
+// clicking a tile swaps to that panel with a "← Back" link back to the
+// tiles. Always reset to the tile picker whenever the home screen itself is
+// (re-)shown (see leaveToHome and the initial-load boot path), so returning
+// home never leaves a stale panel expanded from a previous visit.
+const HOME_TILE_TARGETS = ['join', 'host', 'rules'];
+function showHomeTile(target) {
+  hide($('home-tiles'));
+  HOME_TILE_TARGETS.forEach((t) => $(`home-panel-${t}`).classList.toggle('hidden', t !== target));
+}
+function showHomeTiles() {
+  show($('home-tiles'));
+  HOME_TILE_TARGETS.forEach((t) => hide($(`home-panel-${t}`)));
+}
+
 // clearRejoin is false only for the "clicked the High Society title mid-game"
 // path (see onHomeLinkClick) — that's meant to behave like closing the tab,
-// which stays reconnectable, not like clicking "Host a New Game" after the
+// which stays reconnectable, not like clicking "Return to Home" after the
 // game's already over, which has nothing left to reconnect to.
 function leaveToHome(clearRejoin = true) {
   if (clearRejoin) clearRejoinInfo(currentRoomCode);
@@ -612,6 +629,7 @@ function leaveToHome(clearRejoin = true) {
   history.replaceState(null, '', location.pathname);
   stopPolling();
   showScreen('screen-host-setup');
+  showHomeTiles();
   renderProfileChip();
   startRoomsPolling();
 }
@@ -990,6 +1008,12 @@ function showRematchDeclinedNotice(declinedBy) {
 function wireStaticHandlers() {
   $('confirm-modal-cancel').addEventListener('click', () => _resolveConfirmDialog(false));
   $('confirm-modal-confirm').addEventListener('click', () => _resolveConfirmDialog(true));
+  document.querySelectorAll('.home-tile').forEach((btn) => {
+    btn.addEventListener('click', () => showHomeTile(btn.dataset.homeTarget));
+  });
+  document.querySelectorAll('.home-back').forEach((btn) => {
+    btn.addEventListener('click', showHomeTiles);
+  });
   $('btn-create-game').addEventListener('click', onCreateGame);
   $('btn-join-by-code').addEventListener('click', onJoinByCode);
   $('btn-add-bot').addEventListener('click', onAddBot);
