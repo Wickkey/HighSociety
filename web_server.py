@@ -28,7 +28,7 @@ import uuid
 from typing import Optional
 
 from dotenv import load_dotenv
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, Response, jsonify, render_template, request
 from flask_sock import Sock
 
 from highsociety.code.ai import BOT_TYPES, create_bot_players
@@ -393,6 +393,15 @@ def _identify(ws, game_id: str, first_prompt: str, second_prompt: str):
 @app.route("/")
 def index():
     return render_template("index.html", ga_measurement_id=GA_MEASUREMENT_ID)
+
+
+@app.route("/robots.txt")
+def robots_txt():
+    # /?room=<code> pages are ephemeral game sessions, not indexable
+    # content -- the room may not even exist anymore by the time a crawler
+    # visits. Everything else (just the homepage, in practice) is fine to
+    # crawl, so nothing else needs an explicit Disallow.
+    return Response("User-agent: *\nDisallow: /?room=\n", mimetype="text/plain")
 
 
 @app.errorhandler(404)
