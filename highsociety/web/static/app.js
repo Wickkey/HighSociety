@@ -852,7 +852,8 @@ function renderLobby(status) {
   $('join-waiting').classList.add('hidden');
   applyJoinIdentityDefaults();
   const visibilityNote = status.visibility === 'private' ? ' (private — share this code with friends)' : ' (public)';
-  $('room-code-display').textContent = `Room code: ${status.room_code}${visibilityNote}`;
+  $('room-code-text').textContent = `Room code: ${status.room_code}${visibilityNote}`;
+  show($('room-code-display'));
   const names = status.joined.map((p) => `${p.name}${p.is_bot ? ' 🤖' : ''}`).join(', ') || 'nobody yet';
   $('lobby-status').textContent = `Seats filled: ${status.joined.length}/${status.seats} — ${names}`;
   if (pendingIdentifyError) {
@@ -1042,6 +1043,7 @@ function wireStaticHandlers() {
   });
   $('btn-create-game').addEventListener('click', onCreateGame);
   $('btn-join-by-code').addEventListener('click', onJoinByCode);
+  $('btn-copy-room-link').addEventListener('click', onCopyRoomLink);
   $('btn-add-bot').addEventListener('click', onAddBot);
   $('btn-join').addEventListener('click', onJoin);
   $('btn-spectate-link').addEventListener('click', () => {
@@ -1138,6 +1140,29 @@ function onJoinByCode(event) {
   const code = $('join-room-code').value.trim().toUpperCase();
   if (!code) { showError($('host-error'), 'Enter a room code.'); return; }
   enterRoom(code, event);
+}
+
+// Copies the full joinable URL (not just the bare code) -- pasted into a
+// chat app it becomes a one-tap link straight to this room's join screen,
+// versus a bare code which still makes the recipient find the site
+// themselves and type it in. The code itself is still visible as plain
+// text right next to this button for anyone who'd rather read it aloud.
+async function onCopyRoomLink() {
+  if (!currentRoomCode) return;
+  const url = `${location.origin}${location.pathname}?room=${encodeURIComponent(currentRoomCode)}`;
+  try {
+    await navigator.clipboard.writeText(url);
+  } catch (e) {
+    return; // clipboard permission denied/unavailable -- silently no-op, nothing else useful to do
+  }
+  const btn = $('btn-copy-room-link');
+  btn.classList.add('copied');
+  btn.title = 'Copied!';
+  clearTimeout(onCopyRoomLink._resetTimer);
+  onCopyRoomLink._resetTimer = setTimeout(() => {
+    btn.classList.remove('copied');
+    btn.title = 'Copy invite link';
+  }, 1500);
 }
 
 // ------------------------------------------------------------- join flow --

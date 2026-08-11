@@ -475,6 +475,10 @@ button.secondary.standalone { margin-top: 0.9rem; display: inline-block; }
 }
 
 .room-code-display {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
   background: var(--accent-soft);
   border: 1px solid var(--accent-light);
   border-radius: var(--radius-sm);
@@ -484,7 +488,26 @@ button.secondary.standalone { margin-top: 0.9rem; display: inline-block; }
   font-weight: 600;
   letter-spacing: 0.02em;
 }
-.room-code-display:empty { display: none; }
+
+.copy-link-btn {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.9rem;
+  height: 1.9rem;
+  padding: 0;
+  border: 1px solid var(--accent-light);
+  border-radius: var(--radius-sm);
+  background: var(--panel-bg);
+  color: var(--accent-strong);
+  cursor: pointer;
+  transition: background 0.15s ease, transform 0.1s ease;
+}
+.copy-link-btn svg { width: 1rem; height: 1rem; }
+.copy-link-btn:hover { background: var(--accent-highlight); color: #fff; }
+.copy-link-btn:active { transform: scale(0.93); }
+.copy-link-btn.copied { background: var(--accent-strong); color: #fff; border-color: var(--accent-strong); }
 
 .radio-label {
   display: flex;
@@ -1113,7 +1136,7 @@ button.link-button:hover { color: var(--accent); }
    "Joining as X — not you?" confirmation. */
 #join-as-label, #spectate-as-label { margin: 0 0 0.9rem; }
 
-#spec-chat-input {
+#spec-chat-input, #player-chat-input {
   flex: 1;
   padding: 0.5rem 0.65rem;
   border-radius: var(--radius-sm);
