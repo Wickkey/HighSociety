@@ -837,6 +837,17 @@ def _send_reconnect_catchup(player: NetworkPlayer, room: "GameRoom") -> None:
         return
     room.game._send_player_state(player)
 
+    # Restores the true post-shuffle seat order a reconnecting client would
+    # otherwise have lost (see PlayGame.play_game's own player_order
+    # broadcast, sent once at game start and missed by anyone who wasn't
+    # connected yet) -- room.game.players is the same list shuffle_players()
+    # mutated in place, so this is always the real turn order, not lobby
+    # join order.
+    player.send_message(
+        "", message_type="GLOBAL_EVENT",
+        data={"event": "player_order", "usernames": [p.username for p in room.game.players]},
+    )
+
     live_state = room.game.get_live_auction_state()
     if live_state.get("card") is not None:
         player.send_message(
@@ -877,6 +888,21 @@ def _handle_player_reconnect(ws, room: "GameRoom", rejoin_token: str) -> None:
     )
     player.reattach(transport)
     room.touch()
+
+    # reattach() above flips this player back to active on the server, but
+    # everyone else's browser still has them frozen at whatever state a
+    # dropped connection left them in (see app.js's opponent-tile "(out)"/
+    # greyed styling) -- without telling the rest of the table, that tile
+    # never recovers even though the seat is genuinely back. Mirrors
+    # _handle_out_of_turn_resign's broadcast shape, just the opposite event.
+    formatted = f"🔌 {username} reconnected."
+    data = {"event": "player_reconnected", "player": username}
+    for p in list(room.players):
+        if isinstance(p, NetworkPlayer) and p.username != username and p.active:
+            p.send_message(formatted, message_type="GLOBAL_EVENT", data=data)
+    for s in list(room.spectators):
+        if s.active:
+            s.send_message(formatted, message_type="GLOBAL_EVENT", data=data)
 
     _send(ws, room.game_id, "IDENTIFY_SUCCESS", f"Welcome back, {username}!",
           data={"rejoin_token": rejoin_token, "reconnected": True})

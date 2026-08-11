@@ -511,6 +511,10 @@ function resetGameState(myUsername, status) {
     myStatusCards: [],
     selectedBid: new Set(),
     opponents: {}, // username -> {name, statusCards: [], active: true, outOfAuction: false}
+    // The real post-shuffle seat/turn order (see gameplay.py's player_order
+    // broadcast) -- empty until that arrives, which renderOpponents falls
+    // back to plain insertion order for.
+    playerOrder: [],
     revealCards: status ? status.reveal_cards !== false : true,
     showLogs: status ? status.show_logs !== false : true,
     // The room's fixed per-move timer (seconds, or null/undefined for no
@@ -1450,6 +1454,22 @@ function applyGameMessage(msg, isSpectator) {
           renderOpponents(isSpectator);
           enqueueEvent(isSpectator, `${d.player} resigned`, 'quit');
         }
+      } else if (d && d.event === 'player_reconnected') {
+        // Counterpart to player_resigned above -- a dropped connection
+        // greys an opponent's tile out via the exact same o.active flag (see
+        // the AUCTION_UPDATE "kind":"quit" path, since a dead transport
+        // during their own turn looks identical to a quit from the engine's
+        // side), but nothing previously told other browsers when that
+        // player actually came back, so the tile just stayed stuck "(out)"
+        // forever even once the seat was live again.
+        if (d.player !== game.myUsername) {
+          const o = ensureOpponent(d.player);
+          o.active = true;
+          renderOpponents(isSpectator);
+        }
+      } else if (d && d.event === 'player_order') {
+        game.playerOrder = d.usernames;
+        renderOpponents(isSpectator);
       } else if (d && d.event === 'countdown') {
         showCountdownOverlay(isSpectator);
       } else if (d && d.event === 'countdown_finished') {
@@ -1846,12 +1866,40 @@ function updateCardInfoButton(isSpectator) {
 // .opponent-row actually animate when the active player changes — a freshly
 // recreated element has no "previous state" for a CSS transition to animate
 // from, it just appears with its final style already applied.
+// Puts the opponent list in real seat/turn order instead of whatever order
+// each player was first heard about (which used to make turns look like
+// they jumped around at random -- see the player_order GLOBAL_EVENT
+// handler above for where game.playerOrder comes from). Rotated to start
+// right after "me" for players, so the list always reads top-to-bottom in
+// the exact order turns will actually advance, wrapping bottom-to-top --
+// even when the shuffle put you mid-cycle rather than first. Spectators
+// have no seat of their own to rotate around, so they just see the raw
+// seat order start to finish.
+function orderedOpponentUsernames(isSpectator) {
+  const known = Object.keys(game.opponents);
+  if (!game.playerOrder.length) return known; // player_order hasn't arrived yet -- fall back to insertion order
+
+  let order = game.playerOrder;
+  if (!isSpectator && game.myUsername) {
+    const myIdx = order.indexOf(game.myUsername);
+    if (myIdx !== -1) order = order.slice(myIdx + 1).concat(order.slice(0, myIdx));
+  }
+  const result = order.filter((u) => u !== game.myUsername && known.includes(u));
+  // Defensive fallback only -- player_order is broadcast right at game
+  // start, so this shouldn't normally trigger, but nobody should silently
+  // vanish from the list if it somehow does.
+  known.forEach((u) => { if (!result.includes(u)) result.push(u); });
+  return result;
+}
+
 function renderOpponents(isSpectator) {
   if (!game) return;
   const container = $(isSpectator ? 'spec-players-list' : 'opponents-list');
   const seenUsernames = new Set();
 
-  Object.entries(game.opponents).forEach(([username, o]) => {
+  orderedOpponentUsernames(isSpectator).forEach((username) => {
+    const o = game.opponents[username];
+    if (!o) return;
     seenUsernames.add(username);
     let row = container.querySelector(`.opponent-row[data-username="${CSS.escape(username)}"]`);
     if (!row) {
@@ -1859,8 +1907,12 @@ function renderOpponents(isSpectator) {
       row.dataset.username = username;
       row.innerHTML = '<div class="opponent-header"><span class="name"></span><span class="pts"></span></div>'
         + '<div class="chip-row small"></div>';
-      container.appendChild(row);
     }
+    // appendChild on an already-attached node moves it -- calling this
+    // every render (not just on first creation) is what keeps existing
+    // rows in the right order as game.playerOrder becomes known/changes,
+    // not just newly-added ones.
+    container.appendChild(row);
 
     const isCurrentTurn = game.turnPlayer === username;
     const classes = ['opponent-row'];

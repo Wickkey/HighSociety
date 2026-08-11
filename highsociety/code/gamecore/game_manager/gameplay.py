@@ -811,6 +811,16 @@ class PlayGame():
         LoggingManager.info("Game Started..")
         self.shuffle_players()
 
+        # Lets a client render its opponent list in true turn order instead
+        # of whatever order it happened to first hear about each player (see
+        # app.js's renderOpponents) -- without this, the shuffle is real on
+        # the engine side but invisible in the UI, so turns visually jump
+        # around a list ordered by first-appearance rather than seating.
+        self.host.send_message(
+            "", message_type="GLOBAL_EVENT",
+            data={"event": "player_order", "usernames": [p.username for p in self.players]},
+        )
+
         # Without this, a player's own money hand only ever appeared once
         # they'd taken their first turn (the interactive bid prompt is the
         # only other thing that ever populated it) — round 1 looked bare for
