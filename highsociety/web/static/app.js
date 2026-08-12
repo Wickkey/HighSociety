@@ -1838,6 +1838,20 @@ function playUrgentDoubleBeep() {
 function setMovePending() {
   clearMoveTimer(); // acted — no need to keep counting down what's already submitted
   $('move-panel').classList.add('pending');
+  // The panel is now correctly blocked, but the server's broadcast of what
+  // actually happens next (whose turn it really is) hasn't arrived yet --
+  // without this, game.turnPlayer keeps pointing at whoever just acted
+  // (often *this* player), so the auction header kept reading "Your turn"
+  // and the wrong opponent stayed highlighted for however long that
+  // round-trip took. Blank/neutral here is honest about "we don't know
+  // yet"; stale is actively misleading. Most visible right as a per-move
+  // timer hits 0 — the countdown draws the eye to exactly this moment, so
+  // a leftover "Your turn" next to an already-greyed-out panel read as a
+  // real bug ("timer still going, money cards look active") even though
+  // the panel itself was already correctly blocked underneath.
+  game.turnPlayer = null;
+  renderAuctionPanel(false);
+  renderOpponents(false);
 }
 
 // ------------------------------------------------------------- rendering --
