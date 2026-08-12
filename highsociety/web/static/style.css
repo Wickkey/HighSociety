@@ -107,6 +107,19 @@ body {
   outline: 2px solid var(--accent-light);
   outline-offset: 3px;
 }
+@media (max-width: 600px) {
+  /* Fixed-to-viewport meant this sat on top of whatever happened to be
+     scrolled into the bottom-right corner -- confirmed live covering the
+     move-panel's Place Bid button during an active turn, and the bot-count
+     inputs on the host form. Un-fixing it here relies on the element now
+     living at the very end of the document (see index.html) so it renders
+     as a plain footer link below all real content instead. */
+  .github-link {
+    position: static;
+    display: flex; /* block-level, so margin:auto below actually centers it -- inline-flex (the default) wouldn't */
+    margin: 2rem auto 1.5rem;
+  }
+}
 .badge {
   font-size: 0.75rem;
   padding: 0.3rem 0.7rem;
@@ -464,6 +477,45 @@ button.secondary.standalone { margin-top: 0.9rem; display: inline-block; }
   transition: border-color 0.15s ease;
 }
 .button-row select:focus { outline: none; border-color: var(--accent); }
+
+/* Reads as one sentence ("Fill an empty seat with a [Medium ▾] bot") with
+   the difficulty select inline, rather than a same-height dropdown sitting
+   next to an unrelated-looking button -- the pairing between "what
+   difficulty" and "add a bot" wasn't visually obvious before. */
+.bot-add-row {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  flex-wrap: wrap;
+  margin-top: 0.9rem;
+}
+.bot-add-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  font-size: 0.9rem;
+}
+/* "a [dropdown] bot" wraps to a new line as one atomic unit if the row runs
+   out of room, rather than splitting mid-phrase and leaving "bot" orphaned
+   alone on its own line (confirmed live at the join panel's ~460px width). */
+.bot-add-select-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  white-space: nowrap;
+}
+.bot-add-label select {
+  padding: 0.4rem 0.6rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--panel-border);
+  background: var(--panel-bg-soft);
+  color: var(--text);
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.bot-add-label select:focus { outline: none; border-color: var(--accent); }
 
 .lobby-status {
   background: var(--panel-bg-soft);
@@ -833,7 +885,7 @@ button.secondary.standalone { margin-top: 0.9rem; display: inline-block; }
    in this panel's bottom-right corner rather than competing with Points/
    status cards above for attention. Same .danger button + confirm dialog
    as before (see app.js's onResign); only its position changed. */
-.you-panel-footer {
+.panel-footer {
   display: flex;
   justify-content: flex-end;
   margin-top: 0.9rem;
@@ -855,14 +907,22 @@ button.secondary.standalone { margin-top: 0.9rem; display: inline-block; }
 .chat-target-toggle { display: flex; margin: 0.6rem 0 0; }
 
 /* Read-only status badge — reveal-cards is a host-time setting fixed for
-   the whole table (see host-reveal-cards in the Advanced section), not a
-   per-player toggle anymore, so this just states the room's setting. */
+   the whole table (see host-reveal-cards in the host form's "Table
+   settings" section), not a per-player toggle anymore, so this just states
+   the room's setting. */
 .reveal-status {
   font-size: 0.78rem;
   font-weight: 500;
   color: var(--muted);
   white-space: nowrap;
 }
+
+.panel-header-status {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+#spectator-count-status::before { content: "·"; margin-right: 0.4rem; color: var(--panel-border); }
 
 .log-details { padding: 1rem 1.4rem; }
 .log-details summary {

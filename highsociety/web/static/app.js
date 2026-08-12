@@ -807,22 +807,29 @@ function stopPolling() {
 // leaves "lobby" (game started), so it never runs for the rest of the game.
 let waitingRoomPollTimer = null;
 
+async function _tickWaitingRoomStatus() {
+  let status;
+  try {
+    status = await fetchJSON(`/api/status?room=${encodeURIComponent(currentRoomCode)}`);
+  } catch (e) {
+    return;
+  }
+  if (!status.exists || status.state !== 'lobby') {
+    stopWaitingRoomPolling();
+    return;
+  }
+  const names = status.joined.map((p) => `${p.name}${p.is_bot ? ' 🤖' : ''}`).join(', ') || 'nobody yet';
+  $('lobby-status').textContent = `Seats filled: ${status.joined.length}/${status.seats} — ${names}`;
+}
+
 function startWaitingRoomPolling() {
   if (waitingRoomPollTimer) return;
-  waitingRoomPollTimer = setInterval(async () => {
-    let status;
-    try {
-      status = await fetchJSON(`/api/status?room=${encodeURIComponent(currentRoomCode)}`);
-    } catch (e) {
-      return;
-    }
-    if (!status.exists || status.state !== 'lobby') {
-      stopWaitingRoomPolling();
-      return;
-    }
-    const names = status.joined.map((p) => `${p.name}${p.is_bot ? ' 🤖' : ''}`).join(', ') || 'nobody yet';
-    $('lobby-status').textContent = `Seats filled: ${status.joined.length}/${status.seats} — ${names}`;
-  }, 1500);
+  // Without this immediate call, setInterval's first tick is 1.5s out --
+  // "Seats filled: 0/3 — nobody yet" (whatever lobby-status showed before
+  // you joined) sits directly next to "You're in!" for that whole window,
+  // visibly contradicting it. Matches startRoomsPolling()'s same fix below.
+  _tickWaitingRoomStatus();
+  waitingRoomPollTimer = setInterval(_tickWaitingRoomStatus, 1500);
 }
 function stopWaitingRoomPolling() {
   if (waitingRoomPollTimer) { clearInterval(waitingRoomPollTimer); waitingRoomPollTimer = null; }
@@ -1064,6 +1071,7 @@ function wireStaticHandlers() {
   $('btn-change-join-identity').addEventListener('click', onChangeJoinIdentity);
   $('btn-change-spectate-identity').addEventListener('click', onChangeSpectateIdentity);
   $('home-link').addEventListener('click', onHomeLinkClick);
+  $('btn-stop-watching').addEventListener('click', onHomeLinkClick);
   $('home-link').addEventListener('keydown', (e) => {
     if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onHomeLinkClick(); }
   });
@@ -1495,6 +1503,19 @@ function applyGameMessage(msg, isSpectator) {
       } else if (d && d.event === 'player_order') {
         game.playerOrder = d.usernames;
         renderOpponents(isSpectator);
+      } else if (d && d.event === 'spectator_count') {
+        // Player-only -- spectators already see the full player roster, so
+        // a count of their own kind adds nothing for them (see
+        // UX_AUDIT.md #2 for why players needed this and had nothing).
+        if (!isSpectator) {
+          const el = $('spectator-count-status');
+          if (d.count > 0) {
+            el.textContent = `${d.count} watching`;
+            show(el);
+          } else {
+            hide(el);
+          }
+        }
       } else if (d && d.event === 'countdown') {
         showCountdownOverlay(isSpectator);
       } else if (d && d.event === 'countdown_finished') {

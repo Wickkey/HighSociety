@@ -177,6 +177,7 @@ class GameRoom:
             for p in self.players:
                 if isinstance(p, NetworkPlayer):
                     _send_opponent_roster(p, self)
+            _broadcast_spectator_count(self)
             self.state = "in_progress"
             try:
                 game.play_game()
@@ -803,6 +804,35 @@ def _run_player_session(player: NetworkPlayer, transport: WebSocketTransport, ro
         player.active = False
 
 
+def _broadcast_spectator_count(room: "GameRoom") -> None:
+    """
+    Tells every connected player how many people are currently watching.
+    Spectators already see the full player roster, but players previously
+    had zero visibility into spectators at all -- not even a count (see
+    UX_AUDIT.md #2). Called on every spectator join/leave for live updates,
+    and once per player at game start (run_game) to cover anyone who was
+    already watching from the lobby before this player's own connection
+    existed to receive those live join broadcasts.
+
+    No-ops during "lobby" on purpose: a player sitting in the waiting room
+    has no game-message channel yet in any meaningful sense, and
+    app.js's applyGameMessage() unconditionally forces the game screen
+    visible the instant *any* GLOBAL_EVENT arrives (ensureGameScreenVisible)
+    -- sending this while still in lobby was yanking a still-waiting host
+    straight to the (not yet real) game screen the moment a spectator
+    joined, well before the table was actually full. The game-start
+    broadcast in run_game() already covers the initial count correctly once
+    play actually begins.
+    """
+    if room.state == "lobby":
+        return
+    count = sum(1 for s in room.spectators if s.active)
+    data = {"event": "spectator_count", "count": count}
+    for p in list(room.players):
+        if isinstance(p, NetworkPlayer) and p.active:
+            p.send_message("", message_type="GLOBAL_EVENT", data=data)
+
+
 def _send_opponent_roster(player: NetworkPlayer, room: "GameRoom") -> None:
     """
     Tells `player` about every other seat at the table right now — status
@@ -875,6 +905,10 @@ def _send_reconnect_catchup(player: NetworkPlayer, room: "GameRoom") -> None:
         )
 
     _send_opponent_roster(player, room)
+    player.send_message(
+        "", message_type="GLOBAL_EVENT",
+        data={"event": "spectator_count", "count": sum(1 for s in room.spectators if s.active)},
+    )
 
 
 def _handle_player_reconnect(ws, room: "GameRoom", rejoin_token: str) -> None:
@@ -1050,6 +1084,7 @@ def ws_spectate(ws):
     transport = WebSocketTransport(ws, label=f"{username}@web-spectator")
     spectator = NetworkSpectator(transport=transport, name=name, username=username, game_id=game_id)
     room.spectators.append(spectator)
+    _broadcast_spectator_count(room)
 
     _send(ws, game_id, "IDENTIFY_SUCCESS", f"Welcome {name}! You are now watching the game live.")
 
@@ -1060,6 +1095,7 @@ def ws_spectate(ws):
     while spectator.active and transport.is_connected:
         threading.Event().wait(0.5)
     spectator.active = False
+    _broadcast_spectator_count(room)
 
 
 if __name__ == "__main__":
