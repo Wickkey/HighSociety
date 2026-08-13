@@ -687,6 +687,21 @@ button.secondary.standalone { margin-top: 0.9rem; display: inline-block; }
   margin: 0.6rem 0;
 }
 
+/* Persistent card-type name, always visible for as long as this card is up
+   for auction -- unlike the event-toast strip above it (transient,
+   fades after each RAISE/PASS/etc.), this doesn't go away, so a player
+   returning their attention mid-bidding-war can still tell what's actually
+   being auctioned without reopening the ⓘ popover or catching the
+   original "New auction: X" toast before it faded. */
+.auction-card-type {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent-strong);
+  min-height: 1em;
+}
+
 /* ---------------- transient event toast (RAISE/PASS/BUY/etc.) ----------------
    A reserved strip above the card, not an overlay on top of it — the
    "shared game state" underneath (card, bid, whose turn) never dims or

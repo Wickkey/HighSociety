@@ -82,6 +82,14 @@ function describeCard(card) {
   return names[card.type] || card.type;
 }
 
+// Just the type name, no value/effect -- describeCard()'s "(9)"/"(×2)" is
+// redundant here since the card face right below already shows that part.
+function cardTypeName(card) {
+  const names = { Painting: 'Painting', PrestigeCard: 'Prestige Card',
+    FauxPas: 'Faux Pas', Passe: 'Passe', Scandale: 'Scandale' };
+  return names[card.type] || card.type;
+}
+
 // Color coding is deliberately just green-vs-not: Prestige and Scandale are
 // the two actual "green cards" (see is_green / the green_card_limit rule),
 // so only they get real green — every other card shares one neutral tone
@@ -1876,6 +1884,8 @@ function renderAuctionPanel(isSpectator) {
     void bidEl.offsetWidth; // restart the animation even if it's already mid-play
     bidEl.classList.add('bump');
   }
+
+  $(`${prefix}auction-card-type`).textContent = game.card ? cardTypeName(game.card) : '';
 
   const cardContainer = $(`${prefix}auction-card`);
   cardContainer.innerHTML = '';
