@@ -659,7 +659,7 @@ async function onHomeLinkClick() {
   const midGame = isActivelyPlayingLiveGame();
   if (midGame) {
     const ok = await confirmDialog(
-      'Leave this game and go back to the home screen? Your seat stays open to rejoin from this device.',
+      'Leave this game? You can rejoin from this device later.',
       'Leave',
     );
     if (!ok) return;
