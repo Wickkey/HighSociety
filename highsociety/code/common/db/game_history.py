@@ -92,9 +92,26 @@ def ensure_schema() -> None:
     process start, which matters because it needs to run identically whether
     the app is started directly (`python3 web_server.py`) or imported fresh
     by each of gunicorn's own worker processes in production.
+
+    Announces its outcome either way (configured-and-ready, configured-but-
+    failed, or not configured at all) via a plain print() — deliberately
+    not just LoggingManager, which writes to a local log file a hosting
+    platform's dashboard typically never surfaces (Render et al. only
+    capture stdout/stderr). Without this, a deployment that forgot to set
+    DATABASE_URL in its host's dashboard (only a local .env file gets
+    picked up automatically — see web_server.py's load_dotenv() call)
+    silently recorded nothing, with zero signal anywhere that it was ever
+    supposed to. That's exactly what happened in production here: real
+    games went unrecorded for days with no error, no warning, nothing that
+    would even suggest checking — confirmed by querying the database
+    directly and finding only local test data, none of the real games
+    actually played on the live site.
     """
     global _schema_ready
-    if not is_configured() or _schema_ready:
+    if not is_configured():
+        print("game_history: DATABASE_URL not set -- game history logging is DISABLED.")
+        return
+    if _schema_ready:
         return
     with _schema_lock:
         if _schema_ready:
@@ -106,7 +123,9 @@ def ensure_schema() -> None:
                 for statement in _SCHEMA_STATEMENTS:
                     cur.execute(statement)
             _schema_ready = True
+            print("game_history: DATABASE_URL configured, schema ready -- game history logging is ACTIVE.")
         except Exception as e:  # noqa: BLE001 — a DB hiccup at startup must never crash the app
+            print(f"game_history: DATABASE_URL is set but schema setup FAILED, game history logging is DISABLED: {e}")
             LoggingManager.warning(f"game_history.ensure_schema failed, game history disabled: {e}")
         finally:
             if conn is not None:
