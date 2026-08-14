@@ -14,6 +14,7 @@ from highsociety.code.gamecore.components_module.status_card import StatusCard
 from highsociety.code.gamecore.components_module.painting import Painting
 from highsociety.code.gamecore.game_manager.disgrace_settlement import DisgraceAuctionSettlement, ForfeitSettlement
 from highsociety.code.gamecore.game_manager.auction_information import AuctionRecord, summarize_card
+from highsociety.code.gamecore.game_manager.auction_history import AuctionHistory
 from highsociety.code.gamecore.game_manager.turn_clock import TurnClock
 
 # Distinguishes "turn_duration not passed at all" (use HSConfig.json's
@@ -51,7 +52,8 @@ class PlayGame():
     """
     def __init__(self, players: list[BasePlayer], spectators: list[NetworkSpectator] = None, mode = 'cli', game_id: str = None,
                  disgrace_settlement: DisgraceAuctionSettlement = None, seed: Optional[int] = None,
-                 turn_duration: Optional[float] = _TURN_DURATION_UNSET):
+                 turn_duration: Optional[float] = _TURN_DURATION_UNSET,
+                 auction_history: Optional[AuctionHistory] = None):
         """
         seed: if given, seeds the RNG before anything random happens (deck
         shuffle here, then player shuffle / starting-player pick in
@@ -64,6 +66,11 @@ class PlayGame():
         play and network_server.py get. Pass an explicit value (including
         None) to override that per-game, e.g. web_server.py letting a host
         pick a per-move timer from the lobby form.
+
+        auction_history: an AuctionHistory instance to keep refreshed after
+        every turn (see _record_auction_history_snapshot), or None to skip
+        entirely — CLI/network_server.py callers that have no use for it
+        today just omit it, at zero cost.
         """
         self.players = players
         self.spectators = spectators
@@ -76,6 +83,7 @@ class PlayGame():
 
         self.game_state = "initialized"
         self.auction_rounds = []
+        self.auction_history = auction_history
         self.current_auction = None
         # Just enough live state for a reconnecting player's client to catch
         # up immediately (see web_server.py's reconnect handling and
@@ -244,6 +252,14 @@ class PlayGame():
                 "current_bid": [c.value for c in player.current_money_card_bids],
             },
         )
+
+    def _record_auction_history_snapshot(self) -> None:
+        """Refreshes self.auction_history (if one was passed in) with every
+        player's current state — see normal_card_auction/disgrace_card_auction
+        and handle_faux_pas_penalty for the call sites, one per resolved
+        turn/outcome. A no-op when no AuctionHistory was configured."""
+        if self.auction_history is not None:
+            self.auction_history.record_turn(self.players)
 
     def _finalize_auction(self, winner_id: int, status_card: StatusCard, max_bid: int):
         if winner_id != -1:
@@ -489,6 +505,8 @@ class PlayGame():
                     # Invalid / repeated bid
                     pass
 
+                self._record_auction_history_snapshot()
+
                 if num_players_in_auction <= 1:
                     break
 
@@ -510,6 +528,7 @@ class PlayGame():
         record.cards_spent = {p.username: [c.value for c in p.current_money_card_bids] for p in self.players}
         self.auction_rounds.append(record)
         self._broadcast_auction_result(record)
+        self._record_auction_history_snapshot()
 
         # Reset auction state
         for player in self.players:
@@ -580,6 +599,7 @@ class PlayGame():
                     record.add_event(player.username, "quit")
                     self.host.send_message(f"❌ {player.username} quit.")
                     self._broadcast_auction_update("quit", status_card, player=player.username, max_bid=max_bid)
+                    self._record_auction_history_snapshot()
                     break
                 current_player_id = self.get_next_player_id(current_player_id)
                 continue
@@ -596,6 +616,7 @@ class PlayGame():
                     record.add_event(player.username, cmd)
                     self.host.send_message(f"💢 {player.username} passed and takes the disgrace card!")
                     self._broadcast_auction_update(cmd, status_card, player=player.username, max_bid=max_bid)
+                    self._record_auction_history_snapshot()
                     break
                 elif cmd == "quit":
                     # quitting also makes them lose the disgrace card (treated same as pass)
@@ -604,6 +625,7 @@ class PlayGame():
                     record.add_event(player.username, "quit")
                     self.host.send_message(f"❌ {player.username} quit.")
                     self._broadcast_auction_update("quit", status_card, player=player.username, max_bid=max_bid)
+                    self._record_auction_history_snapshot()
                     break
                 else:
                     # unexpected string (shouldn't happen) — ask again in next loop
@@ -619,6 +641,7 @@ class PlayGame():
                 self.host.send_message(f"💰 {player.username} bid now {max_bid}.")
                 self._broadcast_auction_update("bid", status_card, player=player.username, max_bid=max_bid,
                                                 cards=[c.value for c in player.current_money_card_bids])
+                self._record_auction_history_snapshot()
                 # move to next player
                 current_player_id = self.get_next_player_id(current_player_id)
                 continue
@@ -665,6 +688,7 @@ class PlayGame():
         record.cards_spent = {p.username: [c.value for c in p.current_money_card_bids] for p in self.players}
         self.auction_rounds.append(record)
         self._broadcast_auction_result(record)
+        self._record_auction_history_snapshot()
 
         # Reset auction state for all players
         for player in self.players:
@@ -717,6 +741,7 @@ class PlayGame():
                 data={"event": "faux_pas_discard", "player": player.username, "discarded_value": chosen.value},
             )
             self._send_player_state(player)
+            self._record_auction_history_snapshot()
             return True
 
         return False
@@ -845,6 +870,7 @@ class PlayGame():
         # (read-only/greyed) from the very start instead.
         for player in self.players:
             self._send_player_state(player)
+        self._record_auction_history_snapshot()
 
         num_green_cards = 0
         starting_player_id = random.randint(0, len(self.players) - 1) # random starting player id

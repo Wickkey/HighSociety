@@ -41,6 +41,7 @@ from highsociety.code.common.utils.utility import (
     get_game_setting_configurations,
     validate_player_count,
 )
+from highsociety.code.gamecore.game_manager.auction_history import AuctionHistory
 from highsociety.code.gamecore.game_manager.auction_information import summarize_card
 from highsociety.code.gamecore.game_manager.gameplay import PlayGame
 from highsociety.code.gamecore.network.transport import WebSocketTransport
@@ -122,6 +123,12 @@ class GameRoom:
         # the host picked.
         self.reveal_cards = reveal_cards
         self.show_logs = show_logs
+        # The "universal source of truth" for this room's current game state
+        # (each player's money cards/paintings/Faux Pas status), refreshed
+        # after every turn by PlayGame — see auction_history.py. One per
+        # room, not per rematch: _maybe_start_rematch reuses it as-is, so a
+        # rematch's early turns aren't missing the context of who just won.
+        self.auction_history = AuctionHistory()
 
         self.players = create_bot_players(bot_mix, bot_think_time) if bot_mix else []
         self.human_seats = seats - len(self.players)
@@ -175,7 +182,8 @@ class GameRoom:
             started_at = datetime.datetime.now(datetime.timezone.utc)
             game = PlayGame(players=self.players, spectators=self.spectators,
                              mode='network', game_id=self.game_id, seed=self.seed,
-                             turn_duration=self.turn_time_limit)
+                             turn_duration=self.turn_time_limit,
+                             auction_history=self.auction_history)
             self.game = game
             # A player who joined before someone else otherwise has no way
             # to know that other seat exists until some in-auction event
