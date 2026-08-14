@@ -255,7 +255,7 @@ class PlayGame():
             return None
         return time.time() + self.__TURN_DURATION
 
-    def _pace_toast_event(self) -> None:
+    def _pace_toast_event(self, consume: bool = True) -> None:
         """
         Floors the gap between consecutive toast-worthy broadcasts at
         MIN_TOAST_GAP_SECONDS, matching the web frontend's real toast
@@ -267,12 +267,20 @@ class PlayGame():
         auction's result immediately followed by the next card's green-
         reveal/auction_start) — bumping bot think_time alone can't fix
         that, since no bot decision happens in between those broadcasts.
+
+        consume=False waits out any recent burst without stamping
+        _last_toast_broadcast_at again — for a call site (see
+        _handle_player_turn) that has no broadcast of its own to justify
+        resetting the clock. Consuming there anyway would silently "spend"
+        a pacing slot for nothing, forcing the *next* real broadcast to eat
+        an extra, unearned wait it never should have needed.
         """
         now = time.time()
         wait = self._last_toast_broadcast_at + self.MIN_TOAST_GAP_SECONDS - now
         if wait > 0:
             time.sleep(wait)
-        self._last_toast_broadcast_at = time.time()
+        if consume:
+            self._last_toast_broadcast_at = time.time()
 
 
     def _handle_player_turn(self, player: BasePlayer, max_bid: int, status_card: StatusCard) -> Union[int,str]:
@@ -331,7 +339,16 @@ class PlayGame():
             # better). Only the deadline computation waits — the PLAYER_MOVE
             # itself was already sent above and reflects the real game
             # state either way.
-            self._pace_toast_event()
+            #
+            # consume=False: this call has no broadcast of its own, so it
+            # must not stamp _last_toast_broadcast_at — doing so used to
+            # make this player's own next real broadcast (their bid/pass)
+            # eat an extra, unearned ~1.8s wait, since the pacing clock
+            # would think a toast had just fired when none actually had.
+            # That extra stall, on every single turn in a timed room, was
+            # exactly why toasts felt inconsistent only when a clock was
+            # running.
+            self._pace_toast_event(consume=False)
         turn_expires_at = self._compute_deadline()
 
         while True:
