@@ -20,7 +20,16 @@ from highsociety.code.gamecore.game_manager.auction_history import AuctionHistor
 
 class BotDecisionService:
     def decide_bid(self, auction_history: AuctionHistory, event_log: list[dict], live_state: dict,
-                    username: str, config: MCTSConfig, rng: random.Random) -> Union[list[int], str]:
+                    username: str, config: MCTSConfig, rng: random.Random,
+                    difficulty: str = "custom") -> Union[list[int], str]:
+        """
+        difficulty ("easy"/"medium"/"hard", or "custom" for an ad hoc
+        MCTSBot) is unused here -- this base implementation always computes
+        locally, in-process. It exists on the interface so a subclass that
+        DOES care (e.g. WorkerPoolBotDecisionService, routing to one of
+        several per-difficulty worker pools) can, without every other
+        implementation needing to know or care about pools at all.
+        """
         return decide_bid(auction_history, event_log, live_state, username, config, rng)
 
     def decide_faux_pas_discard(self, my_status_cards: list[dict]) -> Optional[int]:

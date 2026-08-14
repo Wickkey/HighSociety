@@ -106,6 +106,11 @@ class TestDifficultyPresetsAndFactories:
     def test_factory_subclasses_use_the_matching_preset(self, cls, difficulty):
         instance = cls(name="Bot", username="bot")
         assert instance._config == DIFFICULTY_PRESETS[difficulty]
+        assert instance._difficulty == difficulty  # used to route to the right worker pool, if any
+
+    def test_direct_mcts_bot_construction_defaults_to_custom_difficulty(self):
+        instance = MCTSBot(name="Bot", username="bot", config=_TINY_CONFIG)
+        assert instance._difficulty == "custom"
 
     def test_factory_subclasses_match_create_bot_players_call_signature(self):
         # highsociety/code/ai/__init__.py's create_bot_players always calls

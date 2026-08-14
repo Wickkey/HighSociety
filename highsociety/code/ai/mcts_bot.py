@@ -37,18 +37,27 @@ _process_rng = random.Random()
 
 
 class MCTSBot(BasePlayer):
-    def __init__(self, name: str, username: str, config: MCTSConfig, think_time: float = 0) -> None:
+    def __init__(self, name: str, username: str, config: MCTSConfig, think_time: float = 0,
+                 difficulty: str = "custom") -> None:
         """
         think_time: seconds to pause before returning a decision from
         get_bid(), same meaning as every other bot's — purely for a human-
         watchable simulation; the search itself has no use for it (a fresh
         SimState-based search is fast enough that "how long to think" is
         entirely a UX knob, not a real compute budget).
+
+        difficulty: which named DIFFICULTY_PRESETS entry this is ("easy"/
+        "medium"/"hard") — Easy/Medium/HardMCTSBot below always pass their
+        real name; only matters for routing to the right worker pool if
+        default_decision_service is a WorkerPoolBotDecisionService (see
+        decision_service.py) — the default "custom" is fine for direct
+        MCTSBot construction with an ad hoc config (tests, dev tools).
         """
         super().__init__(name, username)
         self.active = True
         self._config = config
         self._think_time = think_time
+        self._difficulty = difficulty
 
     def send_message(self, message: str, message_type: str = None, created_at: float = None, **kwargs) -> None:
         # Nothing to track -- get_current_auction_history()/
@@ -68,6 +77,7 @@ class MCTSBot(BasePlayer):
             username=self.username,
             config=self._config,
             rng=_process_rng,
+            difficulty=self._difficulty,
         )
 
     def choose_painting_to_discard(self) -> Optional[Painting]:
@@ -90,14 +100,17 @@ DIFFICULTY_PRESETS = {
 
 class EasyMCTSBot(MCTSBot):
     def __init__(self, name: str, username: str, think_time: float = 0) -> None:
-        super().__init__(name, username, config=DIFFICULTY_PRESETS["easy"], think_time=think_time)
+        super().__init__(name, username, config=DIFFICULTY_PRESETS["easy"], think_time=think_time,
+                          difficulty="easy")
 
 
 class MediumMCTSBot(MCTSBot):
     def __init__(self, name: str, username: str, think_time: float = 0) -> None:
-        super().__init__(name, username, config=DIFFICULTY_PRESETS["medium"], think_time=think_time)
+        super().__init__(name, username, config=DIFFICULTY_PRESETS["medium"], think_time=think_time,
+                          difficulty="medium")
 
 
 class HardMCTSBot(MCTSBot):
     def __init__(self, name: str, username: str, think_time: float = 0) -> None:
-        super().__init__(name, username, config=DIFFICULTY_PRESETS["hard"], think_time=think_time)
+        super().__init__(name, username, config=DIFFICULTY_PRESETS["hard"], think_time=think_time,
+                          difficulty="hard")
