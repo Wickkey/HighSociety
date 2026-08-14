@@ -27,15 +27,6 @@ from highsociety.code.gamecore.components_module.painting import Painting
 from highsociety.code.gamecore.game_manager.auction_information import summarize_card
 from highsociety.code.gamecore.player.player import BasePlayer
 
-# A dedicated Random instance per decision, rather than the `random` module's
-# shared global state — gameplay.py calls random.seed(...) for reproducible
-# games (see PlayGame.__init__), and drawing from the same global generator
-# here would both consume from that sequence (breaking reproducibility for
-# tests/replays) and make this bot's own sampling accidentally deterministic
-# across a whole seeded game instead of independently random each decision.
-_process_rng = random.Random()
-
-
 class MCTSBot(BasePlayer):
     def __init__(self, name: str, username: str, config: MCTSConfig, think_time: float = 0,
                  difficulty: str = "custom") -> None:
@@ -68,6 +59,16 @@ class MCTSBot(BasePlayer):
 
     def get_bid(self, timeout: Optional[float] = None) -> Union[list[int], str, None]:
         self._pace_think_time()
+        # A fresh Random() per call, not a shared instance reused across
+        # calls: this may cross a process boundary now (see
+        # WorkerPoolBotDecisionService) -- pickling a shared rng sends a
+        # snapshot of its state, and a worker's own mutations to its copy
+        # never propagate back, so reusing one instance across pooled calls
+        # would silently make every pooled decision draw the exact same
+        # "random" shuffle. A fresh instance sidesteps that entirely (and
+        # doesn't touch gameplay.py's own seeded `random` module state,
+        # same reasoning as before -- see PlayGame.__init__'s random.seed()).
+        rng = random.Random()
         # decide_bid() already returns "pass" or a [value] list -- BotDecisionService
         # just passes that straight through, nothing to re-wrap here.
         return default_decision_service.decide_bid(
@@ -76,7 +77,7 @@ class MCTSBot(BasePlayer):
             live_state=self.get_live_auction_state(),
             username=self.username,
             config=self._config,
-            rng=_process_rng,
+            rng=rng,
             difficulty=self._difficulty,
         )
 
