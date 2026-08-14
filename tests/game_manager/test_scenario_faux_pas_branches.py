@@ -45,7 +45,7 @@ def test_branch_a_bob_takes_faux_pas_and_discards_his_own_painting(make_player):
     game.play_game()
 
     assert bob.holds_faux_pas is True
-    assert bob.has_discarded_card is False  # BasePlayer never flips this back; discard already happened
+    assert bob.has_discarded_card is True  # discard_painting_card() flips this on a real discard
     # bob won Painting(3) and Painting(5) before FauxPas, discards the lower one (3) first
     assert 3 not in [c.value for c in bob.status_cards]
     assert 5 in [c.value for c in bob.status_cards]

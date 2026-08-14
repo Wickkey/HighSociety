@@ -101,3 +101,29 @@ def test_discard_painting_card_missing_value_returns_none(player):
     player.add_status_card(Painting(value=5))
     assert player.discard_painting_card(999) is None
     assert len(player.status_cards) == 1
+
+
+def test_discard_painting_card_flips_has_discarded_card(player):
+    player.add_status_card(FauxPas())
+    player.add_status_card(Painting(value=5))
+    assert player.has_discarded_card is False
+
+    player.discard_painting_card(5)
+    assert player.has_discarded_card is True
+
+
+def test_discard_painting_card_missing_value_does_not_flip_has_discarded_card(player):
+    player.add_status_card(FauxPas())
+    player.add_status_card(Painting(value=5))
+    player.discard_painting_card(999)  # no matching card -- nothing actually discarded
+    assert player.has_discarded_card is False
+
+
+def test_a_new_faux_pas_resets_has_discarded_card(player):
+    player.add_status_card(FauxPas())
+    player.add_status_card(Painting(value=5))
+    player.discard_painting_card(5)
+    assert player.has_discarded_card is True
+
+    player.add_status_card(FauxPas())  # picked up again -- a fresh discard obligation
+    assert player.has_discarded_card is False

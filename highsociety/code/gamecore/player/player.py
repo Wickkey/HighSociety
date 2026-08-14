@@ -248,6 +248,7 @@ class BasePlayer(BotInterface):
                 LoggingManager.info(
                     f"Discarded {status_card} from Player {self.__username}"
                 )
+                self.__has_discarded_card = True
                 self.__calculate_points() # recalculate points after discarding a painting card
                 return status_card
 
