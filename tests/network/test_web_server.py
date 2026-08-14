@@ -738,7 +738,13 @@ def test_player_can_reconnect_after_disconnecting_mid_game(running_web_server):
         _ws_url(port, f"/ws?room={room_code}&rejoin_token={token}"), mover_name,
     )
     reconnected.handshake()
-    assert mover_player.active, "should have stayed active throughout — this reconnect is well within the grace period"
+    # active only flips True in finish_reconnect(), called *after* the
+    # catch-up state is fully sent (see networkplayer.py) -- deliberately
+    # after IDENTIFY_SUCCESS, which this client just received, so a brief
+    # gap here is correct, not a bug (closes a real race where the game
+    # thread could otherwise start writing fresh messages to this player's
+    # transport concurrently with the still-in-flight catch-up sequence).
+    _wait_until_active(mover_player, "should have stayed active throughout — this reconnect is well within the grace period")
     reconnected.start()  # start collecting: the catch-up messages arrive right after IDENTIFY_SUCCESS
 
     deadline = time.time() + 5
@@ -832,7 +838,7 @@ def test_reconnect_within_grace_period_on_a_timed_room_produces_no_quit_broadcas
         _ws_url(port, f"/ws?room={room_code}&rejoin_token={token}"), mover_name,
     )
     reconnected.handshake()
-    assert mover_player.active, "should have stayed active -- well within the timed room's grace window"
+    _wait_until_active(mover_player, "should have stayed active -- well within the timed room's grace window")
 
     for name, client in clients.items():
         if name != mover_name:
@@ -850,6 +856,22 @@ def test_reconnect_within_grace_period_on_a_timed_room_produces_no_quit_broadcas
     for name, client in clients.items():
         if name != mover_name:
             client.close()
+
+
+def _wait_until_active(player, message, timeout=2):
+    """
+    NetworkPlayer.finish_reconnect() (see networkplayer.py) only flips
+    active=True once the reconnect handler is done sending catch-up state --
+    strictly after the client-visible IDENTIFY_SUCCESS a test's own
+    .handshake() call already returned from. Polls briefly rather than
+    asserting instantaneously, since that small gap is now the correct,
+    intentional behavior (it's what closes a real race between the
+    reconnect handler's own sends and the game thread's).
+    """
+    deadline = time.time() + timeout
+    while time.time() < deadline and not player.active:
+        threading.Event().wait(0.02)
+    assert player.active, message
 
 
 def _drain_once(client):
@@ -959,7 +981,7 @@ def test_reconnect_after_grace_period_still_quits_then_recovers_via_player_recon
         _ws_url(port, f"/ws?room={room_code}&rejoin_token={token}"), mover_name,
     )
     reconnected.handshake()
-    assert mover_player.active, "reattach() should mark the player active again"
+    _wait_until_active(mover_player, "finish_reconnect() should mark the player active again")
 
     deadline = time.time() + 5
     found = False
