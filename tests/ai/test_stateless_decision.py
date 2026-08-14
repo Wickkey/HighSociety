@@ -40,7 +40,7 @@ class TestDecideBid:
 
         action = decide_bid(history, event_log=[], live_state=_live_state(Painting(value=5), max_bid=100),
                              username="bot", config=_TINY_CONFIG, rng=random.Random(1))
-        assert action == "pass" or (isinstance(action, list) and len(action) == 1)
+        assert action == "pass" or (isinstance(action, list) and len(action) == 1 and isinstance(action[0], int))
 
     def test_reconstructs_an_opponents_remaining_hand_exactly_from_the_snapshot(self):
         bot = PassBot(name="Bot", username="bot")
