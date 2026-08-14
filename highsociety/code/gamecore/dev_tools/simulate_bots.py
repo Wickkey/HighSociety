@@ -14,6 +14,7 @@ Usage:
 
 import argparse
 
+from highsociety.code.gamecore.game_manager.auction_history import AuctionHistory
 from highsociety.code.gamecore.game_manager.gameplay import PlayGame
 from highsociety.code.ai import BOT_TYPES, create_bot_players
 
@@ -36,7 +37,7 @@ def main():
         parser.error(f"Unknown bot type(s) {sorted(unknown)}; choose from {list(BOT_TYPES)}")
 
     players = create_bot_players(bot_mix, think_time=args.think_time)
-    game = PlayGame(players=players, mode="cli", seed=args.seed)
+    game = PlayGame(players=players, mode="cli", seed=args.seed, auction_history=AuctionHistory())
     game.play_game()
 
 

@@ -14,6 +14,7 @@ import sys
 from tabnanny import check
 import time
 from highsociety.code.gamecore.player.networkplayer import NetworkPlayer
+from highsociety.code.gamecore.game_manager.auction_history import AuctionHistory
 from highsociety.code.gamecore.game_manager.gameplay import PlayGame
 from highsociety.code.common.utils.utility import get_all_configurations, validate_player_count, generate_game_id
 from highsociety.code.common.logger_module.logger.logging_manager import LoggingManager, LogType
@@ -429,7 +430,8 @@ def start_server(host='0.0.0.0', port=8888, num_players=2, seed=None, record_pat
         # Create and start game
         heartbeat_monitor_thread = threading.Thread(target=players_heartbeat_monitor_thread, args=(players, 120, 5), daemon=True)
         heartbeat_monitor_thread.start()
-        game = PlayGame(players=game_players, spectators=spectators, mode='network', game_id=game_id, seed=game_seed)
+        game = PlayGame(players=game_players, spectators=spectators, mode='network', game_id=game_id, seed=game_seed,
+                         auction_history=AuctionHistory())
         game.play_game()
         
         # Close all real player connections (bots have no socket to close)
