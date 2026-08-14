@@ -21,7 +21,7 @@ for each decision (mcts/simulation.py's sample_future_deck).
 import random
 from typing import Optional, Union
 
-from highsociety.code.ai.mcts.decision_service import default_decision_service
+from highsociety.code.ai.mcts import decision_service
 from highsociety.code.ai.mcts.search import MCTSConfig
 from highsociety.code.gamecore.components_module.painting import Painting
 from highsociety.code.gamecore.game_manager.auction_information import summarize_card
@@ -71,7 +71,19 @@ class MCTSBot(BasePlayer):
         rng = random.Random()
         # decide_bid() already returns "pass" or a [value] list -- BotDecisionService
         # just passes that straight through, nothing to re-wrap here.
-        return default_decision_service.decide_bid(
+        #
+        # decision_service.default_decision_service, not a `from ... import
+        # default_decision_service` name bound once at import time: a
+        # `from` import captures whatever the module's attribute pointed to
+        # at THAT moment, and never sees a later reassignment (see
+        # web_server.py's BOT_POOL_SIZE wiring, which swaps this attribute
+        # after mcts_bot.py has already been imported) -- looking it up
+        # through the module on every call is what makes that swap actually
+        # take effect. Caught live: with a stale binding, BOT_POOL_SIZE
+        # silently did nothing -- no worker processes ever spawned, no
+        # error either, since the code just kept quietly calling the
+        # original in-process BotDecisionService instead.
+        return decision_service.default_decision_service.decide_bid(
             auction_history=self.get_current_auction_history(),
             event_log=self.get_auction_history(),
             live_state=self.get_live_auction_state(),
@@ -83,7 +95,7 @@ class MCTSBot(BasePlayer):
 
     def choose_painting_to_discard(self) -> Optional[Painting]:
         my_status_cards = [summarize_card(c) for c in self.status_cards]
-        value = default_decision_service.decide_faux_pas_discard(my_status_cards)
+        value = decision_service.default_decision_service.decide_faux_pas_discard(my_status_cards)
         if value is None:
             return None
         return next(c for c in self.status_cards if isinstance(c, Painting) and c.value == value)

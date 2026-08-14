@@ -21,6 +21,7 @@ import json
 import os
 import random
 import secrets
+import signal
 import sys
 import threading
 import time
@@ -89,6 +90,17 @@ if _BOT_POOL_SIZE > 0:
     decision_service.default_decision_service = WorkerPoolBotDecisionService(pool_size=_BOT_POOL_SIZE)
     print(f"BOT_POOL_SIZE={_BOT_POOL_SIZE} -- MCTS bot decisions run in worker processes, "
           f"{_BOT_POOL_SIZE} per difficulty.")
+    # concurrent.futures.process registers its own atexit hook to shut down
+    # every ProcessPoolExecutor's workers -- but atexit hooks only run on a
+    # *normal* interpreter exit (sys.exit(), an uncaught exception, or the
+    # main thread finishing), not a bare SIGTERM with no handler installed,
+    # which is the OS's default action and skips Python cleanup entirely.
+    # Confirmed empirically: a plain `kill -TERM` on this process left its
+    # worker subprocesses running as orphans. Turning SIGTERM into a normal
+    # sys.exit() here doesn't change gunicorn's own shutdown behavior (it
+    # still just wants this process to exit) -- it only makes that exit
+    # actually clean up the worker processes instead of orphaning them.
+    signal.signal(signal.SIGTERM, lambda signum, frame: sys.exit(0))
 
 # The lobby form only ever offers these as a preset <select> (see
 # index.html's #host-turn-time) — no free-text entry — so the server
