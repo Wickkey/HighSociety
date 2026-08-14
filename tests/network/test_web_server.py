@@ -290,6 +290,14 @@ def test_add_bot_fills_an_empty_seat_and_can_start_the_game(running_web_server):
     )
     assert bad_limit.status_code == 400
 
+    # The lobby form only ever offers a fixed set of presets (see
+    # _TURN_TIME_PRESETS) -- anything else, even a plausible-looking custom
+    # value, is rejected rather than silently accepted.
+    non_preset = client.post(
+        "/api/create_game", json={"seats": 2, "bot_mix": ["pass"], "turn_time_limit": 45}
+    )
+    assert non_preset.status_code == 400
+
 
 def test_player_receives_a_live_countdown_when_the_host_sets_a_turn_time_limit(running_web_server):
     port = running_web_server
@@ -776,13 +784,14 @@ def test_reconnect_within_grace_period_on_a_timed_room_produces_no_quit_broadcas
     Pins the timed-room grace formula (turn_time_limit / 5, see
     _compute_disconnect_grace_seconds) end-to-end, not just the untimed
     default already covered by test_player_can_reconnect_after_disconnecting_mid_game
-    above. turn_time_limit=5 -> grace=1.0s; reconnecting well inside that
-    should behave identically to the untimed case: active never flips
-    False, no quit is ever broadcast.
+    above. turn_time_limit=15 (the shortest preset the lobby form actually
+    offers -- see _TURN_TIME_PRESETS) -> grace=3.0s; reconnecting well
+    inside that should behave identically to the untimed case: active never
+    flips False, no quit is ever broadcast.
     """
     port = running_web_server
     room_code = web_server.app.test_client().post(
-        "/api/create_game", json={"seats": 3, "bot_mix": [], "seed": 1, "turn_time_limit": 5}
+        "/api/create_game", json={"seats": 3, "bot_mix": [], "seed": 1, "turn_time_limit": 15}
     ).get_json()["room_code"]
 
     clients = {
@@ -817,7 +826,7 @@ def test_reconnect_within_grace_period_on_a_timed_room_produces_no_quit_broadcas
     room = web_server._rooms[room_code]
     mover_player = next(p for p in room.players if p.username == mover_name)
 
-    # Reconnect well inside the 1.0s grace window.
+    # Reconnect well inside the 3.0s grace window.
     threading.Event().wait(0.3)
     reconnected = ReconnectingWSClient(
         _ws_url(port, f"/ws?room={room_code}&rejoin_token={token}"), mover_name,
@@ -865,7 +874,7 @@ def _drain_once(client):
 
 def test_reconnect_after_grace_period_still_quits_then_recovers_via_player_reconnected(running_web_server):
     """
-    The slow-reconnect path: once the grace window (1.0s here) genuinely
+    The slow-reconnect path: once the grace window (3.0s here) genuinely
     runs out with no reconnect, behavior must fall back to exactly today's
     pre-feature shape -- a real quit fires, `active` goes False -- and only
     then does the earlier-shipped player_reconnected broadcast (see
@@ -885,7 +894,7 @@ def test_reconnect_after_grace_period_still_quits_then_recovers_via_player_recon
     """
     port = running_web_server
     room_code = web_server.app.test_client().post(
-        "/api/create_game", json={"seats": 3, "bot_mix": [], "seed": 1, "turn_time_limit": 5}
+        "/api/create_game", json={"seats": 3, "bot_mix": [], "seed": 1, "turn_time_limit": 15}
     ).get_json()["room_code"]
 
     clients = {
@@ -921,7 +930,7 @@ def test_reconnect_after_grace_period_still_quits_then_recovers_via_player_recon
     mover_player = next(p for p in room.players if p.username == mover_name)
     others = [c for name, c in clients.items() if name != mover_name]
 
-    # Wait out the 1.0s grace window with no reconnect, passively draining
+    # Wait out the 3.0s grace window with no reconnect, passively draining
     # the other two the whole time so nothing they receive gets lost.
     deadline = time.time() + 5
     while time.time() < deadline and mover_player.active:

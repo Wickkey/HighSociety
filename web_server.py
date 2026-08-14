@@ -76,6 +76,13 @@ game_history.ensure_schema()
 GA_MEASUREMENT_ID = os.environ.get("GA_MEASUREMENT_ID")
 
 
+# The lobby form only ever offers these as a preset <select> (see
+# index.html's #host-turn-time) — no free-text entry — so the server
+# rejects anything else here too rather than silently accepting whatever a
+# modified/non-browser client sends.
+_TURN_TIME_PRESETS = frozenset({15.0, 30.0, 60.0, 90.0, 120.0})
+
+
 def _compute_disconnect_grace_seconds(turn_time_limit: Optional[float]) -> float:
     """
     How long NetworkPlayer.get_bid()/choose_painting_to_discard() should wait
@@ -474,6 +481,8 @@ def api_create_game():
             return jsonify({"error": "turn_time_limit must be a number"}), 400
         if turn_time_limit <= 0:
             turn_time_limit = None  # 0/blank means "no limit", not "instant timeout"
+        elif turn_time_limit not in _TURN_TIME_PRESETS:
+            return jsonify({"error": f"turn_time_limit must be one of {sorted(_TURN_TIME_PRESETS)} or omitted"}), 400
 
     reveal_cards = body.get("reveal_cards", True)
     show_logs = body.get("show_logs", True)

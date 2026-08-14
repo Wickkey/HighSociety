@@ -119,10 +119,17 @@
           <input type="number" id="host-seats" min="2" max="5" value="3">
         </label>
 
-        <label>Time per move (seconds, optional)
-          <input type="number" id="host-turn-time" min="0" step="1" placeholder="no limit">
+        <label>Time per move
+          <select id="host-turn-time">
+            <option value="">No limit</option>
+            <option value="15">15 seconds</option>
+            <option value="30">30 seconds</option>
+            <option value="60">60 seconds</option>
+            <option value="90">90 seconds</option>
+            <option value="120">2 minutes</option>
+          </select>
         </label>
-        <p class="hint">Leave blank for no timer. If set, each player gets this many seconds per bid/pass before they're auto-passed.</p>
+        <p class="hint">If set, each player gets this many seconds per bid/pass before they're auto-passed.</p>
 
         <fieldset class="bot-mix">
           <legend>Who can join?</legend>
