@@ -14,6 +14,7 @@ from highsociety.code.gamecore.components_module.status_card import StatusCard
 from highsociety.code.gamecore.components_module.painting import Painting
 from highsociety.code.gamecore.game_manager.disgrace_settlement import DisgraceAuctionSettlement, ForfeitSettlement
 from highsociety.code.gamecore.game_manager.auction_information import AuctionRecord, summarize_card
+from highsociety.code.gamecore.game_manager.turn_clock import TurnClock
 
 # Distinguishes "turn_duration not passed at all" (use HSConfig.json's
 # time_per_move, today null/no limit — the CLI/network_server.py behavior,
@@ -116,7 +117,13 @@ class PlayGame():
         else:
             LoggingManager.info("Invalid Host. Default host: cli")
             self.host = CLIHost()
-        
+
+    @property
+    def turn_duration(self) -> Optional[float]:
+        """Seconds per move after resolving _TURN_DURATION_UNSET against
+        HSConfig.json's default (see __init__) — read-only outside this
+        class; TurnClock is what actually turns this into a live deadline."""
+        return self.__TURN_DURATION
 
     def get_auction_history(self) -> list[dict]:
         """
@@ -250,11 +257,6 @@ class PlayGame():
         else:
             self.host.send_message("⚠️ Auction ended. No active bidders left.")
 
-    def _compute_deadline(self):
-        if self.__TURN_DURATION is None:
-            return None
-        return time.time() + self.__TURN_DURATION
-
     def _pace_toast_event(self, consume: bool = True) -> None:
         """
         Floors the gap between consecutive toast-worthy broadcasts at
@@ -349,18 +351,16 @@ class PlayGame():
             # exactly why toasts felt inconsistent only when a clock was
             # running.
             self._pace_toast_event(consume=False)
-        turn_expires_at = self._compute_deadline()
+        clock = TurnClock(self.__TURN_DURATION)
+        clock.start()
 
         while True:
-            if turn_expires_at:
-                remaining_time = turn_expires_at - time.time()
-                if remaining_time <=0:
-                    player.send_message(f"⏳ Time up! Auto pass.", message_type = "PLAYER_INFO")
-                    player.withdraw_bid()
-                    return "pass"
-            else:
-                remaining_time = None
-            
+            remaining_time = clock.remaining()
+            if remaining_time is not None and remaining_time <= 0:
+                player.send_message(f"⏳ Time up! Auto pass.", message_type = "PLAYER_INFO")
+                player.withdraw_bid()
+                return "pass"
+
             # Check if player is still active before getting bid
             if not player.active:
                 player.withdraw_bid()

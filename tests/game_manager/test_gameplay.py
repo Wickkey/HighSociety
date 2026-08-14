@@ -3,6 +3,7 @@ import time
 import pytest
 
 from highsociety.code.gamecore.game_manager.gameplay import PlayGame
+from highsociety.code.gamecore.game_manager.turn_clock import TurnClock
 from highsociety.code.gamecore.components_module.painting import Painting
 from highsociety.code.gamecore.components_module.prestige_card import PrestigeCard
 from highsociety.code.gamecore.components_module.disgrace_card import FauxPas, Passe
@@ -507,19 +508,45 @@ class TestTurnDuration:
     turn_duration lets a caller (e.g. web_server.py, letting a host pick a
     per-move timer in the lobby form) override HSConfig.json's
     game_settings.rules.time_per_move on a per-game basis — see
-    PlayGame.__init__'s _TURN_DURATION_UNSET sentinel.
+    PlayGame.__init__'s _TURN_DURATION_UNSET sentinel. Deadline arithmetic
+    itself is TurnClock's job (see TestTurnClock below) — this class only
+    covers how __TURN_DURATION gets resolved.
     """
 
     def test_default_uses_configured_value_which_is_currently_no_limit(self, make_player):
         game = PlayGame(players=[make_player("A"), make_player("B")], mode="cli")
-        assert game._compute_deadline() is None
+        assert game.turn_duration is None
 
     def test_explicit_turn_duration_overrides_the_config_default(self, make_player):
         game = PlayGame(players=[make_player("A"), make_player("B")], mode="cli", turn_duration=30)
-        deadline = game._compute_deadline()
-        assert deadline is not None
-        assert deadline == pytest.approx(time.time() + 30, abs=1)
+        assert game.turn_duration == 30
 
     def test_explicit_none_disables_the_timer(self, make_player):
         game = PlayGame(players=[make_player("A"), make_player("B")], mode="cli", turn_duration=None)
-        assert game._compute_deadline() is None
+        assert game.turn_duration is None
+
+
+class TestTurnClock:
+    def test_no_duration_never_expires(self):
+        clock = TurnClock(None)
+        clock.start()
+        assert clock.remaining() is None
+        assert not clock.expired()
+
+    def test_remaining_counts_down_from_the_configured_duration(self):
+        clock = TurnClock(30)
+        clock.start()
+        assert clock.remaining() == pytest.approx(30, abs=1)
+        assert not clock.expired()
+
+    def test_expired_once_remaining_hits_zero(self):
+        clock = TurnClock(30)
+        clock.start()
+        clock.expires_at = time.time() - 1  # simulate time having passed
+        assert clock.expired()
+        assert clock.remaining() < 0
+
+    def test_remaining_and_expired_are_none_before_start(self):
+        clock = TurnClock(30)
+        assert clock.remaining() is None
+        assert not clock.expired()
