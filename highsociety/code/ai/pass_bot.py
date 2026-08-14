@@ -1,4 +1,3 @@
-import time
 from typing import Optional, Union
 
 from highsociety.code.gamecore.components_module.painting import Painting
@@ -24,7 +23,7 @@ class PassBot(BasePlayer):
         self._think_time = think_time
 
     def get_bid(self, timeout: Optional[float] = None) -> Union[list[int], str, None]:
-        time.sleep(self._think_time)
+        self._pace_think_time()
         return "pass"
 
     def choose_painting_to_discard(self) -> Optional[Painting]:

@@ -23,7 +23,6 @@ MCTSConfig.determinizations) and combined, rather than assumed away.
 """
 import random
 import re
-import time
 from typing import Optional, Union
 
 from highsociety.code.ai.mcts.policy import capped_greedy_policy
@@ -105,7 +104,7 @@ class MCTSBot(BasePlayer):
             self._current_card_value = int(card_match.group(2))
 
     def get_bid(self, timeout: Optional[float] = None) -> Union[list[int], str, None]:
-        time.sleep(self._think_time)
+        self._pace_think_time()
         state, me_idx = self._build_state()
         action = run_search(state, me_idx, capped_greedy_policy, self._config)
         return "pass" if action == "pass" else [action]

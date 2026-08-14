@@ -1,3 +1,4 @@
+import time
 from abc import ABC, abstractmethod
 from typing import Optional, Union
 from highsociety.code.gamecore.components_module.painting import Painting
@@ -31,6 +32,27 @@ class BotInterface(ABC):
     # in a unit test) — get_auction_history() just reads whatever this
     # currently points to.
     _auction_history_source: list = []
+
+    # Matches PlayGame.MIN_TOAST_GAP_SECONDS / the web frontend's
+    # TOAST_DURATION_MS+fade-out gap (highsociety/web/static/app.js) --
+    # duplicated rather than imported, since gameplay.py imports player
+    # classes, not the other way around. A timed room already gets this
+    # floor for free from PlayGame's own toast pacing; the gap this closes
+    # is routine, non-round-ending bot turns in an UNTIMED room, which
+    # previously had no floor at all beyond whatever --bot-think-time
+    # happened to be set to (0 included) -- every toast-worthy broadcast
+    # there was paced by bot decision speed alone.
+    MIN_THINK_TIME_SECONDS = 1.8
+
+    def _pace_think_time(self) -> None:
+        """
+        Every bot subclass should call this instead of sleeping on its own
+        `_think_time` directly, so the floor above is enforced in exactly
+        one place. Assumes `self._think_time` is set (every current bot
+        constructor sets it) -- falls back to 0 rather than raising if a
+        future one doesn't, since a missing think_time shouldn't be fatal.
+        """
+        time.sleep(max(getattr(self, "_think_time", 0), self.MIN_THINK_TIME_SECONDS))
 
     def get_auction_history(self) -> list[dict]:
         """

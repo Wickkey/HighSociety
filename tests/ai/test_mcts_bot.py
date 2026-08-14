@@ -144,11 +144,14 @@ class TestGetBid:
         # happened with the right delay instead of real elapsed time.
         sleeps = []
         monkeypatch.setattr(time, "sleep", lambda seconds: sleeps.append(seconds))
+        # think_time=0.2 is below BotInterface.MIN_THINK_TIME_SECONDS (1.8) --
+        # every bot's _pace_think_time() floors at that minimum, so 1.8 is
+        # actually what should get slept, not the raw configured value.
         slow_bot = MCTSBot(name="Bot", username="bot", config=_TINY_CONFIG, think_time=0.2)
         _tell(slow_bot, "\nAuctioning: Painting (value=5)")
         _tell(slow_bot, "\nCurrent Highest Bid: 0")
         slow_bot.get_bid()
-        assert 0.2 in sleeps
+        assert 1.8 in sleeps
 
 
 class TestChoosePaintingToDiscard:
