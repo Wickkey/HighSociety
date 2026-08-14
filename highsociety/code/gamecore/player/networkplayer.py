@@ -60,37 +60,54 @@ class NetworkPlayer(BasePlayer):
     def reattach(self, transport: Transport) -> None:
         """
         Swaps in a fresh transport after a reconnect (see web_server.py's
-        rejoin-token handling) and marks the player active again.
+        rejoin-token handling) — but deliberately does NOT mark the player
+        active yet (see finish_reconnect(), which does). From this point on
+        the new transport is live and can receive messages the caller sends
+        on it (e.g. web_server.py's own IDENTIFY_SUCCESS + reconnect
+        catch-up), but the game thread still treats this player as inactive
+        (skips their turn in the round-robin, same as while disconnected)
+        until finish_reconnect() explicitly says otherwise.
 
-        Deliberately does NOT wake a blocked get_bid()/choose_painting_to_discard()
-        call yet — see finish_reconnect() for why that's a separate step, not
-        folded into this one. From this point on, the new transport is live
-        and can receive messages the caller sends on it (e.g. web_server.py's
-        own IDENTIFY_SUCCESS + reconnect catch-up), but nothing already
-        blocked waiting on the *old* transport resumes until finish_reconnect()
-        explicitly says so.
+        This split matters even when it's *not* this player's own turn that
+        was paused: send_message() doesn't gate on self.active at all (it
+        just writes to self.transport), so catch-up sending here works fine
+        either way — but if active flipped True immediately, the game
+        thread's round-robin loop (running on a separate thread, cycling
+        through *other* players' turns the whole time this player was
+        disconnected) could see this player as active again and start
+        writing its own fresh messages (a new turn_start/PLAYER_MOVE) to the
+        very same transport the caller here is still in the middle of
+        writing catch-up messages to — two unsynchronized writers on one
+        socket, wire order whatever the scheduler produces. That's exactly
+        what let a reconnecting player's browser see the auction card
+        revert to a stale round for a moment: a fresh, correct AUCTION_UPDATE
+        landing on the wire, immediately followed by a catch-up "sync"
+        snapshotted *before* it, overwriting the client's now-current state
+        back to the wrong round.
         """
         self.transport = transport
-        self.active = True
         self.transport.start()
 
     def finish_reconnect(self) -> None:
         """
-        Wakes a get_bid()/choose_painting_to_discard() call that's been
-        sitting in _wait_for_reconnect() since the old transport died,
-        letting it resume immediately instead of waiting out the rest of
-        its grace period.
+        Marks the player active again and wakes a get_bid()/
+        choose_painting_to_discard() call that's been sitting in
+        _wait_for_reconnect() since the old transport died (a no-op if that
+        wait was never entered — nothing blocked on a fresh/never-
+        disconnected player).
 
-        Split out from reattach() on purpose: the moment this fires, the
-        (separate, blocked) game thread can immediately start sending its
-        own messages on the newly-attached transport again (a fresh
-        "Enter your bid" re-prompt, typically) — call this only once the
-        caller is done sending anything of its own that has to land first
+        Split out from reattach() on purpose, for two related races (see
+        reattach()'s docstring for the second one): the moment this fires,
+        the (separate) game thread can immediately start sending its own
+        messages on the newly-attached transport again — a fresh "Enter
+        your bid" re-prompt for this player's own resumed turn, or (if it
+        was someone else's turn instead) simply seeing this player as active
+        again in its round-robin loop. Call this only once the caller is
+        done sending anything of its own that has to land first
         (web_server.py's IDENTIFY_SUCCESS + catch-up state), or those two
-        message streams can interleave out of order on the wire. Only
-        matters if the wait was ever actually entered; a harmless no-op
-        otherwise (nothing is blocked on a fresh/never-disconnected player).
+        message streams can interleave out of order on the wire.
         """
+        self.active = True
         self._reconnected_event.set()
 
     def _wait_for_reconnect(self, remaining_turn_time: Optional[float]) -> bool:
