@@ -107,6 +107,14 @@ class PlayGame():
         # further wiring as the game progresses.
         for player in self.players:
             player._auction_history_source = self.auction_rounds
+            # Same live-reference pattern, two more sources: the aggregated
+            # per-player state snapshot (get_current_auction_history()) and
+            # the live current-auction state (get_live_auction_state()) —
+            # together these are what let a bot make each decision as a
+            # pure function of "what's true right now" instead of
+            # accumulating its own state across the game (see MCTSBot).
+            player._auction_history_snapshot_source = self.auction_history
+            player._live_auction_state_source = self._live_auction_state
 
         self.__game_config = get_game_setting_configurations()
         if turn_duration is _TURN_DURATION_UNSET:
