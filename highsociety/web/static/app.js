@@ -548,6 +548,24 @@ function resetGameState(myUsername, status) {
   // new game) left the previous game's whole narration log, and chat,
   // sitting above whatever the new game starts writing underneath it.
   ['game-log', 'spec-game-log', 'player-chat-log', 'spec-chat-log'].forEach((id) => { $(id).innerHTML = ''; });
+  // resetGameState only just rebuilt the in-memory `game` object above --
+  // the DOM itself still shows whatever the *previous* game (or, for a
+  // spectator/reconnect, whatever this tab happened to render before)
+  // last rendered: the old auction card, opponents, points. That stays
+  // visible until the new game's first live event overwrites it, which
+  // can be a couple of seconds away (see countdown_to_start) -- long
+  // enough to visibly flash stale state right as a new game starts.
+  // Re-rendering both prefixes now (this call doesn't know in advance
+  // whether it's for a player or spectator context, and doing the
+  // "wrong" one is harmless -- those elements just stay hidden until
+  // actually needed) forces every panel to reflect the fresh, empty
+  // state immediately instead.
+  hide($('move-panel'));
+  $('move-panel').classList.remove('pending');
+  renderAuctionPanel(false);
+  renderAuctionPanel(true);
+  renderMyPanel();
+  renderMoneyChips([]);
   // See style.css's .move-panel.has-timer rule: reserves the move-timer
   // badge's own layout space for the whole game so it starting/stopping
   // doesn't resize the panel, but only in rooms that actually have a
@@ -1317,17 +1335,6 @@ function handlePlayerMessage(msg) {
       currentRematch = null;
       const myUsername = game.myUsername;
       resetGameState(myUsername, lastStatus);
-      // resetGameState only resets the in-memory model — the DOM still shows
-      // whatever the *previous* game last rendered (final points, opponents'
-      // won cards, auction count) until the new game's first live event
-      // overwrites it, which can be a couple of seconds away (see
-      // countdown_to_start). Force it to reflect the fresh, empty state
-      // immediately instead of flashing the old game's numbers first.
-      hide($('move-panel'));
-      $('move-panel').classList.remove('pending');
-      renderAuctionPanel(false);
-      renderMyPanel();
-      renderMoneyChips([]);
       // Resign works anytime once in a game (see onResign) -- re-enable it
       // for the fresh game immediately rather than waiting for its first
       // PLAYER_STATE/PLAYER_MOVE.
