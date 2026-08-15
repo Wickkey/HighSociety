@@ -695,7 +695,7 @@ async function onHomeLinkClick() {
   const midGame = isActivelyPlayingLiveGame();
   if (midGame) {
     const ok = await confirmDialog(
-      'Leave this game? You can rejoin from this device later.',
+      'Leave the game? You can rejoin later.',
       'Leave',
     );
     if (!ok) return;
