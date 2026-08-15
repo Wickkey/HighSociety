@@ -82,22 +82,23 @@ class TestNormalCardAuction:
         assert p1.current_participation_in_auction is True
         assert p2.current_participation_in_auction is True
 
-    def test_player_move_is_always_accompanied_by_a_fresh_sync_of_round_and_card(self, make_player):
+    def test_player_gets_a_fresh_sync_of_round_and_card_before_their_own_turn(self, make_player):
         """
         Regression test for a real, live-reproduced bug: a player's own
-        PLAYER_MOVE prompt (which opens their bid panel) and the broadcast
-        AUCTION_UPDATE (which drives everyone's round/card/"whose turn"
-        header) are two independent messages. On a flaky connection, the
-        broadcast can be lost or fail to render while the direct prompt
-        still gets through -- leaving a player looking at a live, working
-        bid panel under a header frozen on an earlier round's card. See
-        _handle_player_turn's own comment for the full story.
+        turn prompt (which opens their bid panel -- for a NetworkPlayer,
+        get_bid()'s own PLAYER_MOVE) and the broadcast AUCTION_UPDATE
+        (which drives everyone's round/card/"whose turn" header) are two
+        independent messages. On a flaky connection, the broadcast can be
+        lost or fail to render while the direct prompt still gets through
+        -- leaving a player looking at a live, working bid panel under a
+        header frozen on an earlier round's card. See _handle_player_turn's
+        own comment for the full story.
 
-        Fix: every PLAYER_MOVE is now immediately followed, on that same
-        player's own connection, by a "sync" AUCTION_UPDATE carrying the
-        ground-truth round/card/max_bid/turn_player for exactly this turn
-        -- so their panel can never be stale relative to the prompt they're
-        actually looking at, regardless of what happened to the broadcast.
+        Fix: _handle_player_turn sends a "sync" AUCTION_UPDATE (ground-truth
+        round/card/max_bid/turn_player for exactly this turn) directly to
+        the player right before their own turn prompt -- so their panel can
+        never be stale relative to the prompt they're about to see,
+        regardless of what happened to the broadcast.
         """
         painting = Painting(value=5)
         bidder = make_player("Bidder", actions=[[10], "pass"])
@@ -107,12 +108,10 @@ class TestNormalCardAuction:
         game.normal_card_auction(painting, starting_player_id=0)
 
         for player in (bidder, rival):
-            move_indices = [i for i, m in enumerate(player.sent_messages) if m["message_type"] == "PLAYER_MOVE"]
-            assert move_indices, f"{player.username} was never prompted"
-            for i in move_indices:
-                sync = player.sent_messages[i + 1]
-                assert sync["message_type"] == "AUCTION_UPDATE"
-                assert sync["data"]["kind"] == "sync"
+            syncs = [m for m in player.sent_messages
+                     if m["message_type"] == "AUCTION_UPDATE" and m.get("data", {}).get("kind") == "sync"]
+            assert syncs, f"{player.username} never got a sync before their turn"
+            for sync in syncs:
                 assert sync["data"]["turn_player"] == player.username
                 assert sync["data"]["card"]["value"] == 5
                 assert sync["data"]["round_number"] == 1
@@ -120,37 +119,26 @@ class TestNormalCardAuction:
     def test_each_turn_gets_its_own_increasing_move_sequence(self, make_player):
         """
         Regression test for a real, live-reproduced bug (narrower than the
-        one above): a player's own answer can cross _handle_player_turn's
-        second prompt (sent via get_bid(), after the toast-pacing wait --
-        see that call site's own comment) in flight, arriving at the
-        client just *after* it. Without a way to recognize that second
-        prompt as still the *same* decision, the client treated it as a
-        fresh turn and re-opened an already-answered, already-greyed move
-        panel. _handle_player_turn now stamps player._current_move_seq
-        (and the initial PLAYER_MOVE's own data) with a value from
-        PlayGame._next_move_sequence() -- this pins that every distinct
-        turn gets a strictly increasing one, matching what the player
-        object itself was left holding.
+        one above): a player's own answer can cross a re-sent prompt for
+        the same turn in flight over a real network. Without a way to
+        recognize a re-send as still the *same* decision, a naive client
+        could treat it as a fresh turn and re-open an already-answered,
+        already-greyed move panel. _handle_player_turn stamps
+        player._current_move_seq with a value from
+        PlayGame._next_move_sequence() before every turn -- this pins that
+        each distinct decision gets a strictly increasing one.
         """
         painting = Painting(value=5)
         bidder = make_player("Bidder", actions=[[10], "pass"])
         rival = make_player("Rival", actions=["pass"])
         game = make_game([bidder, rival])
 
+        before = game._move_sequence
         game.normal_card_auction(painting, starting_player_id=0)
 
-        seqs = []
-        for player in (bidder, rival):
-            move_msgs = [m for m in player.sent_messages if m["message_type"] == "PLAYER_MOVE"]
-            assert move_msgs, f"{player.username} was never prompted"
-            for m in move_msgs:
-                seqs.append(m["data"]["move_seq"])
-
-        assert all(s is not None for s in seqs)
-        assert len(seqs) == len(set(seqs)), f"move_seq values must be unique per turn, got {seqs}"
-        # bidder acts first (starting_player_id=0), so their one prompt
-        # must carry the lowest sequence number of the whole auction.
-        assert min(seqs) in [m["data"]["move_seq"] for m in bidder.sent_messages if m["message_type"] == "PLAYER_MOVE"]
+        # bidder acts first (starting_player_id=0), so their turn must have
+        # claimed the lower of the two sequence numbers handed out here.
+        assert before < bidder._current_move_seq < rival._current_move_seq
 
 
 class TestOutOfTurnDeparture:

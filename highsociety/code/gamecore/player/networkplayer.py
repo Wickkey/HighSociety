@@ -207,56 +207,20 @@ class NetworkPlayer(BasePlayer):
         """Request a bid from the remote player and validate it."""
         self.print_player_info()
 
-        # _handle_player_turn (gameplay.py) already sent its own "Your Turn!"
-        # PLAYER_MOVE before calling here -- deliberately, so a browser's bid
-        # panel opens right away instead of sitting frozen through the toast-
-        # pacing wait that can separate that message from this one by up to
-        # ~1.8s. A fast player can answer that first prompt before this
-        # method ever runs. Real, live-reproduced bug: sending a *second*
-        # "Enter your bid" prompt for the exact same turn regardless
-        # re-opened the browser's already-pending (correctly greyed-out)
-        # move panel right after the player had already answered it, even
-        # though their answer was recorded correctly either way -- a
-        # confusing "did that register?" flicker with no data loss. A
-        # non-blocking peek here catches that case and skips the redundant
-        # prompt/timer reset entirely; on every other call (retries after an
-        # invalid bid, or simply a player who wasn't that fast) this finds
-        # nothing and falls through unchanged.
-        early_bid = self.transport.receive(timeout=0)
-        if early_bid is not None:
-            bid = early_bid
-        elif not self.transport.is_connected:
-            # The non-blocking peek above can race with a connection that
-            # just dropped: SocketTransport._receiver_loop sets its own
-            # is_connected False *before* pushing the queue's one-shot
-            # "closed" sentinel (None), so if the peek happened to consume
-            # that sentinel, is_connected is already guaranteed False here.
-            # Falling through to a second, real receive() in that case would
-            # wait on a value that will never arrive now that the sentinel
-            # is gone -- hang forever with no timeout to save it (this
-            # branch is also reachable with timeout=None). Treat it exactly
-            # as the real receive() below already would: a None bid, for
-            # the existing reconnect/quit handling right below to resolve.
-            bid = None
-        else:
-            # Same move_seq as _handle_player_turn's own initial "Your
-            # Turn!" prompt (set as an attribute rather than a parameter
-            # here so every non-network player type stays untouched — see
-            # gameplay.py's own comment). Lets the web client recognize
-            # this as still the *same* decision if its own early answer
-            # crossed this send in flight (the narrower race the
-            # non-blocking peek above can't fully close on its own: an
-            # answer that arrives at this exact server while it's between
-            # the peek and this send) rather than treating it as a fresh
-            # prompt and re-opening an already-answered move panel.
-            move_seq = getattr(self, '_current_move_seq', None)
-            if timeout:
-                self.send_message(f"Time left: {timeout:.2f}s ⏰", message_type="PLAYER_MOVE_TIMER",
-                                   data={"seconds_remaining": timeout, "move_seq": move_seq})
-            self.send_message("Enter your bid for the auction: ", message_type="PLAYER_MOVE",
-                               data={"move_seq": move_seq})
+        # move_seq: set by _handle_player_turn (gameplay.py) as an
+        # attribute, not a parameter here, so every non-network player type
+        # stays untouched. Shared by every message this method sends for
+        # the same logical decision, including retries below after an
+        # invalid bid — lets the web client recognize a retry's prompt as
+        # still the same decision rather than a fresh one.
+        move_seq = getattr(self, '_current_move_seq', None)
+        if timeout:
+            self.send_message(f"Time left: {timeout:.2f}s ⏰", message_type="PLAYER_MOVE_TIMER",
+                               data={"seconds_remaining": timeout, "move_seq": move_seq})
+        self.send_message("Enter your bid for the auction: ", message_type="PLAYER_MOVE",
+                           data={"move_seq": move_seq})
 
-            bid = self.transport.receive(timeout=timeout)
+        bid = self.transport.receive(timeout=timeout)
 
         if bid is None:
             # Timed out waiting, or the transport has disconnected.

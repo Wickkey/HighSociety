@@ -364,60 +364,23 @@ class PlayGame():
             (int) bid_value by the player
         """
         # One id for this whole decision, shared by every message related to
-        # it (the initial prompt below, and every PLAYER_MOVE/
-        # PLAYER_MOVE_TIMER get_bid() sends afterward, including retries
-        # after an invalid bid -- all still the same logical decision). Set
-        # as an attribute rather than threaded through get_bid()'s own
+        # it (get_bid()'s own PLAYER_MOVE/PLAYER_MOVE_TIMER sends, including
+        # retries after an invalid bid -- still the same logical decision).
+        # Set as an attribute rather than threaded through get_bid()'s own
         # signature so every player type (bots, CLIPlayer, recording/replay)
-        # is completely unaffected -- only NetworkPlayer reads it, to give
-        # its own web client a stable, unambiguous id to recognize "this is
-        # a stale re-send of the exact prompt I already answered" by,
-        # something real-network timing alone can't do reliably (see
-        # NetworkPlayer.get_bid's own comment for the bug this fixes).
+        # is completely unaffected -- only NetworkPlayer reads it.
         move_seq = self._next_move_sequence()
         player._current_move_seq = move_seq
 
-        # Initial message:
+        # Notify everyone else first -- this doesn't touch `player`'s own
+        # move panel, so no reason to hold it back for the pacing wait below.
         created_at = time.time()
         for p in self.players:
-            if not p.active:
-                continue  # already quit/disconnected; nothing to notify
-            if p != player:
-                p.send_message(f"{player.username}'s turn. Player is playing..",
-                message_type = "GLOBAL_MOVE_INFO",
-                created_at = created_at)
-            else:
-                p.send_message(f"Your Turn!", message_type = "PLAYER_MOVE", created_at = created_at,
-                                data={"move_seq": move_seq})
-                # Defensive resync sent straight to this player alongside
-                # their own turn prompt: guarantees their auction panel
-                # (round #, card shown, "whose turn" label) matches what
-                # they're about to act on, even if the broadcast
-                # auction_start/turn_start for this exact turn never
-                # actually lands or renders on their end (a dropped
-                # WebSocket frame on a flaky connection, a client-side
-                # exception mid-render, etc.) — a real, reproduced bug
-                # where a player's move panel opened live and correct
-                # while the auction panel above it stayed frozen on a
-                # previous round's card and a stale "X's turn" label,
-                # since those two panels are populated by two independent
-                # messages and only one of them got through. Same message
-                # shape as web_server.py's reconnect catch-up
-                # (_send_reconnect_catchup/get_live_auction_state), just
-                # sent proactively on every turn instead of only after a
-                # reconnect. Built directly from this call's own
-                # arguments (not self._live_auction_state) so it can't be
-                # stale relative to *this* turn regardless of call order.
-                p.send_message(
-                    "", message_type="AUCTION_UPDATE",
-                    data={
-                        "round_number": len(self.auction_rounds) + 1,
-                        "kind": "sync",
-                        "card": summarize_card(status_card),
-                        "max_bid": max_bid,
-                        "turn_player": player.username,
-                    },
-                )
+            if not p.active or p == player:
+                continue  # already quit/disconnected, or is `player` themselves (handled below)
+            p.send_message(f"{player.username}'s turn. Player is playing..",
+            message_type = "GLOBAL_MOVE_INFO",
+            created_at = created_at)
         for s in (self.spectators or []):
             if not s.active:
                 continue
@@ -426,6 +389,55 @@ class PlayGame():
 
         self._broadcast_auction_update("turn_start", status_card, player=player.username, max_bid=max_bid)
 
+        # Pace *before* anything reaches `player` themselves, rather than
+        # sending them an early "you can act now" prompt and only delaying
+        # the deadline computation that follows it (the previous design).
+        # That split — one message opening the move panel immediately,
+        # a second, separate one carrying the real timer once this wait
+        # was over — was two independent sends for what's really one
+        # decision, and a fast player answering the first one could cross
+        # the second in flight: it would still arrive and reopen their
+        # already-answered, already-greyed panel, however narrow the
+        # window. Waiting first and sending exactly one atomic prompt
+        # afterward (get_bid()'s own, below) removes that race outright
+        # instead of layering more detection on top of it. The tradeoff,
+        # deliberately accepted: the panel can look briefly idle during a
+        # burst of fast preceding events (bot turns, an auction resolving)
+        # rather than opening the instant it's technically this player's
+        # turn -- but it's never live-and-wrong, only briefly not-yet-live,
+        # which is the truth.
+        #
+        # consume=False: this call has no broadcast of its own, so it must
+        # not stamp _last_toast_broadcast_at — doing so used to make this
+        # player's own next real broadcast (their bid/pass) eat an extra,
+        # unearned ~1.8s wait, since the pacing clock would think a toast
+        # had just fired when none actually had.
+        if self.__TURN_DURATION is not None:
+            self._pace_toast_event(consume=False)
+
+        # Defensive resync sent straight to this player right before their
+        # own turn prompt: guarantees their auction panel (round #, card
+        # shown, "whose turn" label) matches what they're about to act on,
+        # even if the broadcast auction_start/turn_start for this exact
+        # turn never actually lands or renders on their end (a dropped
+        # WebSocket frame on a flaky connection, a client-side exception
+        # mid-render, etc.) — a real, reproduced bug where a player's move
+        # panel opened live and correct while the auction panel above it
+        # stayed frozen on a previous round's card and a stale "X's turn"
+        # label, since those two panels used to be populated by two
+        # independent messages and only one of them got through. Same
+        # message shape as web_server.py's reconnect catch-up
+        # (_send_reconnect_catchup/get_live_auction_state).
+        player.send_message(
+            "", message_type="AUCTION_UPDATE",
+            data={
+                "round_number": len(self.auction_rounds) + 1,
+                "kind": "sync",
+                "card": summarize_card(status_card),
+                "max_bid": max_bid,
+                "turn_player": player.username,
+            },
+        )
         # "Auctioning: X" is broadcast once via self.host.send_message() at the
         # start of normal_card_auction/disgrace_card_auction, but CLIHost
         # doesn't forward broadcasts to individual players (see host.py) — so
@@ -437,28 +449,6 @@ class PlayGame():
                              message_type = "PLAYER_INFO")
         player.send_message(f"\nCurrent Highest Bid: {max_bid}", message_type = "PLAYER_INFO")
         player.send_message(f"You have {self.__TURN_DURATION}s to make a move.", message_type="PLAYER_INFO")
-        if self.__TURN_DURATION is not None:
-            # turn_start (just above) isn't a paced broadcast (see
-            # _TOAST_UPDATE_KINDS) — nothing here has ever waited for the
-            # client's toast queue to actually finish displaying whatever
-            # led up to this turn. That's harmless with no clock running,
-            # but with one, a burst of fast bot turns right before a timed
-            # human turn was eating into their think time before they'd
-            # even seen the card that's now up for auction (bots deciding
-            # near-instantly, per bot_think_time, makes this worse, not
-            # better). Only the deadline computation waits — the PLAYER_MOVE
-            # itself was already sent above and reflects the real game
-            # state either way.
-            #
-            # consume=False: this call has no broadcast of its own, so it
-            # must not stamp _last_toast_broadcast_at — doing so used to
-            # make this player's own next real broadcast (their bid/pass)
-            # eat an extra, unearned ~1.8s wait, since the pacing clock
-            # would think a toast had just fired when none actually had.
-            # That extra stall, on every single turn in a timed room, was
-            # exactly why toasts felt inconsistent only when a clock was
-            # running.
-            self._pace_toast_event(consume=False)
         clock = TurnClock(self.__TURN_DURATION)
         clock.start()
 
