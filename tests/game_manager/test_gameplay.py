@@ -117,6 +117,41 @@ class TestNormalCardAuction:
                 assert sync["data"]["card"]["value"] == 5
                 assert sync["data"]["round_number"] == 1
 
+    def test_each_turn_gets_its_own_increasing_move_sequence(self, make_player):
+        """
+        Regression test for a real, live-reproduced bug (narrower than the
+        one above): a player's own answer can cross _handle_player_turn's
+        second prompt (sent via get_bid(), after the toast-pacing wait --
+        see that call site's own comment) in flight, arriving at the
+        client just *after* it. Without a way to recognize that second
+        prompt as still the *same* decision, the client treated it as a
+        fresh turn and re-opened an already-answered, already-greyed move
+        panel. _handle_player_turn now stamps player._current_move_seq
+        (and the initial PLAYER_MOVE's own data) with a value from
+        PlayGame._next_move_sequence() -- this pins that every distinct
+        turn gets a strictly increasing one, matching what the player
+        object itself was left holding.
+        """
+        painting = Painting(value=5)
+        bidder = make_player("Bidder", actions=[[10], "pass"])
+        rival = make_player("Rival", actions=["pass"])
+        game = make_game([bidder, rival])
+
+        game.normal_card_auction(painting, starting_player_id=0)
+
+        seqs = []
+        for player in (bidder, rival):
+            move_msgs = [m for m in player.sent_messages if m["message_type"] == "PLAYER_MOVE"]
+            assert move_msgs, f"{player.username} was never prompted"
+            for m in move_msgs:
+                seqs.append(m["data"]["move_seq"])
+
+        assert all(s is not None for s in seqs)
+        assert len(seqs) == len(set(seqs)), f"move_seq values must be unique per turn, got {seqs}"
+        # bidder acts first (starting_player_id=0), so their one prompt
+        # must carry the lowest sequence number of the whole auction.
+        assert min(seqs) in [m["data"]["move_seq"] for m in bidder.sent_messages if m["message_type"] == "PLAYER_MOVE"]
+
 
 class TestOutOfTurnDeparture:
     """
@@ -365,6 +400,23 @@ class TestFauxPasPenalty:
 
         assert game.handle_faux_pas_penalty(0) is True
         assert player.status_cards == ()
+
+    def test_discard_prompt_gets_its_own_move_sequence(self, make_player):
+        """
+        Same wiring as normal_card_auction's turn prompts (see
+        TestNormalCardAuction.test_each_turn_gets_its_own_increasing_move_sequence)
+        applies to the Faux Pas discard prompt too -- handle_faux_pas_penalty
+        is a completely separate call site from _handle_player_turn, so it
+        needs its own PlayGame._next_move_sequence() call rather than
+        accidentally reusing/skipping a value.
+        """
+        player = make_player("P")
+        player.add_status_card(Painting(value=5))
+        game = make_game([player, make_player("Q")])
+
+        game.handle_faux_pas_penalty(0)
+
+        assert isinstance(player._current_move_seq, int)
 
     def test_none_choice_is_handled_without_crashing(self, make_player):
         """

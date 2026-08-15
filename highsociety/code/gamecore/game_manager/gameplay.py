@@ -123,6 +123,15 @@ class PlayGame():
             self.__TURN_DURATION = turn_duration
         self.__green_card_limit = self.__game_config.get("green_card_limit", 4)
         self._last_toast_broadcast_at = 0.0
+        # Monotonically increasing id for each distinct player decision
+        # point (one per _handle_player_turn call, one per
+        # handle_faux_pas_penalty's discard prompt) -- see
+        # _next_move_sequence and NetworkPlayer.get_bid/
+        # choose_painting_to_discard for why this exists: it lets a
+        # player's own client tell "a stale re-send of the prompt I
+        # already answered" apart from "a genuinely new prompt", which
+        # timing alone can't do reliably over a real network.
+        self._move_sequence = 0
 
         if mode.lower() == 'cli':
             self.host = CLIHost(players)
@@ -133,6 +142,12 @@ class PlayGame():
         else:
             LoggingManager.info("Invalid Host. Default host: cli")
             self.host = CLIHost()
+
+    def _next_move_sequence(self) -> int:
+        """Call once per distinct player decision (not per retry/re-prompt
+        for the *same* decision) -- see self._move_sequence's own comment."""
+        self._move_sequence += 1
+        return self._move_sequence
 
     @property
     def turn_duration(self) -> Optional[float]:
@@ -348,6 +363,20 @@ class PlayGame():
         Returns 
             (int) bid_value by the player
         """
+        # One id for this whole decision, shared by every message related to
+        # it (the initial prompt below, and every PLAYER_MOVE/
+        # PLAYER_MOVE_TIMER get_bid() sends afterward, including retries
+        # after an invalid bid -- all still the same logical decision). Set
+        # as an attribute rather than threaded through get_bid()'s own
+        # signature so every player type (bots, CLIPlayer, recording/replay)
+        # is completely unaffected -- only NetworkPlayer reads it, to give
+        # its own web client a stable, unambiguous id to recognize "this is
+        # a stale re-send of the exact prompt I already answered" by,
+        # something real-network timing alone can't do reliably (see
+        # NetworkPlayer.get_bid's own comment for the bug this fixes).
+        move_seq = self._next_move_sequence()
+        player._current_move_seq = move_seq
+
         # Initial message:
         created_at = time.time()
         for p in self.players:
@@ -358,7 +387,8 @@ class PlayGame():
                 message_type = "GLOBAL_MOVE_INFO",
                 created_at = created_at)
             else:
-                p.send_message(f"Your Turn!", message_type = "PLAYER_MOVE", created_at = created_at)
+                p.send_message(f"Your Turn!", message_type = "PLAYER_MOVE", created_at = created_at,
+                                data={"move_seq": move_seq})
                 # Defensive resync sent straight to this player alongside
                 # their own turn prompt: guarantees their auction panel
                 # (round #, card shown, "whose turn" label) matches what
@@ -792,6 +822,7 @@ class PlayGame():
         paintings = [card for card in player.status_cards if isinstance(card, Painting)]
 
         if paintings:
+            player._current_move_seq = self._next_move_sequence()
             chosen = player.choose_painting_to_discard()
             if chosen is None:
                 # Player disconnected or otherwise failed to choose; retry on the next opportunity.

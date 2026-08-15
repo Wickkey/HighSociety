@@ -1722,6 +1722,19 @@ function applyPlayerState(msg) {
 }
 
 function applyPlayerMove(msg) {
+  const moveSeq = msg.data && msg.data.move_seq;
+  if (moveSeq != null && lastAnsweredMoveSeq != null && moveSeq <= lastAnsweredMoveSeq) {
+    // A stale re-send, over the network, of the exact prompt already
+    // answered (see currentMoveSeq's own comment) -- our own answer
+    // simply hasn't reached/been processed by the server yet, or crossed
+    // this message in flight. Applying it anyway would re-open an
+    // already-answered, already-greyed move panel right after the player
+    // acted on it -- a real, live-reproduced bug ("I placed my bid, panel
+    // didn't grey out"). Ignore entirely; the panel is already correct.
+    return;
+  }
+  currentMoveSeq = moveSeq;
+
   // A genuinely new prompt (either the next real turn, or a re-prompt after
   // an invalid bid) is exactly the one place it's safe to allow another
   // submission -- see hasSubmittedCurrentMove's own definition below for
@@ -1803,6 +1816,20 @@ let moveTimerDeadline = null;
 // (applyPlayerMove) for the *next* prompt, so at most one RESPONSE can ever
 // be in flight per prompt.
 let hasSubmittedCurrentMove = false;
+// The move_seq (see gameplay.py's _current_move_seq) of whichever prompt
+// is currently open, and of the last one actually answered. Distinct from
+// hasSubmittedCurrentMove above: that guards *this browser's own* double
+// click; these two let applyPlayerMove tell "a stale re-send, over the
+// network, of the exact prompt I already answered" apart from "a
+// genuinely new prompt" -- something timing alone can't do reliably (an
+// answer sent just as the server's own second prompt was already in
+// flight arrives at the client *after* it, looking identical to a fresh
+// turn unless the two carry different ids). Both start null; a msg with
+// no move_seq at all (e.g. a test double, or an older deployed version
+// briefly mismatched with this client during a rollout) is always treated
+// as fresh, matching this feature's total absence today.
+let currentMoveSeq = null;
+let lastAnsweredMoveSeq = null;
 // Whether the double-beep has already fired for the *current* move's urgent
 // window — set once on the transition into "urgent", not per second, so it
 // never repeats every tick (see updateMoveTimerDisplay).
@@ -1897,6 +1924,10 @@ function setMovePending() {
   // landing in whatever gap exists before that takes effect still can't
   // send a second RESPONSE (see hasSubmittedCurrentMove's own comment).
   hasSubmittedCurrentMove = true;
+  // Records this as the last-answered prompt (see currentMoveSeq's own
+  // comment) so a stale re-send of it arriving afterward gets ignored by
+  // applyPlayerMove instead of re-opening this now-pending panel.
+  lastAnsweredMoveSeq = currentMoveSeq;
   $('move-panel').classList.add('pending');
   // The panel is now correctly blocked, but the server's broadcast of what
   // actually happens next (whose turn it really is) hasn't arrived yet --

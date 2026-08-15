@@ -517,6 +517,40 @@ def test_bid_prompts_are_sent_with_move_type_bid(player_and_peer):
     assert result["bid"] == "pass"
 
 
+def test_get_bid_and_its_timer_carry_the_move_seq_set_by_the_caller(player_and_peer):
+    """
+    gameplay.py's _handle_player_turn sets player._current_move_seq before
+    calling get_bid() (as an attribute, not a get_bid() parameter, so every
+    other player type stays untouched) -- both messages get_bid() sends
+    here must carry it, so the web client can recognize a re-sent prompt as
+    still the *same* decision (see app.js's currentMoveSeq) rather than
+    treating it as a fresh turn and re-opening an already-answered panel.
+    """
+    player, peer = player_and_peer
+    player._current_move_seq = 7
+    reader = _LineReader(peer)
+
+    def call_get_bid():
+        player.get_bid(timeout=2.0)
+
+    t = threading.Thread(target=call_get_bid, daemon=True)
+    t.start()
+
+    seen = {}
+    for _ in range(10):
+        msg = reader.next()
+        if msg.get("message_type") in ("PLAYER_MOVE", "PLAYER_MOVE_TIMER"):
+            seen[msg["message_type"]] = msg
+        if len(seen) == 2:
+            break
+
+    assert seen["PLAYER_MOVE"]["data"]["move_seq"] == 7
+    assert seen["PLAYER_MOVE_TIMER"]["data"]["move_seq"] == 7
+
+    _send_response(peer, "pass")
+    t.join(timeout=2.0)
+
+
 def test_discard_prompts_are_sent_with_move_type_discard_painting(player_and_peer):
     """
     Regression test: a discard prompt must be distinguishable from a bid

@@ -239,10 +239,22 @@ class NetworkPlayer(BasePlayer):
             # the existing reconnect/quit handling right below to resolve.
             bid = None
         else:
+            # Same move_seq as _handle_player_turn's own initial "Your
+            # Turn!" prompt (set as an attribute rather than a parameter
+            # here so every non-network player type stays untouched — see
+            # gameplay.py's own comment). Lets the web client recognize
+            # this as still the *same* decision if its own early answer
+            # crossed this send in flight (the narrower race the
+            # non-blocking peek above can't fully close on its own: an
+            # answer that arrives at this exact server while it's between
+            # the peek and this send) rather than treating it as a fresh
+            # prompt and re-opening an already-answered move panel.
+            move_seq = getattr(self, '_current_move_seq', None)
             if timeout:
                 self.send_message(f"Time left: {timeout:.2f}s ⏰", message_type="PLAYER_MOVE_TIMER",
-                                   data={"seconds_remaining": timeout})
-            self.send_message("Enter your bid for the auction: ", message_type="PLAYER_MOVE")
+                                   data={"seconds_remaining": timeout, "move_seq": move_seq})
+            self.send_message("Enter your bid for the auction: ", message_type="PLAYER_MOVE",
+                               data={"move_seq": move_seq})
 
             bid = self.transport.receive(timeout=timeout)
 
@@ -340,9 +352,14 @@ class NetworkPlayer(BasePlayer):
         if len(paintings) == 0:
             return None
 
+        # Same move_seq for every retry in this loop -- they're all still
+        # the same logical decision (see gameplay.py's own comment on
+        # _current_move_seq).
+        move_seq = getattr(self, '_current_move_seq', None)
         while True:
             try:
-                self.send_message("Choose one to discard: ", message_type="PLAYER_MOVE", move_type="discard_painting")
+                self.send_message("Choose one to discard: ", message_type="PLAYER_MOVE", move_type="discard_painting",
+                                   data={"move_seq": move_seq})
 
                 choice = self.transport.receive(timeout=None)
 
