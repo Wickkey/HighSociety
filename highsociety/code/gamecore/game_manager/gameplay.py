@@ -165,6 +165,31 @@ class PlayGame():
 
 
     def shuffle_players(self) -> list[BasePlayer]:
+        # Sorted first, not shuffled in whatever order self.players already
+        # happens to be in: for a web room, humans get appended to that list
+        # in the real-world order their own WebSocket connection happens to
+        # finish joining (see web_server.py's ws_player) -- not something
+        # the game's own seed has any influence over. Without this, the SAME
+        # seed could still produce a DIFFERENT final turn order across two
+        # "reproductions" of the same game purely because two humans
+        # happened to connect in a different relative order, defeating the
+        # entire point of a seed being reproducible.
+        #
+        # Sorted by username, but ONLY among humans (CLIPlayer/NetworkPlayer)
+        # -- a bot's username is itself randomly assigned at creation (see
+        # highsociety/code/ai/bot_names.py), not tied to the game's own seed
+        # at all, so sorting bots by name would make bot ordering *less*
+        # deterministic across "reproductions", not more (confirmed: broke
+        # tests/test_bot_evaluator.py's own reproducibility test the first
+        # time this was tried). All bots instead share one constant sort key,
+        # so Python's stable sort leaves them in their existing relative
+        # order -- already fully deterministic, since create_bot_players()
+        # builds them in bot_mix's own fixed order at room-creation time,
+        # before any human has even joined.
+        self.players.sort(key=lambda p: (
+            isinstance(p, (CLIPlayer, NetworkPlayer)),
+            p.username if isinstance(p, (CLIPlayer, NetworkPlayer)) else "",
+        ))
         random.shuffle(self.players)
         LoggingManager.info("Shuffled players")
         return self.players

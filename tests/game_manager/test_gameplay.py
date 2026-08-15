@@ -2,6 +2,7 @@ import time
 
 import pytest
 
+from highsociety.code.ai.pass_bot import PassBot
 from highsociety.code.gamecore.game_manager.gameplay import PlayGame
 from highsociety.code.gamecore.game_manager.turn_clock import TurnClock
 from highsociety.code.gamecore.components_module.painting import Painting
@@ -501,6 +502,53 @@ class TestSeededDeterminism:
             return [(p.username, p.points, p.money_left()) for p in game.players]
 
         assert run() == run()
+
+    def test_same_seed_produces_the_same_turn_order_regardless_of_join_order(self, make_player):
+        """
+        For a real web room, humans get appended to PlayGame.players in
+        whatever real-world order their own connection happens to finish
+        joining (see web_server.py's ws_player) -- not something the seed has
+        any influence over. shuffle_players() must sort by username first so
+        the SAME seed reproduces the SAME final turn order regardless of that
+        real-world timing, not just when players happen to be constructed in
+        the same relative order every time.
+        """
+        alice1, bob1 = make_player("Alice", username="alice"), make_player("Bob", username="bob")
+        game1 = PlayGame(players=[alice1, bob1], mode="cli", seed=123)  # alice, bob
+        order1 = [p.username for p in game1.shuffle_players()]
+
+        bob2, alice2 = make_player("Bob", username="bob"), make_player("Alice", username="alice")
+        game2 = PlayGame(players=[bob2, alice2], mode="cli", seed=123)  # bob, alice -- reversed
+        order2 = [p.username for p in game2.shuffle_players()]
+
+        assert order1 == order2
+
+    def test_bot_shuffle_result_depends_on_creation_order_not_random_names(self):
+        """
+        A bot's own username is randomly assigned at creation (see
+        highsociety/code/ai/bot_names.py), unrelated to the game's seed --
+        sorting bots by that name would make the shuffle's *input* order
+        (and therefore its result) depend on the random name, not just the
+        seed and creation order. Two games with the same seed and the same
+        bot creation order, but different (here, deliberately swapped)
+        usernames, must still shuffle the "first created" bot to the same
+        final position both times -- confirming bot ordering is a function
+        of creation order, never of the name they happened to get.
+        """
+        def make_two_bots(name1, name2):
+            return [PassBot(name="Bot1", username=name1), PassBot(name="Bot2", username=name2)]
+
+        players_a = make_two_bots("zeta_bot", "alpha_bot")
+        game_a = PlayGame(players=players_a, mode="cli", seed=7)
+        game_a.shuffle_players()
+        first_created_position_a = game_a.players.index(players_a[0])
+
+        players_b = make_two_bots("alpha_bot", "zeta_bot")  # same creation order, swapped names
+        game_b = PlayGame(players=players_b, mode="cli", seed=7)
+        game_b.shuffle_players()
+        first_created_position_b = game_b.players.index(players_b[0])
+
+        assert first_created_position_a == first_created_position_b
 
 
 class TestTurnDuration:
