@@ -1722,6 +1722,12 @@ function applyPlayerState(msg) {
 }
 
 function applyPlayerMove(msg) {
+  // A genuinely new prompt (either the next real turn, or a re-prompt after
+  // an invalid bid) is exactly the one place it's safe to allow another
+  // submission -- see hasSubmittedCurrentMove's own definition below for
+  // why this guard exists at all.
+  hasSubmittedCurrentMove = false;
+
   // Self-healing guarantee, independent of any other message: receiving a
   // PLAYER_MOVE is unambiguous proof it's this player's own turn right now,
   // so the header can be corrected from this message alone rather than
@@ -1782,6 +1788,21 @@ function applyPlayerMove(msg) {
 // never appears — the feature is a no-op unless a host opts in.
 let moveTimerInterval = null;
 let moveTimerDeadline = null;
+// Hard guard against sending more than one RESPONSE per prompt, independent
+// of the move-panel's own CSS greying-out (.pending's pointer-events:none)
+// — a real, live-reproduced bug: a player unsure whether their first click
+// registered (e.g. during the brief window before the panel visibly greys)
+// clicking Pass/Place Bid again didn't just get ignored -- both clicks were
+// genuine RESPONSE messages sent over the wire. The server only reads one
+// at a time (see NetworkPlayer.get_bid()'s blocking receive()), so the
+// *second* one just sat queued and got silently consumed as the answer to
+// whatever this player's next real prompt turned out to be -- a totally
+// different round/card/decision than the one they thought they were
+// answering. Set the instant any move is submitted (or the local clock
+// hits 0); cleared only when a genuinely new PLAYER_MOVE arrives
+// (applyPlayerMove) for the *next* prompt, so at most one RESPONSE can ever
+// be in flight per prompt.
+let hasSubmittedCurrentMove = false;
 // Whether the double-beep has already fired for the *current* move's urgent
 // window — set once on the transition into "urgent", not per second, so it
 // never repeats every tick (see updateMoveTimerDisplay).
@@ -1870,6 +1891,12 @@ function playUrgentDoubleBeep() {
 // rather than disappearing entirely between your turns.
 function setMovePending() {
   clearMoveTimer(); // acted — no need to keep counting down what's already submitted
+  // Also reachable when the local clock hits 0 (see updateMoveTimerDisplay)
+  // *before* any of this player's own clicks -- belt-and-suspenders
+  // alongside the .pending CSS lock below (pointer-events:none) so a click
+  // landing in whatever gap exists before that takes effect still can't
+  // send a second RESPONSE (see hasSubmittedCurrentMove's own comment).
+  hasSubmittedCurrentMove = true;
   $('move-panel').classList.add('pending');
   // The panel is now correctly blocked, but the server's broadcast of what
   // actually happens next (whose turn it really is) hasn't arrived yet --
@@ -2112,7 +2139,9 @@ function renderPaintingChoices(values) {
 }
 
 function onDiscardPainting() {
+  if (hasSubmittedCurrentMove) return;
   if (selectedDiscardValue === null) return;
+  hasSubmittedCurrentMove = true;
   ws.send(JSON.stringify({ message_type: 'RESPONSE', prompt: String(selectedDiscardValue) }));
   setMovePending();
 }
@@ -2120,9 +2149,11 @@ function onDiscardPainting() {
 // ------------------------------------------------------------- controls --
 
 function onPlaceBid() {
+  if (hasSubmittedCurrentMove) return;
   hide($('move-error'));
   const values = [...game.selectedBid];
   if (values.length === 0) { showError($('move-error'), 'Select at least one money card.'); return; }
+  hasSubmittedCurrentMove = true;
   ws.send(JSON.stringify({ message_type: 'RESPONSE', prompt: JSON.stringify(values) }));
   // Once sent, these chips are no longer "being added on top" — they're
   // already part of the committed bid. Without clearing this, the server's
@@ -2136,7 +2167,9 @@ function onPlaceBid() {
 }
 
 function onPass() {
+  if (hasSubmittedCurrentMove) return;
   hide($('move-error'));
+  hasSubmittedCurrentMove = true;
   ws.send(JSON.stringify({ message_type: 'RESPONSE', prompt: 'pass' }));
   setMovePending();
 }
