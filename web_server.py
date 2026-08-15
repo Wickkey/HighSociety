@@ -547,6 +547,7 @@ def _status_payload(room: Optional[GameRoom]) -> dict:
         "seats": room.seats,
         "human_seats": room.human_seats,
         "bot_mix": room.bot_mix,
+        "seed": room.seed,
         "turn_time_limit": room.turn_time_limit,
         "reveal_cards": room.reveal_cards,
         "show_logs": room.show_logs,

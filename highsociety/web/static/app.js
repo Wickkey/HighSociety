@@ -529,6 +529,10 @@ function resetGameState(myUsername, status) {
     // limit) — used only to scale the move-timer's "urgent" warning window
     // (see urgentWindowSeconds), not re-sent per move.
     turnTimeLimit: status ? status.turn_time_limit : null,
+    // Shown in-game (see applyRoomDisplaySettings) so a game can be
+    // reported/reproduced precisely -- "it happened in seed 12345" -- even
+    // if nobody thought to set one deliberately when hosting.
+    seed: status ? status.seed : null,
   };
   applyRoomDisplaySettings();
 }
@@ -545,6 +549,10 @@ function applyRoomDisplaySettings() {
   $('reveal-cards-status').textContent = label;
   $('spec-reveal-cards-status').textContent = label;
   $('game-log').closest('details').classList.toggle('hidden', !game.showLogs);
+
+  const seedLabel = game.seed != null ? `— Seed: ${game.seed}` : '';
+  $('seed-display').textContent = seedLabel;
+  $('spec-seed-display').textContent = seedLabel;
 }
 
 function seedOpponents(status, myUsername) {
@@ -1121,18 +1129,17 @@ async function onCreateGame(event) {
   for (const [type, n] of Object.entries(counts)) for (let i = 0; i < n; i += 1) botMix.push(type);
 
   const turnTimeRaw = $('host-turn-time').value;
+  const seedRaw = $('host-seed').value;
   const body = {
     seats,
     bot_mix: botMix,
-    // No seed field in the UI on purpose — a reproducible game is a
-    // developer/testing concern (real training/testing can go through the
-    // backend directly), not something a hosting player needs to see.
     bot_think_time: parseFloat($('host-think-time').value || '1.5'),
     visibility: $('host-visibility-private').checked ? 'private' : 'public',
     turn_time_limit: turnTimeRaw ? parseFloat(turnTimeRaw) : null,
     reveal_cards: $('host-reveal-cards').checked,
     show_logs: $('host-show-logs').checked,
   };
+  if (seedRaw) body.seed = parseInt(seedRaw, 10);
   try {
     const status = await fetchJSON('/api/create_game', {
       method: 'POST',
