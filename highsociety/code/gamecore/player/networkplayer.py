@@ -207,12 +207,44 @@ class NetworkPlayer(BasePlayer):
         """Request a bid from the remote player and validate it."""
         self.print_player_info()
 
-        if timeout:
-            self.send_message(f"Time left: {timeout:.2f}s ⏰", message_type="PLAYER_MOVE_TIMER",
-                               data={"seconds_remaining": timeout})
-        self.send_message("Enter your bid for the auction: ", message_type="PLAYER_MOVE")
+        # _handle_player_turn (gameplay.py) already sent its own "Your Turn!"
+        # PLAYER_MOVE before calling here -- deliberately, so a browser's bid
+        # panel opens right away instead of sitting frozen through the toast-
+        # pacing wait that can separate that message from this one by up to
+        # ~1.8s. A fast player can answer that first prompt before this
+        # method ever runs. Real, live-reproduced bug: sending a *second*
+        # "Enter your bid" prompt for the exact same turn regardless
+        # re-opened the browser's already-pending (correctly greyed-out)
+        # move panel right after the player had already answered it, even
+        # though their answer was recorded correctly either way -- a
+        # confusing "did that register?" flicker with no data loss. A
+        # non-blocking peek here catches that case and skips the redundant
+        # prompt/timer reset entirely; on every other call (retries after an
+        # invalid bid, or simply a player who wasn't that fast) this finds
+        # nothing and falls through unchanged.
+        early_bid = self.transport.receive(timeout=0)
+        if early_bid is not None:
+            bid = early_bid
+        elif not self.transport.is_connected:
+            # The non-blocking peek above can race with a connection that
+            # just dropped: SocketTransport._receiver_loop sets its own
+            # is_connected False *before* pushing the queue's one-shot
+            # "closed" sentinel (None), so if the peek happened to consume
+            # that sentinel, is_connected is already guaranteed False here.
+            # Falling through to a second, real receive() in that case would
+            # wait on a value that will never arrive now that the sentinel
+            # is gone -- hang forever with no timeout to save it (this
+            # branch is also reachable with timeout=None). Treat it exactly
+            # as the real receive() below already would: a None bid, for
+            # the existing reconnect/quit handling right below to resolve.
+            bid = None
+        else:
+            if timeout:
+                self.send_message(f"Time left: {timeout:.2f}s ⏰", message_type="PLAYER_MOVE_TIMER",
+                                   data={"seconds_remaining": timeout})
+            self.send_message("Enter your bid for the auction: ", message_type="PLAYER_MOVE")
 
-        bid = self.transport.receive(timeout=timeout)
+            bid = self.transport.receive(timeout=timeout)
 
         if bid is None:
             # Timed out waiting, or the transport has disconnected.

@@ -75,6 +75,48 @@ def test_get_bid_rejects_unowned_money_card(player_and_peer):
     assert result is None
 
 
+def test_get_bid_consumes_an_early_response_without_resending_the_prompt(player_and_peer):
+    """
+    Regression test for a real, live-reproduced bug: _handle_player_turn
+    (gameplay.py) sends its own "Your Turn!" PLAYER_MOVE before ever calling
+    get_bid() -- deliberately, so a browser's bid panel opens right away
+    instead of sitting frozen through a toast-pacing wait that can separate
+    that message from get_bid()'s own "Enter your bid" prompt by up to
+    ~1.8s (see get_bid()'s own comment). A fast player who answered within
+    that window used to have their (correctly recorded) answer immediately
+    followed by a *second*, redundant "Enter your bid" + PLAYER_MOVE_TIMER
+    prompt for the exact same turn -- which reopened their already-pending,
+    correctly-greyed-out move panel client-side right after they'd already
+    answered it: a confusing "did that even register?" flicker, even though
+    no data was actually lost. get_bid() must consume an already-waiting
+    response instead of ever sending that second prompt.
+    """
+    player, peer = player_and_peer
+    _send_response(peer, "3")  # arrives before get_bid() is even called
+    # Gives the receiver thread a moment to actually parse and queue the
+    # response before get_bid()'s own non-blocking peek runs -- real gap in
+    # production is up to ~1.8s (the toast-pacing wait between
+    # _handle_player_turn's own send and this call); NOTE plain time.sleep
+    # is a no-op under this suite's autouse mock, hence threading.Event.
+    threading.Event().wait(0.05)
+
+    result = player.get_bid(timeout=2.0)
+    assert result == [3]
+
+    reader = _LineReader(peer)
+    seen_types = []
+    peer.settimeout(0.3)
+    try:
+        while True:
+            seen_types.append(reader.next(timeout=0.3)["message_type"])
+    except socket.timeout:
+        pass
+    # print_player_info() still sends its usual PLAYER_INFO lines -- only
+    # the redundant re-prompt must be suppressed.
+    assert "PLAYER_MOVE" not in seen_types
+    assert "PLAYER_MOVE_TIMER" not in seen_types
+
+
 def test_ping_updates_heartbeat_and_is_not_delivered_as_a_bid(player_and_peer):
     # NOTE: uses threading.Event().wait() instead of time.sleep() — the
     # session's autouse fixture monkeypatches time.sleep to a no-op (to skip
