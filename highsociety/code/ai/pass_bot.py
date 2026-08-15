@@ -23,7 +23,7 @@ class PassBot(BasePlayer):
         self._think_time = think_time
 
     def get_bid(self, timeout: Optional[float] = None) -> Union[list[int], str, None]:
-        self._pace_think_time()
+        self._pace_think_time(timeout)
         return "pass"
 
     def choose_painting_to_discard(self) -> Optional[Painting]:

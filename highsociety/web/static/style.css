@@ -995,8 +995,18 @@ button.secondary.standalone { margin-top: 0.9rem; display: inline-block; }
 .opponent-row.waiting { opacity: 0.7; }
 .opponent-row.out-of-auction { opacity: 0.4; filter: grayscale(0.3); }
 .opponent-row.inactive { opacity: 0.35; }
-.opponent-header { display: flex; justify-content: space-between; font-size: 0.9rem; margin-bottom: 0.35rem; }
+.opponent-header { display: flex; justify-content: space-between; align-items: center; font-size: 0.9rem; margin-bottom: 0.35rem; }
 .opponent-header .name { font-weight: 600; }
+.opp-timer {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--accent-strong);
+  background: var(--accent-soft);
+  border-radius: 999px;
+  padding: 0.1rem 0.5rem;
+}
+.opp-timer.urgent { color: #fff; background: var(--danger); }
+.opp-timer:empty { display: none; }
 
 .chip-row { display: flex; flex-wrap: wrap; gap: 0.45rem; margin-top: 0.6rem; }
 .chip-row.small .status-card, .chip-row.small .card-back { width: 40px; height: 56px; font-size: 0.7rem; }
@@ -1092,6 +1102,20 @@ button.secondary.standalone { margin-top: 0.9rem; display: inline-block; }
   padding: 0.25rem 0.7rem;
   margin-bottom: 0.7rem;
 }
+/* Overrides the generic .hidden utility (display:none) just for this badge,
+   and only in a room that actually has a per-move timer (see
+   resetGameState's own has-timer toggle on #move-panel) -- toggling this
+   badge in and out of layout entirely is what grew/shrank the whole
+   move-panel by its height every time a timer started/stopped, a small
+   but constant layout shift right as the panel became interactive.
+   visibility:hidden keeps its box (and the margin below it) reserved at
+   all times instead, so the moment right before a timer arrives renders
+   at the exact same panel height as a turn already in progress. Scoped to
+   .has-timer specifically so an untimed room's panel stays exactly as
+   compact as before -- it never shows this badge at all. Matches
+   .move-timer.hidden's higher specificity against .hidden's own
+   !important. */
+.move-panel.has-timer .move-timer.hidden { display: inline-block !important; visibility: hidden !important; }
 .move-timer.urgent {
   color: #fff;
   background: var(--danger);

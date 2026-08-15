@@ -73,7 +73,7 @@ class CappedGreedyBot(BasePlayer):
             c.value for c in self.money_cards
             if c.value >= needed and self.current_bid_value + c.value <= self._max_spend
         ]
-        self._pace_think_time()
+        self._pace_think_time(timeout)
         if not affordable:
             return "pass"
         return [min(affordable)]

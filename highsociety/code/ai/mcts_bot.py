@@ -19,6 +19,7 @@ makes exactly knowable is the future status card draw order, sampled fresh
 for each decision (mcts/simulation.py's sample_future_deck).
 """
 import random
+import time
 from typing import Optional, Union
 
 from highsociety.code.ai.mcts import decision_service
@@ -58,7 +59,14 @@ class MCTSBot(BasePlayer):
         pass
 
     def get_bid(self, timeout: Optional[float] = None) -> Union[list[int], str, None]:
-        self._pace_think_time()
+        started_at = time.time()
+        self._pace_think_time(timeout)
+        # Whatever's left of this turn's own budget *after* the pacing
+        # pause above -- passing the original, full timeout again here
+        # would let the pause and the actual search each separately run
+        # close to the full deadline, adding up to roughly double the
+        # real turn budget instead of respecting it.
+        remaining_timeout = None if timeout is None else max(0.0, timeout - (time.time() - started_at))
         # A fresh Random() per call, not a shared instance reused across
         # calls: this may cross a process boundary now (see
         # WorkerPoolBotDecisionService) -- pickling a shared rng sends a
@@ -91,6 +99,7 @@ class MCTSBot(BasePlayer):
             config=self._config,
             rng=rng,
             difficulty=self._difficulty,
+            timeout=remaining_timeout,
         )
 
     def choose_painting_to_discard(self) -> Optional[Painting]:

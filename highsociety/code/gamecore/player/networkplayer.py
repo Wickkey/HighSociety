@@ -1,4 +1,5 @@
 import threading
+import time
 from socket import error as SocketError
 from typing import Union
 from typing import Optional
@@ -197,6 +198,46 @@ class NetworkPlayer(BasePlayer):
             return False
         return True
 
+    # How often, while waiting on a timed move, to re-send the client a
+    # fresh PLAYER_MOVE_TIMER carrying the *actual* remaining time. The
+    # client only ever gets a starting point once and counts down locally
+    # from there (see app.js's startMoveTimer) -- with no periodic
+    # correction, a single lost/delayed message (a flaky connection, a
+    # backgrounded tab throttling timers) leaves its displayed clock
+    # silently drifting from what this server will actually act on, with
+    # nothing to notice or fix it. This never changes the real deadline
+    # (TurnClock, in gameplay.py, is what actually decides when to
+    # auto-pass) -- it only keeps the client's own display honest.
+    _CLOCK_RESYNC_INTERVAL_SECONDS = 5.0
+
+    def _receive_with_periodic_resync(self, timeout: Optional[float], move_seq):
+        """
+        self.transport.receive(timeout=timeout), except for a timed move
+        (timeout is truthy) it polls in shorter slices and re-sends a fresh
+        PLAYER_MOVE_TIMER between them instead of one long blocking wait --
+        see _CLOCK_RESYNC_INTERVAL_SECONDS above for why. Behaviorally
+        identical to a plain receive() otherwise: still returns as soon as
+        a response arrives, still returns None if the full timeout elapses
+        with nothing received, still surfaces a disconnect the same way
+        (receive() returns None either way; the caller's own
+        is_connected check right after tells those two apart).
+        """
+        if not timeout:
+            return self.transport.receive(timeout=timeout)
+
+        deadline = time.time() + timeout
+        while True:
+            remaining = deadline - time.time()
+            if remaining <= 0:
+                return None
+            bid = self.transport.receive(timeout=min(remaining, self._CLOCK_RESYNC_INTERVAL_SECONDS))
+            if bid is not None or not self.transport.is_connected:
+                return bid
+            fresh_remaining = deadline - time.time()
+            if fresh_remaining > 0:
+                self.send_message(f"Time left: {fresh_remaining:.2f}s ⏰", message_type="PLAYER_MOVE_TIMER",
+                                   data={"seconds_remaining": fresh_remaining, "move_seq": move_seq})
+
     def print_player_info(self):
         self.send_message(f"{self.username}'s status cards: {self.status_cards}", message_type="PLAYER_INFO")
         self.send_message(f"{self.username}'s points: {self.points}", message_type="PLAYER_INFO")
@@ -220,7 +261,7 @@ class NetworkPlayer(BasePlayer):
         self.send_message("Enter your bid for the auction: ", message_type="PLAYER_MOVE",
                            data={"move_seq": move_seq})
 
-        bid = self.transport.receive(timeout=timeout)
+        bid = self._receive_with_periodic_resync(timeout, move_seq)
 
         if bid is None:
             # Timed out waiting, or the transport has disconnected.

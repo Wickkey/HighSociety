@@ -509,6 +509,43 @@ def test_get_bid_and_its_timer_carry_the_move_seq_set_by_the_caller(player_and_p
     t.join(timeout=2.0)
 
 
+def test_get_bid_periodically_resyncs_the_client_clock_during_a_long_wait(player_and_peer, monkeypatch):
+    """
+    Regression test: the web client only ever gets a starting point once
+    (see app.js's startMoveTimer) and counts down locally from there --
+    with no periodic correction, a single lost/delayed PLAYER_MOVE_TIMER
+    (a flaky connection, a backgrounded tab throttling timers) leaves its
+    displayed clock silently drifting from what this server will actually
+    act on, with nothing to notice or fix it. get_bid() must periodically
+    re-send a fresh PLAYER_MOVE_TIMER while waiting on a timed move, not
+    just once at the very start.
+    """
+    player, peer = player_and_peer
+    monkeypatch.setattr(player, '_CLOCK_RESYNC_INTERVAL_SECONDS', 0.2)
+    reader = _LineReader(peer)
+
+    def call_get_bid():
+        player.get_bid(timeout=1.0)
+
+    t = threading.Thread(target=call_get_bid, daemon=True)
+    t.start()
+
+    timers = []
+    for _ in range(20):
+        msg = reader.next(timeout=2.0)
+        if msg.get("message_type") == "PLAYER_MOVE_TIMER":
+            timers.append(msg["data"]["seconds_remaining"])
+        if len(timers) >= 3:
+            break
+
+    _send_response(peer, "pass")
+    t.join(timeout=2.0)
+
+    assert len(timers) >= 3, f"expected multiple resyncs within a 1.0s wait, got {timers}"
+    # Each resync reflects genuinely less time actually remaining than the last.
+    assert all(a > b for a, b in zip(timers, timers[1:])), timers
+
+
 def test_discard_prompts_are_sent_with_move_type_discard_painting(player_and_peer):
     """
     Regression test: a discard prompt must be distinguishable from a bid

@@ -88,13 +88,29 @@ class WorkerPoolBotDecisionService(BotDecisionService):
                 del self._last_used_at[difficulty]
 
     def decide_bid(self, auction_history, event_log, live_state, username, config, rng,
-                    difficulty: str = "custom"):
+                    difficulty: str = "custom", timeout=None):
+        # The smaller of this service's own configured pool-request budget
+        # and the caller's *actual* remaining turn time (see
+        # BotDecisionService.decide_bid's own comment for why that exists
+        # at all) -- a slow pool must never be allowed to run past the
+        # real turn clock just because request_timeout_seconds alone would
+        # have permitted it.
+        wait = self.request_timeout_seconds if timeout is None else min(timeout, self.request_timeout_seconds)
+        started_at = time.time()
         try:
             pool = self._get_pool(difficulty)
             future = pool.submit(decide_bid, auction_history, event_log, live_state, username, config, rng)
-            return future.result(timeout=self.request_timeout_seconds)
+            return future.result(timeout=wait)
         except Exception as e:  # noqa: BLE001 -- any pool failure degrades to local, never crashes the game
             LoggingManager.warning(
                 f"worker pool decide_bid failed for difficulty={difficulty!r}, falling back to local: {e}"
             )
-            return decide_bid(auction_history, event_log, live_state, username, config, rng)
+            # Bounded the same way the base class's own local path is, by
+            # whatever's actually left of this player's turn *after*
+            # however long the pool attempt above already spent waiting --
+            # passing the original, full timeout again here would let a
+            # slow pool plus a slow local fallback add up to roughly
+            # double the real turn budget instead of respecting it.
+            remaining = None if timeout is None else max(0.0, timeout - (time.time() - started_at))
+            return super().decide_bid(auction_history, event_log, live_state, username, config, rng,
+                                       difficulty=difficulty, timeout=remaining)

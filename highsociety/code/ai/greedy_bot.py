@@ -48,7 +48,7 @@ class GreedyBot(BasePlayer):
         # >=3 works, and we want the cheapest one we actually have.
         needed = self._current_highest_bid - self.current_bid_value + 1
         affordable = [c.value for c in self.money_cards if c.value >= needed]
-        self._pace_think_time()
+        self._pace_think_time(timeout)
         if not affordable:
             return "pass"
         return [min(affordable)]

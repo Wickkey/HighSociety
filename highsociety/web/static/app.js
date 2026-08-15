@@ -514,6 +514,15 @@ function resetGameState(myUsername, status) {
     maxBid: 0,
     myAuctionBid: 0, // my own cumulative committed bid for the *current* auction only
     turnPlayer: null,
+    // When the current turnPlayer's turn actually started, client-side --
+    // lets renderOpponents show a live countdown for *whoever's* turn it
+    // is, the same math startMoveTimer already uses for your own turn,
+    // just anchored to this instead of a server-sent deadline. Approximate
+    // (a few hundred ms of real network latency before this client even
+    // saw the turn_start that set it), which is fine for a glance at an
+    // opponent's clock -- the real deadline enforced server-side never
+    // depends on this.
+    turnStartedAt: null,
     myUsername,
     myPoints: 0,
     myStatusCards: [],
@@ -534,6 +543,17 @@ function resetGameState(myUsername, status) {
     // if nobody thought to set one deliberately when hosting.
     seed: status ? status.seed : null,
   };
+  // logLine()/appendChatLine() only ever append — without this, a rematch
+  // (or any other resetGameState call, e.g. reconnecting into a genuinely
+  // new game) left the previous game's whole narration log, and chat,
+  // sitting above whatever the new game starts writing underneath it.
+  ['game-log', 'spec-game-log', 'player-chat-log', 'spec-chat-log'].forEach((id) => { $(id).innerHTML = ''; });
+  // See style.css's .move-panel.has-timer rule: reserves the move-timer
+  // badge's own layout space for the whole game so it starting/stopping
+  // doesn't resize the panel, but only in rooms that actually have a
+  // per-move timer -- an untimed room's panel never shows this badge at
+  // all, so it should stay exactly as compact as it always was.
+  $('move-panel').classList.toggle('has-timer', !!game.turnTimeLimit);
   applyRoomDisplaySettings();
 }
 
@@ -1625,6 +1645,7 @@ function applyAuctionUpdate(msg, isSpectator) {
     game.maxBid = 0;
     game.myAuctionBid = 0;
     game.turnPlayer = d.starting_player;
+    game.turnStartedAt = Date.now();
     if (d.starting_player !== game.myUsername) ensureOpponent(d.starting_player);
     // Everyone's back in for the new auction — clear last round's greyed-out state.
     Object.values(game.opponents).forEach((o) => { o.outOfAuction = false; });
@@ -1632,6 +1653,7 @@ function applyAuctionUpdate(msg, isSpectator) {
     logLine(`🃏 Auction #${d.round_number}: ${describeCard(d.card)}`, isSpectator);
   } else if (d.kind === 'turn_start') {
     game.turnPlayer = d.player;
+    game.turnStartedAt = Date.now();
     if (d.player !== game.myUsername) ensureOpponent(d.player);
   } else if (d.kind === 'bid') {
     if (d.player === game.myUsername) {
@@ -1918,6 +1940,16 @@ function playUrgentDoubleBeep() {
 // rather than disappearing entirely between your turns.
 function setMovePending() {
   clearMoveTimer(); // acted — no need to keep counting down what's already submitted
+  // Covers the local clock reaching 0 (an anticipated auto-pass — the
+  // player never acted, so onPass()/onPlaceBid() never got a chance to
+  // clear this themselves): without this, a rejected bid's "Insufficient
+  // bid" error stayed on screen through the auto-pass and into this
+  // player's *next* real turn, a stale message next to a completely fresh
+  // prompt. Redundant (but harmless) on the submit-handler paths, which
+  // already hide() this themselves before calling here. Still correctly
+  // left up through an immediate same-turn retry after a rejected bid —
+  // that path (INPUT_ERROR) never calls setMovePending() at all.
+  hide($('move-error'));
   // Also reachable when the local clock hits 0 (see updateMoveTimerDisplay)
   // *before* any of this player's own clicks -- belt-and-suspenders
   // alongside the .pending CSS lock below (pointer-events:none) so a click
@@ -2058,7 +2090,7 @@ function renderOpponents(isSpectator) {
     if (!row) {
       row = document.createElement('div');
       row.dataset.username = username;
-      row.innerHTML = '<div class="opponent-header"><span class="name"></span><span class="pts"></span></div>'
+      row.innerHTML = '<div class="opponent-header"><span class="name"></span><span class="opp-timer"></span><span class="pts"></span></div>'
         + '<div class="chip-row small"></div>';
     }
     // appendChild on an already-attached node moves it -- calling this
@@ -2086,6 +2118,22 @@ function renderOpponents(isSpectator) {
     row.querySelector('.name').textContent = `${o.name}${statusSuffix}`;
     row.querySelector('.pts').textContent = ptsLabel;
 
+    // Live countdown for whichever opponent's turn it currently is —
+    // same math as your own move-timer (startMoveTimer), just anchored to
+    // game.turnStartedAt (set when their turn_start/auction_start arrived)
+    // instead of a value this specific client was sent. Only meaningful
+    // for a timed room; untimed rooms never set turnTimeLimit, so this
+    // stays blank for everyone, same as today.
+    const timerEl = row.querySelector('.opp-timer');
+    if (isCurrentTurn && game.turnTimeLimit && game.turnStartedAt) {
+      const remaining = Math.max(0, game.turnTimeLimit - (Date.now() - game.turnStartedAt) / 1000);
+      timerEl.textContent = `⏰ ${Math.ceil(remaining)}s`;
+      timerEl.classList.toggle('urgent', remaining > 0 && remaining <= urgentWindowSeconds());
+    } else {
+      timerEl.textContent = '';
+      timerEl.classList.remove('urgent');
+    }
+
     const chips = row.querySelector('.chip-row');
     chips.innerHTML = '';
     o.statusCards.forEach((c) => chips.appendChild(game.revealCards ? cardEl(c) : cardBackEl()));
@@ -2095,6 +2143,18 @@ function renderOpponents(isSpectator) {
     if (!seenUsernames.has(row.dataset.username)) row.remove();
   });
 }
+
+// Ticks the opponents list often enough for the live per-opponent
+// countdown above to actually look live, rather than only updating
+// whenever some unrelated event happens to trigger a re-render. Runs
+// unconditionally for the life of the page — renderOpponents() itself
+// already no-ops immediately if there's no game in progress, and once
+// there is one, this is the same cheap "update existing rows in place"
+// path every other event already drives, just on a timer instead of an
+// event. Coarser than your own move-timer's 250ms tick (that one gates a
+// real auto-pass-adjacent deadline you're expected to act on; this is
+// just a glance at someone else's).
+setInterval(() => { renderOpponents(false); renderOpponents(true); }, 500);
 
 function renderMyPanel() {
   $('my-username-label').textContent = game.myUsername || '';
