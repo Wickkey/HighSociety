@@ -22,3 +22,13 @@ psycopg2-binary
 # A real host (Render/Railway/etc.) sets env vars its own way and simply has
 # no .env file to find, so this is a no-op there.
 python-dotenv
+# Verifies a Google "Sign In With Google" ID token server-side (see
+# web_server.py's /api/auth/google) -- only imported once GOOGLE_CLIENT_ID
+# is set, same lazy-import-on-first-use pattern as psycopg2-binary above.
+# No client secret needed: verifying an ID token's signature only requires
+# knowing the expected audience (our own Client ID), not a shared secret.
+google-auth
+# google-auth's own HTTP transport (google.auth.transport.requests) for
+# fetching/caching Google's public signing keys -- a hard runtime
+# dependency of the id_token verification call above, not optional.
+requests

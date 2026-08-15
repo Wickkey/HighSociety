@@ -1327,3 +1327,132 @@ def test_rematch_needs_every_players_acceptance_and_a_decline_cancels_it(running
 
     alice.close()
     bob.close()
+
+
+# ------------------------------------------------------ /api/auth/google --
+
+def test_auth_google_requires_an_id_token():
+    resp = web_server.app.test_client().post("/api/auth/google", json={})
+    assert resp.status_code == 400
+
+
+def test_auth_google_rejects_an_invalid_token(monkeypatch):
+    monkeypatch.setattr(web_server, "_verify_google_id_token", lambda token: None)
+    resp = web_server.app.test_client().post("/api/auth/google", json={"id_token": "garbage"})
+    assert resp.status_code == 401
+
+
+def test_auth_google_reports_needs_username_for_a_first_time_account(monkeypatch):
+    monkeypatch.setattr(web_server, "_verify_google_id_token",
+                         lambda token: {"sub": "g-123", "email": "a@example.com", "name": "Alice A"})
+    monkeypatch.setattr(game_history, "find_player_by_google_id", lambda google_id: None)
+
+    resp = web_server.app.test_client().post("/api/auth/google", json={"id_token": "valid"})
+    body = resp.get_json()
+    assert resp.status_code == 200
+    assert body == {"needs_username": True, "suggested_display_name": "Alice A"}
+
+
+def test_auth_google_returns_the_existing_account_when_already_linked(monkeypatch):
+    monkeypatch.setattr(web_server, "_verify_google_id_token",
+                         lambda token: {"sub": "g-123", "email": "a@example.com", "name": "Alice A"})
+    monkeypatch.setattr(game_history, "find_player_by_google_id",
+                         lambda google_id: {"username": "alice", "display_name": "Alice"})
+
+    resp = web_server.app.test_client().post("/api/auth/google", json={"id_token": "valid"})
+    assert resp.status_code == 200
+    assert resp.get_json() == {"username": "alice", "display_name": "Alice"}
+
+
+# --------------------------------------- /api/auth/google/claim_username --
+
+def test_claim_username_requires_an_id_token():
+    resp = web_server.app.test_client().post("/api/auth/google/claim_username", json={"username": "alice"})
+    assert resp.status_code == 400
+
+
+def test_claim_username_requires_a_non_empty_username(monkeypatch):
+    monkeypatch.setattr(web_server, "_verify_google_id_token",
+                         lambda token: {"sub": "g-123", "email": "a@example.com", "name": "Alice A"})
+    resp = web_server.app.test_client().post(
+        "/api/auth/google/claim_username", json={"id_token": "valid", "username": "   "}
+    )
+    assert resp.status_code == 400
+
+
+def test_claim_username_rejects_an_invalid_token(monkeypatch):
+    monkeypatch.setattr(web_server, "_verify_google_id_token", lambda token: None)
+    resp = web_server.app.test_client().post(
+        "/api/auth/google/claim_username", json={"id_token": "garbage", "username": "alice"}
+    )
+    assert resp.status_code == 401
+
+
+def test_claim_username_rejects_an_already_taken_name(monkeypatch):
+    monkeypatch.setattr(web_server, "_verify_google_id_token",
+                         lambda token: {"sub": "g-123", "email": "a@example.com", "name": "Alice A"})
+    monkeypatch.setattr(game_history, "find_player_by_google_id", lambda google_id: None)
+    monkeypatch.setattr(game_history, "username_is_taken", lambda username: True)
+
+    resp = web_server.app.test_client().post(
+        "/api/auth/google/claim_username", json={"id_token": "valid", "username": "alice"}
+    )
+    assert resp.status_code == 409
+
+
+def test_claim_username_creates_the_account_and_defaults_display_name_to_username(monkeypatch):
+    """Regression for the user's explicit ask: display name must not be a
+    required step -- omitting it entirely still succeeds, defaulting to
+    the username itself."""
+    monkeypatch.setattr(web_server, "_verify_google_id_token",
+                         lambda token: {"sub": "g-123", "email": "a@example.com", "name": "Alice A"})
+    monkeypatch.setattr(game_history, "find_player_by_google_id", lambda google_id: None)
+    monkeypatch.setattr(game_history, "username_is_taken", lambda username: False)
+    created = {}
+
+    def fake_create(google_id, email, username, display_name):
+        created.update(google_id=google_id, email=email, username=username, display_name=display_name)
+        return True
+
+    monkeypatch.setattr(game_history, "create_google_player", fake_create)
+
+    resp = web_server.app.test_client().post(
+        "/api/auth/google/claim_username", json={"id_token": "valid", "username": "alice"}
+    )
+    assert resp.status_code == 200
+    assert resp.get_json() == {"username": "alice", "display_name": "alice"}
+    assert created == {"google_id": "g-123", "email": "a@example.com", "username": "alice", "display_name": "alice"}
+
+
+def test_claim_username_returns_the_existing_row_on_a_retry_by_the_same_account(monkeypatch):
+    """A client retrying after a flaky connection ate the first success
+    response must not see a spurious "username taken" for a name this
+    exact Google account already owns."""
+    monkeypatch.setattr(web_server, "_verify_google_id_token",
+                         lambda token: {"sub": "g-123", "email": "a@example.com", "name": "Alice A"})
+    monkeypatch.setattr(game_history, "find_player_by_google_id",
+                         lambda google_id: {"username": "alice", "display_name": "Alice"})
+    monkeypatch.setattr(game_history, "username_is_taken", lambda username: (_ for _ in ()).throw(
+        AssertionError("should not re-check uniqueness for an already-linked account")))
+
+    resp = web_server.app.test_client().post(
+        "/api/auth/google/claim_username", json={"id_token": "valid", "username": "alice"}
+    )
+    assert resp.status_code == 200
+    assert resp.get_json() == {"username": "alice", "display_name": "Alice"}
+
+
+def test_claim_username_handles_a_uniqueness_race_at_the_database_level(monkeypatch):
+    """username_is_taken said it was free, but create_google_player's own
+    INSERT still lost a race (two tabs claiming it at once) -- must
+    surface as the same clean 409, not a raw 500."""
+    monkeypatch.setattr(web_server, "_verify_google_id_token",
+                         lambda token: {"sub": "g-123", "email": "a@example.com", "name": "Alice A"})
+    monkeypatch.setattr(game_history, "find_player_by_google_id", lambda google_id: None)
+    monkeypatch.setattr(game_history, "username_is_taken", lambda username: False)
+    monkeypatch.setattr(game_history, "create_google_player", lambda *a, **k: False)
+
+    resp = web_server.app.test_client().post(
+        "/api/auth/google/claim_username", json={"id_token": "valid", "username": "alice"}
+    )
+    assert resp.status_code == 409

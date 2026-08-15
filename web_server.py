@@ -79,6 +79,16 @@ game_history.ensure_schema()
 # gtag.js snippet at all, so local testing never pollutes real GA4 traffic.
 GA_MEASUREMENT_ID = os.environ.get("GA_MEASUREMENT_ID")
 
+# Same opt-in-via-env-var pattern again: unset (the default -- no real
+# Client ID exists yet) means index.html renders with no "Continue with
+# Google" button at all, guest-only, exactly today's behavior. Further
+# gated on a configured database (see GOOGLE_SIGN_IN_ENABLED) -- an
+# account that can't be persisted anywhere defeats the entire point of
+# choosing Google over Guest, so the button simply doesn't offer that
+# broken promise rather than appearing and then failing.
+GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID")
+GOOGLE_SIGN_IN_ENABLED = bool(GOOGLE_CLIENT_ID) and game_history.is_configured()
+
 # Same opt-in-via-env-var pattern again: unset/"0" (the default -- every
 # local dev run and the whole pytest suite) keeps every MCTSBot decision
 # computed in-process, exactly as before. A deployment sets BOT_POOL_SIZE to
@@ -451,9 +461,114 @@ def _identify(ws, game_id: str, first_prompt: str, second_prompt: str):
     return first, second
 
 
+_MAX_USERNAME_LENGTH = 24
+
+
+def _verify_google_id_token(token: str) -> Optional[dict]:
+    """
+    Verifies a "Sign In With Google" ID token's signature, audience, and
+    expiry against Google's own public keys, returning the decoded claims
+    (sub/email/name -- see https://developers.google.com/identity/openid-connect/openid-connect#obtainuserinfo)
+    on success, or None on any failure at all (expired, wrong audience,
+    malformed, a network hiccup fetching Google's keys, GOOGLE_CLIENT_ID
+    unset). Every failure mode collapses to the same "reject this token"
+    response for the caller -- none are actionable differently from a
+    client's perspective, and none should ever crash the request.
+
+    Imports google-auth lazily, same reasoning as game_history.py's own
+    lazy `import psycopg2` inside _connect(): merely importing this
+    module must never fail for an environment that hasn't installed it,
+    only actually calling this (which only happens once GOOGLE_CLIENT_ID
+    is set) needs it.
+    """
+    if not GOOGLE_CLIENT_ID:
+        return None
+    from google.auth.transport import requests as google_requests
+    from google.oauth2 import id_token as google_id_token
+    try:
+        return google_id_token.verify_oauth2_token(token, google_requests.Request(), audience=GOOGLE_CLIENT_ID)
+    except Exception as e:  # noqa: BLE001 -- any verification failure means "reject this token"
+        LoggingManager.warning(f"Google ID token verification failed: {e}", log_type=LogType.SECURITY)
+        return None
+
+
+@app.route("/api/auth/google", methods=["POST"])
+def api_auth_google():
+    """
+    First step of Google sign-in: the client already ran Google's own
+    "Sign In With Google" button flow and got back a signed ID token --
+    this verifies it and resolves whichever players row (if any) belongs
+    to that Google account, keyed on the token's "sub" claim (Google's
+    own stable per-user id, not the email, which a user could in
+    principle change). A first-time Google account gets
+    needs_username=True instead of an error -- see
+    /api/auth/google/claim_username, the very next call the client makes
+    in that case.
+    """
+    body = request.get_json(silent=True) or {}
+    token = body.get("id_token")
+    if not isinstance(token, str) or not token:
+        return jsonify({"error": "id_token is required"}), 400
+
+    claims = _verify_google_id_token(token)
+    if claims is None:
+        return jsonify({"error": "Invalid or expired Google sign-in. Please try again."}), 401
+
+    existing = game_history.find_player_by_google_id(claims["sub"])
+    if existing:
+        return jsonify(existing)
+    return jsonify({"needs_username": True, "suggested_display_name": claims.get("name") or ""})
+
+
+@app.route("/api/auth/google/claim_username", methods=["POST"])
+def api_auth_google_claim_username():
+    """
+    Second step, only reached when /api/auth/google above returned
+    needs_username=True: the client is submitting a username for a
+    first-time Google account. Re-verifies the ID token from scratch
+    (deliberately not trusting a bare google_id supplied by the client
+    alone) -- otherwise anyone could POST an arbitrary made-up google_id
+    here and claim a username under an identity they don't actually
+    control.
+    """
+    body = request.get_json(silent=True) or {}
+    token = body.get("id_token")
+    if not isinstance(token, str) or not token:
+        return jsonify({"error": "id_token is required"}), 400
+
+    username = (body.get("username") or "").strip()
+    if not username or len(username) > _MAX_USERNAME_LENGTH:
+        return jsonify({"error": f"Username must be 1-{_MAX_USERNAME_LENGTH} characters"}), 400
+    display_name = (body.get("display_name") or "").strip() or username
+
+    claims = _verify_google_id_token(token)
+    if claims is None:
+        return jsonify({"error": "Invalid or expired Google sign-in. Please try again."}), 401
+
+    # Already claimed by this exact Google account -- e.g. the client
+    # retried after a flaky connection ate the first response. Return the
+    # existing row rather than a spurious "username taken" for a name
+    # this same account already owns.
+    existing = game_history.find_player_by_google_id(claims["sub"])
+    if existing:
+        return jsonify(existing)
+
+    if game_history.username_is_taken(username):
+        return jsonify({"error": "That username is already taken."}), 409
+
+    ok = game_history.create_google_player(claims["sub"], claims.get("email"), username, display_name)
+    if not ok:
+        return jsonify({"error": "That username is already taken."}), 409
+
+    return jsonify({"username": username, "display_name": display_name})
+
+
 @app.route("/")
 def index():
-    return render_template("index.html", ga_measurement_id=GA_MEASUREMENT_ID)
+    return render_template(
+        "index.html", ga_measurement_id=GA_MEASUREMENT_ID,
+        google_client_id=GOOGLE_CLIENT_ID if GOOGLE_SIGN_IN_ENABLED else None,
+    )
 
 
 @app.route("/robots.txt")

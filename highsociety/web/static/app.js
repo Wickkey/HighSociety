@@ -357,10 +357,148 @@ function loadProfile() {
   }
 }
 
-function saveProfile(username, name) {
-  const value = JSON.stringify({ username, name });
+// googleId: omit entirely to leave whatever was already stored alone
+// (e.g. onSaveProfileClick editing just the display name shouldn't wipe
+// out "this profile came from a real Google account"); pass null
+// explicitly for a guest profile with no account behind it at all.
+function saveProfile(username, name, googleId) {
+  const existing = loadProfile();
+  const resolvedGoogleId = googleId !== undefined ? googleId : (existing ? existing.google_id : null) || null;
+  const value = JSON.stringify({ username, name, google_id: resolvedGoogleId });
   try { localStorage.setItem(PROFILE_STORAGE_KEY, value); } catch (e) { /* fall through to the cookie */ }
   writeCookie(PROFILE_STORAGE_KEY, value, 365);
+}
+
+// Decodes a JWT's payload (base64url) WITHOUT verifying its signature --
+// only ever used to read "sub" (Google's own stable per-user id) for this
+// browser's own local bookkeeping (see saveProfile's google_id), *after*
+// the server has already verified the very same token via
+// /api/auth/google or /api/auth/google/claim_username. Never used for
+// anything security-sensitive -- the server's own verification is what
+// actually matters; this is just so the client doesn't have to ask the
+// server to repeat back a claim already sitting in the token it already
+// has.
+function decodeJwtPayload(token) {
+  try {
+    const base64 = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+    return JSON.parse(atob(base64));
+  } catch (e) {
+    return {};
+  }
+}
+
+// -------------------------------------------------------- login screen --
+
+// Set while the login screen's username form is collecting a name for a
+// first-time Google sign-in (see handleGoogleCredential) rather than a
+// plain Guest continuation -- onLoginUsernameContinue branches on this to
+// decide which endpoint (if any) the submitted username actually goes to.
+let _pendingGoogleIdToken = null;
+
+// The boot handler's own pre-login continuation (join a room already in
+// the URL, or show the home tiles) -- now reached only once #screen-login
+// resolves to a profile, via either path below, instead of running
+// unconditionally at boot.
+function proceedPastLogin() {
+  if (currentRoomCode) {
+    refreshStatus();
+    startPolling();
+  } else {
+    showScreen('screen-host-setup');
+    showHomeTiles();
+    startRoomsPolling();
+  }
+}
+
+function showLoginUsernameForm(prefillUsername) {
+  hide($('login-username-error'));
+  $('login-username').value = prefillUsername || '';
+  show($('login-username-form'));
+  $('login-username').focus();
+}
+
+// "Continue as Guest": today's exact mechanism (a bare username, no
+// account behind it), just reached via an explicit choice now instead of
+// being the only option. Pre-fills from any already-saved profile on this
+// browser purely as a convenience default -- everyone still sees and
+// clicks through this screen (see the login-screen boot change below),
+// this just saves returning players from re-typing a name this browser
+// already told the app once.
+function onContinueAsGuest() {
+  _pendingGoogleIdToken = null;
+  const existing = loadProfile();
+  showLoginUsernameForm(existing ? existing.username : '');
+}
+
+async function onLoginUsernameContinue() {
+  const username = $('login-username').value.trim();
+  hide($('login-username-error'));
+  if (!username) { showError($('login-username-error'), 'Username is required.'); return; }
+
+  if (_pendingGoogleIdToken) {
+    // Second step of a first-time Google sign-in: claim this username
+    // for the account handleGoogleCredential already verified server-side
+    // a moment ago.
+    const token = _pendingGoogleIdToken;
+    try {
+      const result = await fetchJSON('/api/auth/google/claim_username', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id_token: token, username }),
+      });
+      saveProfile(result.username, result.display_name, decodeJwtPayload(token).sub);
+      _pendingGoogleIdToken = null;
+      proceedPastLogin();
+    } catch (e) {
+      showError($('login-username-error'), e.message);
+    }
+    return;
+  }
+
+  // Guest path -- display name defaults to the username itself (see the
+  // user's own "display name... ideally not required" ask); editable
+  // later via the existing profile-chip popover, unchanged from today.
+  saveProfile(username, username, null);
+  proceedPastLogin();
+}
+
+// Google Identity Services calls this once the visitor actually picks an
+// account in its own popup/One Tap UI (wired up by initGoogleSignIn below)
+// -- response.credential is a signed ID token this browser never needs to
+// (and can't meaningfully) verify itself; /api/auth/google does that
+// server-side before this client trusts anything in it.
+async function handleGoogleCredential(response) {
+  hide($('login-username-error'));
+  try {
+    const result = await fetchJSON('/api/auth/google', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id_token: response.credential }),
+    });
+    if (result.needs_username) {
+      _pendingGoogleIdToken = response.credential;
+      showLoginUsernameForm(result.suggested_display_name);
+    } else {
+      saveProfile(result.username, result.display_name, decodeJwtPayload(response.credential).sub);
+      proceedPastLogin();
+    }
+  } catch (e) {
+    _pendingGoogleIdToken = null;
+    showLoginUsernameForm('');
+    showError($('login-username-error'), e.message);
+  }
+}
+
+// Invoked by index.html's own GIS <script> tag via its onload attribute --
+// runs the instant the library is actually ready rather than guessing at
+// a fixed delay, and only exists on the page at all when GOOGLE_CLIENT_ID
+// was configured server-side (see web_server.py); window.GOOGLE_CLIENT_ID
+// is simply never set otherwise, so this quietly does nothing everywhere
+// else (every local dev run and the whole test suite included).
+function initGoogleSignIn() {
+  if (!window.GOOGLE_CLIENT_ID || !window.google || !window.google.accounts) return;
+  google.accounts.id.initialize({ client_id: window.GOOGLE_CLIENT_ID, callback: handleGoogleCredential });
+  google.accounts.id.renderButton($('google-signin-container'), { theme: 'outline', size: 'large', width: 280 });
 }
 
 // Whether the join/spectate screens' "not you?" link has been clicked since
@@ -396,6 +534,8 @@ function openProfilePopover() {
   $('profile-username').value = profile ? profile.username : '';
   $('profile-display-name').value = profile ? profile.name : '';
   hide($('profile-error'));
+  // Nothing to log out of until a profile actually exists.
+  $('btn-logout').classList.toggle('hidden', !profile);
   show($('profile-popover'));
 }
 
@@ -448,6 +588,23 @@ function onSaveProfileClick() {
   if (!username) { showError($('profile-error'), 'Username is required.'); return; }
   saveProfile(username, name);
   renderProfileChip();
+}
+
+// Clears this browser's saved identity entirely (both localStorage and
+// the cookie fallback -- see saveProfile/loadProfile) and returns to the
+// login screen so a different account/guest name can be chosen. Doesn't
+// touch anything server-side -- a Google account itself isn't "logged
+// out" of, only this browser's own cached association with it, exactly
+// mirroring how loadProfile/saveProfile never talked to the server for
+// a guest profile either.
+function onLogout() {
+  try { localStorage.removeItem(PROFILE_STORAGE_KEY); } catch (e) { /* private mode, etc. */ }
+  writeCookie(PROFILE_STORAGE_KEY, '', -1);
+  closeProfilePopover();
+  renderProfileChip();
+  currentRoomCode = null;
+  history.replaceState(null, '', location.pathname);
+  showScreen('screen-login');
 }
 
 // Pre-fills the join screen's username/name fields from the saved profile
@@ -613,14 +770,10 @@ document.addEventListener('DOMContentLoaded', () => {
   wireStaticHandlers();
   renderProfileChip();
   currentRoomCode = new URLSearchParams(location.search).get('room');
-  if (currentRoomCode) {
-    refreshStatus();
-    startPolling();
-  } else {
-    showScreen('screen-host-setup');
-    showHomeTiles();
-    startRoomsPolling();
-  }
+  // Every visitor sees the login screen first, even one with an existing
+  // saved profile and even one opening a direct room-invite link -- see
+  // proceedPastLogin for what used to run unconditionally right here.
+  showScreen('screen-login');
 });
 
 async function fetchJSON(url, opts) {
@@ -1098,6 +1251,9 @@ function showRematchDeclinedNotice(declinedBy) {
 function wireStaticHandlers() {
   $('confirm-modal-cancel').addEventListener('click', () => _resolveConfirmDialog(false));
   $('confirm-modal-confirm').addEventListener('click', () => _resolveConfirmDialog(true));
+  $('btn-continue-guest').addEventListener('click', onContinueAsGuest);
+  $('btn-login-continue').addEventListener('click', onLoginUsernameContinue);
+  $('login-username').addEventListener('keydown', (e) => { if (e.key === 'Enter') onLoginUsernameContinue(); });
   document.querySelectorAll('.home-tile').forEach((btn) => {
     btn.addEventListener('click', () => showHomeTile(btn.dataset.homeTarget));
   });
@@ -1132,6 +1288,7 @@ function wireStaticHandlers() {
   $('connection-badge').addEventListener('click', onProfileChipClick);
   $('btn-cancel-profile-edit').addEventListener('click', onCancelProfileEdit);
   $('btn-save-profile').addEventListener('click', onSaveProfileClick);
+  $('btn-logout').addEventListener('click', onLogout);
   // Standard popover UX: a click anywhere outside the chip/popover itself
   // closes it, same as a browser's own menus.
   document.addEventListener('click', (e) => {

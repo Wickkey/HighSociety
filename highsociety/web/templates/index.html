@@ -11,6 +11,14 @@
     gtag('config', '{{ ga_measurement_id }}');
   </script>
   {% endif %}
+  {% if google_client_id %}
+  <!-- "Sign In With Google" -- opt-in via GOOGLE_CLIENT_ID env var, see
+       web_server.py. initGoogleSignIn (app.js) runs once this library has
+       actually loaded (onload, not a fixed-timing guess) and renders the
+       button into #google-signin-container on the login screen. -->
+  <script>window.GOOGLE_CLIENT_ID = {{ google_client_id | tojson }};</script>
+  <script src="https://accounts.google.com/gsi/client" async defer onload="initGoogleSignIn()"></script>
+  {% endif %}
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>High Society</title>
@@ -52,6 +60,7 @@
           <button type="button" id="btn-cancel-profile-edit" class="secondary">Cancel</button>
         </div>
         <p id="profile-error" class="error hidden"></p>
+        <button type="button" id="btn-logout" class="link-button hidden">Log out</button>
       </div>
     </div>
   </header>
@@ -68,6 +77,28 @@
   </div>
 
   <main id="app">
+
+    <!-- ===================== LOGIN ===================== -->
+    <section id="screen-login" class="screen hidden">
+      <div class="card panel login-panel">
+        <h2>Welcome to High Society</h2>
+        <p class="muted">Sign in to keep your name across devices, or jump straight in as a guest.</p>
+
+        <div id="google-signin-container" class="google-signin-container"></div>
+
+        <div class="login-divider"><span>or</span></div>
+
+        <button type="button" id="btn-continue-guest" class="secondary">Continue as Guest</button>
+
+        <div id="login-username-form" class="hidden">
+          <label>Username
+            <input type="text" id="login-username" placeholder="e.g. alex" autocomplete="off" maxlength="24">
+          </label>
+          <button type="button" id="btn-login-continue" class="primary">Continue</button>
+          <p id="login-username-error" class="error hidden"></p>
+        </div>
+      </div>
+    </section>
 
     <!-- ===================== HOST SETUP ===================== -->
     <section id="screen-host-setup" class="screen hidden">

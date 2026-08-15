@@ -142,3 +142,92 @@ def test_record_finished_game_async_runs_in_a_background_thread(database_url):
         import time
         time.sleep(0.2)
     assert any("INSERT INTO games" in call.args[0] for call in cursor.execute.call_args_list)
+
+
+# ------------------------------------------------------ Google auth lookups --
+
+def test_find_player_by_google_id_is_none_without_a_database(no_database_url):
+    assert game_history.find_player_by_google_id("g-123") is None
+
+
+def test_find_player_by_google_id_returns_the_row_when_found(database_url):
+    game_history._schema_ready = True
+    conn, cursor = _fake_connection()
+    cursor.fetchone.side_effect = None
+    cursor.fetchone.return_value = ("alice", "Alice")
+    with patch.object(game_history, "_connect", return_value=conn):
+        result = game_history.find_player_by_google_id("g-123")
+    assert result == {"username": "alice", "display_name": "Alice"}
+    query, params = cursor.execute.call_args.args
+    assert "google_id" in query
+    assert params == ("g-123",)
+    conn.close.assert_called_once()
+
+
+def test_find_player_by_google_id_returns_none_when_not_found(database_url):
+    game_history._schema_ready = True
+    conn, cursor = _fake_connection()
+    cursor.fetchone.side_effect = None
+    cursor.fetchone.return_value = None
+    with patch.object(game_history, "_connect", return_value=conn):
+        assert game_history.find_player_by_google_id("g-nope") is None
+
+
+def test_find_player_by_google_id_failure_is_caught_not_raised(database_url):
+    game_history._schema_ready = True
+    with patch.object(game_history, "_connect", side_effect=RuntimeError("unreachable")):
+        assert game_history.find_player_by_google_id("g-123") is None  # must not raise
+
+
+def test_username_is_taken_fails_safe_toward_taken_without_a_database(no_database_url):
+    assert game_history.username_is_taken("alice") is True
+
+
+def test_username_is_taken_reflects_whether_a_row_exists(database_url):
+    game_history._schema_ready = True
+    conn, cursor = _fake_connection()
+
+    cursor.fetchone.side_effect = None
+    cursor.fetchone.return_value = (1,)
+    with patch.object(game_history, "_connect", return_value=conn):
+        assert game_history.username_is_taken("alice") is True
+
+    cursor.fetchone.return_value = None
+    with patch.object(game_history, "_connect", return_value=conn):
+        assert game_history.username_is_taken("bob") is False
+
+
+def test_username_is_taken_fails_safe_toward_taken_on_a_db_error(database_url):
+    game_history._schema_ready = True
+    with patch.object(game_history, "_connect", side_effect=RuntimeError("unreachable")):
+        assert game_history.username_is_taken("alice") is True
+
+
+def test_create_google_player_is_a_no_op_without_a_database(no_database_url):
+    assert game_history.create_google_player("g-123", "a@example.com", "alice", "Alice") is False
+
+
+def test_create_google_player_inserts_a_row_and_returns_true(database_url):
+    game_history._schema_ready = True
+    conn, cursor = _fake_connection()
+    with patch.object(game_history, "_connect", return_value=conn):
+        result = game_history.create_google_player("g-123", "a@example.com", "alice", "Alice")
+    assert result is True
+    query, params = cursor.execute.call_args.args
+    assert "INSERT INTO players" in query
+    assert params == ("alice", "Alice", "g-123", "a@example.com")
+    conn.close.assert_called_once()
+
+
+def test_create_google_player_returns_false_instead_of_raising_on_a_uniqueness_race(database_url):
+    """
+    A second tab claiming the same username (or the same Google account
+    signing in twice concurrently) hits the table's own UNIQUE
+    constraints even though username_is_taken's own earlier check passed
+    -- this must resolve to a clean False the caller can turn into a
+    re-prompt, not an unhandled exception that would 500 the request.
+    """
+    game_history._schema_ready = True
+    with patch.object(game_history, "_connect", side_effect=RuntimeError("duplicate key value")):
+        result = game_history.create_google_player("g-123", "a@example.com", "alice", "Alice")
+    assert result is False
