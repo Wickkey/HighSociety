@@ -727,7 +727,7 @@ function renderRoomsList(rooms) {
   updateJoinTileLiveBadge(rooms.length);
   const container = $('public-rooms-list');
   if (!rooms.length) {
-    container.innerHTML = '<p class="muted">No public games open right now — host one below!</p>';
+    container.innerHTML = '<p class="muted">No public games right now.</p>';
     return;
   }
   container.innerHTML = '';
