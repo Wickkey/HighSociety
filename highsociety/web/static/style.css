@@ -315,7 +315,7 @@ body {
   border: 2px solid var(--panel-bg);
 }
 
-.home-back {
+.home-back, .screen-back {
   background: none;
   border: none;
   color: var(--muted);
@@ -325,7 +325,7 @@ body {
   padding: 0 0 0.9rem;
   margin: 0;
 }
-.home-back:hover { color: var(--accent-strong); }
+.home-back:hover, .screen-back:hover { color: var(--accent-strong); }
 
 /* -------------------------------------------------------- 404 page -------------------------------------------------------- */
 .error-page { display: flex; justify-content: center; }
@@ -535,30 +535,58 @@ button.secondary.standalone { margin-top: 0.9rem; display: inline-block; }
   border: 1px solid var(--accent-light);
   border-radius: var(--radius-sm);
   padding: 0.6rem 0.9rem;
-  margin-bottom: 0.9rem;
+  margin-bottom: 0.6rem;
   font-size: 0.95rem;
   font-weight: 600;
   letter-spacing: 0.02em;
 }
 
+/* A dedicated row (its own line, below the room-code badge above) for the
+   invite link -- an icon-only button next to a bare room-code badge was
+   easy to miss entirely (real user feedback: "hidden and not obvious").
+   Pairing it with a visible, selectable link field plus a labeled button
+   makes both the existence of a shareable link and the action to copy it
+   immediately obvious at a glance, closer to how colonist.io surfaces the
+   same thing. */
+.room-link-row {
+  display: flex;
+  align-items: stretch;
+  gap: 0.5rem;
+  margin-bottom: 0.9rem;
+}
+.room-link-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 0.5rem 0.65rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--panel-border);
+  background: var(--panel-bg-soft);
+  color: var(--text);
+  font-size: 0.9rem;
+  /* Not disabled -- readonly still lets a click/tap select-all (see
+     app.js) for a manual copy on a device where the Clipboard API is
+     blocked, without letting anyone actually edit the link. */
+}
+.room-link-input:focus { outline: none; border-color: var(--accent); }
+
 .copy-link-btn {
   flex-shrink: 0;
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  width: 1.9rem;
-  height: 1.9rem;
-  padding: 0;
+  gap: 0.4rem;
+  padding: 0.5rem 0.8rem;
   border: 1px solid var(--accent-light);
   border-radius: var(--radius-sm);
   background: var(--panel-bg);
   color: var(--accent-strong);
+  font-size: 0.9rem;
+  font-weight: 600;
   cursor: pointer;
   transition: background 0.15s ease, transform 0.1s ease;
 }
-.copy-link-btn svg { width: 1rem; height: 1rem; }
+.copy-link-btn svg { width: 1rem; height: 1rem; flex-shrink: 0; }
 .copy-link-btn:hover { background: var(--accent-highlight); color: #fff; }
-.copy-link-btn:active { transform: scale(0.93); }
+.copy-link-btn:active { transform: scale(0.97); }
 .copy-link-btn.copied { background: var(--accent-strong); color: #fff; border-color: var(--accent-strong); }
 
 .radio-label {

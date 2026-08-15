@@ -183,6 +183,7 @@
     <!-- ===================== JOIN / LOBBY ===================== -->
     <section id="screen-join" class="screen hidden">
       <div class="card panel">
+        <button type="button" class="screen-back" id="btn-leave-lobby-back">← Back</button>
         <h2>Join this game</h2>
         <p class="muted">Share this page's link, or the room code below.</p>
 
@@ -195,11 +196,15 @@
 
         <div id="room-code-display" class="room-code-display hidden">
           <span id="room-code-text"></span>
+        </div>
+        <div id="room-link-row" class="room-link-row hidden">
+          <input type="text" id="room-link-input" class="room-link-input" readonly aria-label="Invite link">
           <button type="button" id="btn-copy-room-link" class="copy-link-btn" title="Copy invite link" aria-label="Copy invite link">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <rect x="9" y="9" width="12" height="12" rx="2"/>
               <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
             </svg>
+            <span>Copy</span>
           </button>
         </div>
         <div id="lobby-status" class="lobby-status"></div>

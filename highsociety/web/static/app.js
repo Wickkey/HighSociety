@@ -915,6 +915,8 @@ function renderLobby(status) {
   const visibilityNote = status.visibility === 'private' ? ' (private, share this code with friends)' : ' (public)';
   $('room-code-text').textContent = `Room code: ${status.room_code}${visibilityNote}`;
   show($('room-code-display'));
+  $('room-link-input').value = `${location.origin}${location.pathname}?room=${encodeURIComponent(status.room_code)}`;
+  show($('room-link-row'));
   const names = status.joined.map((p) => `${p.name}${p.is_bot ? ' 🤖' : ''}`).join(', ') || 'nobody yet';
   $('lobby-status').textContent = `Seats filled: ${status.joined.length}/${status.seats} (${names})`;
   if (pendingIdentifyError) {
@@ -1102,9 +1104,22 @@ function wireStaticHandlers() {
   document.querySelectorAll('.home-back').forEach((btn) => {
     btn.addEventListener('click', showHomeTiles);
   });
+  // Same visual style as .home-back, but a different destination: this one
+  // lives on the lobby screen (already past home-tile selection, possibly
+  // already holding an open socket), so it needs onHomeLinkClick's real
+  // "leave the room" behavior (closes the socket, confirms first if a game
+  // is actually in progress) rather than just switching which home panel
+  // is showing.
+  $('btn-leave-lobby-back').addEventListener('click', onHomeLinkClick);
   $('btn-create-game').addEventListener('click', onCreateGame);
   $('btn-join-by-code').addEventListener('click', onJoinByCode);
   $('btn-copy-room-link').addEventListener('click', onCopyRoomLink);
+  // A readonly field can still be selected and copied by hand (Ctrl/Cmd+C)
+  // even where the Clipboard API used by the button above is blocked --
+  // select-all on focus/click means that always works with zero extra
+  // taps, not just for whoever specifically clicks into the text first.
+  $('room-link-input').addEventListener('focus', (e) => e.target.select());
+  $('room-link-input').addEventListener('click', (e) => e.target.select());
   $('btn-add-bot').addEventListener('click', onAddBot);
   $('btn-join').addEventListener('click', onJoin);
   $('btn-spectate-link').addEventListener('click', () => {
@@ -1208,9 +1223,12 @@ function onJoinByCode(event) {
 // versus a bare code which still makes the recipient find the site
 // themselves and type it in. The code itself is still visible as plain
 // text right next to this button for anyone who'd rather read it aloud.
+// Reads from #room-link-input (renderLobby already fills it in) rather
+// than rebuilding the URL again here, so there's exactly one place that
+// knows how to construct it.
 async function onCopyRoomLink() {
-  if (!currentRoomCode) return;
-  const url = `${location.origin}${location.pathname}?room=${encodeURIComponent(currentRoomCode)}`;
+  const url = $('room-link-input').value;
+  if (!url) return;
   try {
     await navigator.clipboard.writeText(url);
   } catch (e) {
