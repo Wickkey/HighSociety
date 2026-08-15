@@ -1722,6 +1722,24 @@ function applyPlayerState(msg) {
 }
 
 function applyPlayerMove(msg) {
+  // Self-healing guarantee, independent of any other message: receiving a
+  // PLAYER_MOVE is unambiguous proof it's this player's own turn right now,
+  // so the header can be corrected from this message alone rather than
+  // depending on a *separate* AUCTION_UPDATE (broadcast or sync) having
+  // also landed and rendered successfully. Closes a real, live-reproduced
+  // bug where the bid panel opened correctly (this message got through)
+  // while the header above it stayed on an earlier round/player -- even
+  // after gameplay.py started sending an accompanying "sync" AUCTION_UPDATE
+  // alongside every PLAYER_MOVE (see _handle_player_turn), since that's
+  // still a second, independent send() that isn't guaranteed to survive
+  // whatever dropped the original broadcast on a flaky connection. This
+  // doesn't by itself fix a stale round number/card image if that
+  // broadcast never arrives, but it eliminates the most confusing and
+  // dangerous half of the symptom -- the panel and the "whose turn" label
+  // disagreeing -- unconditionally.
+  game.turnPlayer = game.myUsername;
+  renderAuctionPanel(false);
+
   $('move-panel').classList.remove('hidden', 'pending');
   const bidControls = $('bid-controls');
   const discardControls = $('discard-controls');
