@@ -29,6 +29,7 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 
 from highsociety.code.ai import BOT_TYPES, create_bot_players
 from highsociety.code.common.utils.utility import validate_player_count
+from highsociety.code.gamecore.game_manager.auction_history import AuctionHistory
 from highsociety.code.gamecore.game_manager.gameplay import PlayGame
 
 
@@ -100,7 +101,8 @@ def _simulate_one_game(bot_mix: list[str], think_time: float, game_seed) -> tupl
         # the terminal per-decision (NetworkHost only forwards to
         # players/spectators, and bot players' own send_message() doesn't
         # print) -- CLI mode would otherwise narrate every single bid.
-        game = PlayGame(players=players, spectators=[], mode="network", seed=game_seed)
+        game = PlayGame(players=players, spectators=[], mode="network", seed=game_seed,
+                         auction_history=AuctionHistory())
         game.play_game()
 
         winner_usernames = {w.username for w in (game.winners or [])}

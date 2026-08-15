@@ -21,6 +21,7 @@ import json
 import os
 import random
 import secrets
+import signal
 import sys
 import threading
 import time
@@ -32,6 +33,8 @@ from flask import Flask, Response, jsonify, render_template, request
 from flask_sock import Sock
 
 from highsociety.code.ai import BOT_TYPES, create_bot_players
+from highsociety.code.ai.mcts import decision_service
+from highsociety.code.ai.mcts.worker_pool_decision_service import WorkerPoolBotDecisionService
 from highsociety.code.common.db import game_history
 from highsociety.code.common.logger_module.logger.logging_manager import LoggingManager, LogType
 from highsociety.code.common.utils.network_utility import get_local_ip
@@ -76,6 +79,28 @@ game_history.ensure_schema()
 # gtag.js snippet at all, so local testing never pollutes real GA4 traffic.
 GA_MEASUREMENT_ID = os.environ.get("GA_MEASUREMENT_ID")
 
+# Same opt-in-via-env-var pattern again: unset/"0" (the default -- every
+# local dev run and the whole pytest suite) keeps every MCTSBot decision
+# computed in-process, exactly as before. A deployment sets BOT_POOL_SIZE to
+# route decide_bid() to N separate worker processes per difficulty instead
+# (see worker_pool_decision_service.py for why that can help even on a
+# fractional CPU quota) -- tune N from here, no code change needed.
+_BOT_POOL_SIZE = int(os.environ.get("BOT_POOL_SIZE", "0"))
+if _BOT_POOL_SIZE > 0:
+    decision_service.default_decision_service = WorkerPoolBotDecisionService(pool_size=_BOT_POOL_SIZE)
+    print(f"BOT_POOL_SIZE={_BOT_POOL_SIZE} -- MCTS bot decisions run in worker processes, "
+          f"{_BOT_POOL_SIZE} per difficulty.")
+    # concurrent.futures.process registers its own atexit hook to shut down
+    # every ProcessPoolExecutor's workers -- but atexit hooks only run on a
+    # *normal* interpreter exit (sys.exit(), an uncaught exception, or the
+    # main thread finishing), not a bare SIGTERM with no handler installed,
+    # which is the OS's default action and skips Python cleanup entirely.
+    # Confirmed empirically: a plain `kill -TERM` on this process left its
+    # worker subprocesses running as orphans. Turning SIGTERM into a normal
+    # sys.exit() here doesn't change gunicorn's own shutdown behavior (it
+    # still just wants this process to exit) -- it only makes that exit
+    # actually clean up the worker processes instead of orphaning them.
+    signal.signal(signal.SIGTERM, lambda signum, frame: sys.exit(0))
 
 # The lobby form only ever offers these as a preset <select> (see
 # index.html's #host-turn-time) — no free-text entry — so the server
@@ -330,9 +355,16 @@ def _reap_stale_rooms() -> None:
     for. Without this, `_rooms` only ever grows for the lifetime of the
     process. Runs forever as a daemon thread — see its start call near the
     bottom of this module.
+
+    Also reaps idle bot worker pools (see BOT_POOL_SIZE above) on the same
+    cadence -- an unrelated kind of staleness, but sharing this loop's
+    existing periodic wakeup avoids a whole second background thread just
+    for it.
     """
     while True:
         threading.Event().wait(_ROOM_REAPER_INTERVAL_SECONDS)
+        if isinstance(decision_service.default_decision_service, WorkerPoolBotDecisionService):
+            decision_service.default_decision_service.reap_idle_pools()
         now = time.time()
         with _rooms_lock:
             stale = [
@@ -515,6 +547,7 @@ def _status_payload(room: Optional[GameRoom]) -> dict:
         "seats": room.seats,
         "human_seats": room.human_seats,
         "bot_mix": room.bot_mix,
+        "seed": room.seed,
         "turn_time_limit": room.turn_time_limit,
         "reveal_cards": room.reveal_cards,
         "show_logs": room.show_logs,

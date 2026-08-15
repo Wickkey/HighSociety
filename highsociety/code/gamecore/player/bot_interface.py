@@ -33,6 +33,13 @@ class BotInterface(ABC):
     # currently points to.
     _auction_history_source: list = []
 
+    # Same live-reference pattern as _auction_history_source above, wired up
+    # by PlayGame.__init__ alongside it — see get_current_auction_history()/
+    # get_live_auction_state() below. None/empty class-level defaults cover
+    # a player/bot instantiated standalone, outside any PlayGame.
+    _auction_history_snapshot_source = None
+    _live_auction_state_source: dict = {}
+
     # Matches PlayGame.MIN_TOAST_GAP_SECONDS / the web frontend's
     # TOAST_DURATION_MS+fade-out gap (highsociety/web/static/app.js) --
     # duplicated rather than imported, since gameplay.py imports player
@@ -44,15 +51,27 @@ class BotInterface(ABC):
     # there was paced by bot decision speed alone.
     MIN_THINK_TIME_SECONDS = 1.8
 
-    def _pace_think_time(self) -> None:
+    def _pace_think_time(self, timeout: Optional[float] = None) -> None:
         """
         Every bot subclass should call this instead of sleeping on its own
         `_think_time` directly, so the floor above is enforced in exactly
         one place. Assumes `self._think_time` is set (every current bot
         constructor sets it) -- falls back to 0 rather than raising if a
         future one doesn't, since a missing think_time shouldn't be fatal.
+
+        timeout: seconds actually left on this player's own turn clock —
+        pass get_bid()'s own `timeout` straight through (None for an
+        untimed room). Without this, the floor above was itself capable of
+        blowing through the real per-move deadline every human player's
+        clock counts down to (e.g. a host-configured --bot-think-time
+        larger than a short turn_time_limit) -- respecting the actual
+        deadline takes priority over this pause's own "feels human"
+        polish, so it's capped, never skipped outright.
         """
-        time.sleep(max(getattr(self, "_think_time", 0), self.MIN_THINK_TIME_SECONDS))
+        desired = max(getattr(self, "_think_time", 0), self.MIN_THINK_TIME_SECONDS)
+        if timeout is not None:
+            desired = min(desired, max(timeout, 0))
+        time.sleep(desired)
 
     def get_auction_history(self) -> list[dict]:
         """
@@ -66,6 +85,31 @@ class BotInterface(ABC):
         can call self.get_auction_history() without any interface change.
         """
         return [record.to_dict() for record in self._auction_history_source]
+
+    def get_current_auction_history(self):
+        """
+        The room's AuctionHistory object (see game_manager/auction_history.py)
+        — an aggregated snapshot of every player's *current* state (money
+        cards, status cards held, points, Faux Pas status), refreshed after
+        every turn. None if the caller (e.g. network_server.py's CLI/socket
+        path) didn't configure one for this game.
+
+        This is what lets a decision be made as a pure function of "what's
+        true right now" instead of accumulating state across the game the
+        way earlier bot implementations did — see MCTSBot for the intended
+        usage pattern.
+        """
+        return self._auction_history_snapshot_source
+
+    def get_live_auction_state(self) -> dict:
+        """
+        A snapshot of "what's true right now" for the current auction —
+        round number, card up for bid, current highest bid, whose turn.
+        Same shape/data as PlayGame.get_live_auction_state(), just reachable
+        from the player/bot side without holding a reference to the whole
+        PlayGame object.
+        """
+        return dict(self._live_auction_state_source)
 
     @abstractmethod
     def get_bid(self, timeout: Optional[float] = None) -> Union[list[int], str, None]:

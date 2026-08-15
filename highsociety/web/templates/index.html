@@ -14,7 +14,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>High Society</title>
-  <meta name="description" content="The classic High Society board game, online — a free 2-5 player auction game. Outbid friends or bots for points, right in your browser.">
+  <meta name="description" content="The classic High Society board game, online: a free 2-5 player auction game. Outbid friends or bots for points, right in your browser.">
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+CiAgPHJlY3Qgd2lkdGg9IjY0IiBoZWlnaHQ9IjY0IiByeD0iMTQiIGZpbGw9IiMwYjM0MjciLz4KICA8cGF0aCBmaWxsPSIjYzhhMDRkIiBkPSJNMzIsOCBDMjIsMTYgMTEsMjMgMTEsMzMgQzExLDQxIDE4LDQ1IDI1LDQzIEMyMyw0OSAxOCw1MyAxNCw1NiBMNTAsNTYgQzQ2LDUzIDQxLDQ5IDM5LDQzIEM0Niw0NSA1Myw0MSA1MywzMyBDNTMsMjMgNDIsMTYgMzIsOCBaIi8+Cjwvc3ZnPgo=">
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 
@@ -25,12 +25,12 @@
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="High Society">
   <meta property="og:title" content="High Society">
-  <meta property="og:description" content="The classic High Society board game, online — a free 2-5 player auction game. Outbid friends or bots for points, right in your browser.">
+  <meta property="og:description" content="The classic High Society board game, online: a free 2-5 player auction game. Outbid friends or bots for points, right in your browser.">
   <meta property="og:image" content="{{ request.url_root }}static/og-image.png">
   <meta property="og:url" content="{{ request.url_root }}">
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="High Society">
-  <meta name="twitter:description" content="The classic High Society board game, online — a free 2-5 player auction game. Outbid friends or bots for points, right in your browser.">
+  <meta name="twitter:description" content="The classic High Society board game, online: a free 2-5 player auction game. Outbid friends or bots for points, right in your browser.">
   <meta name="twitter:image" content="{{ request.url_root }}static/og-image.png">
 </head>
 <body>
@@ -93,7 +93,7 @@
       <div id="home-panel-join" class="card panel home-panel hidden">
         <button type="button" class="home-back">← Back</button>
         <h2>Join a game</h2>
-        <p class="muted">Public games anyone can join, or enter a room code a friend shared with you.</p>
+        <p class="muted">Pick a public game, or enter a room code.</p>
         <div id="public-rooms-list" class="rooms-list">
           <p class="muted">Loading public games…</p>
         </div>
@@ -161,7 +161,7 @@
             <label class="radio-label"><input type="checkbox" id="host-reveal-cards" checked> Reveal opponents' cards</label>
             <label class="radio-label"><input type="checkbox" id="host-show-logs"> Show game log</label>
           </div>
-          <p class="hint">Fixed for the whole table once the game starts — not adjustable mid-game, so worth checking now.</p>
+          <p class="hint">Fixed for the whole table once the game starts. Not adjustable mid-game.</p>
         </fieldset>
 
         <details class="advanced">
@@ -169,6 +169,10 @@
           <label>Bot think time (seconds)
             <input type="number" id="host-think-time" min="0" step="0.1" value="1.5">
           </label>
+          <label>Random seed (optional)
+            <input type="number" id="host-seed" step="1" placeholder="random">
+          </label>
+          <p class="hint">Leave blank for a random game. Setting a seed makes the deck reproducible, useful for reporting a bug ("it happened in seed 12345"). Shown in-game once the round starts.</p>
         </details>
 
         <button id="btn-create-game" class="primary">Host Game</button>
@@ -179,8 +183,9 @@
     <!-- ===================== JOIN / LOBBY ===================== -->
     <section id="screen-join" class="screen hidden">
       <div class="card panel">
+        <button type="button" class="screen-back" id="btn-leave-lobby-back">← Back</button>
         <h2>Join this game</h2>
-        <p class="muted">Share this page's link (or the room code below) with friends — they join the same way.</p>
+        <p class="muted">Share this page's link, or the room code below.</p>
 
         <details class="advanced how-to-play">
           <summary>New to High Society? How to play</summary>
@@ -191,18 +196,22 @@
 
         <div id="room-code-display" class="room-code-display hidden">
           <span id="room-code-text"></span>
+        </div>
+        <div id="room-link-row" class="room-link-row hidden">
+          <input type="text" id="room-link-input" class="room-link-input" readonly aria-label="Invite link">
           <button type="button" id="btn-copy-room-link" class="copy-link-btn" title="Copy invite link" aria-label="Copy invite link">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <rect x="9" y="9" width="12" height="12" rx="2"/>
               <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
             </svg>
+            <span>Copy</span>
           </button>
         </div>
         <div id="lobby-status" class="lobby-status"></div>
 
         <div id="join-form">
-          <p id="join-as-label" class="hidden">Joining as <strong id="join-as-name"></strong> —
-            <button type="button" id="btn-change-join-identity" class="link-button">not you?</button></p>
+          <p id="join-as-label" class="hidden">Joining as <strong id="join-as-name"></strong>.
+            <button type="button" id="btn-change-join-identity" class="link-button">Not you?</button></p>
           <div id="join-identity-fields">
             <label>Username <input type="text" id="join-username" placeholder="e.g. alex" autocomplete="off"></label>
             <label>Display name <input type="text" id="join-name" placeholder="e.g. Alex" autocomplete="off"></label>
@@ -237,8 +246,8 @@
     <section id="screen-spectate-join" class="screen hidden">
       <div class="card panel">
         <h2>Watch this game</h2>
-        <p id="spectate-as-label" class="hidden">Watching as <strong id="spectate-as-name"></strong> —
-          <button type="button" id="btn-change-spectate-identity" class="link-button">not you?</button></p>
+        <p id="spectate-as-label" class="hidden">Watching as <strong id="spectate-as-name"></strong>.
+          <button type="button" id="btn-change-spectate-identity" class="link-button">Not you?</button></p>
         <div id="spectate-identity-fields">
           <label>Your name <input type="text" id="spectate-name" placeholder="e.g. Sam" autocomplete="off"></label>
           <label>Username <input type="text" id="spectate-username" placeholder="e.g. sam" autocomplete="off"></label>
@@ -276,7 +285,7 @@
                 <div class="final-green-banner card panel">
                   <div class="status-card big green final-green-card"><span class="green-dot"></span></div>
                   <div class="final-green-title"></div>
-                  <div class="final-green-sub">The game ends now — final scores coming up</div>
+                  <div class="final-green-sub">The game ends now. Final scores coming up.</div>
                 </div>
               </div>
               <div id="game-start-overlay" class="game-start-overlay">
@@ -309,7 +318,7 @@
                 <p id="move-error" class="error hidden"></p>
               </div>
               <div id="discard-controls" class="hidden">
-                <h3>Faux Pas — discard a painting</h3>
+                <h3>Faux Pas: discard a painting</h3>
                 <div id="my-paintings" class="chip-row"></div>
                 <button type="button" id="btn-discard-painting" class="danger" disabled>Discard</button>
               </div>
@@ -318,7 +327,7 @@
           </div>
 
           <details class="card panel log-details">
-            <summary>Game log (advanced)</summary>
+            <summary>Game log (advanced) <span id="seed-display" class="muted"></span></summary>
             <div id="game-log" class="log"></div>
           </details>
 
@@ -383,7 +392,7 @@
                 <div class="final-green-banner card panel">
                   <div class="status-card big green final-green-card"><span class="green-dot"></span></div>
                   <div class="final-green-title"></div>
-                  <div class="final-green-sub">The game ends now — final scores coming up</div>
+                  <div class="final-green-sub">The game ends now. Final scores coming up.</div>
                 </div>
               </div>
               <div id="spec-game-start-overlay" class="game-start-overlay">
@@ -399,7 +408,7 @@
           </div>
 
           <details class="card panel log-details" open>
-            <summary>Game log</summary>
+            <summary>Game log <span id="spec-seed-display" class="muted"></span></summary>
             <div id="spec-game-log" class="log"></div>
           </details>
 
@@ -442,7 +451,7 @@
           <summary>How is the winner decided?</summary>
           <p class="hint">
             First, anyone with the least money left is eliminated from winning entirely. If two or
-            more players are tied for the least money, none of them are eliminated — everyone stays
+            more players are tied for the least money, none of them are eliminated. Everyone stays
             in contention. Among whoever remains, the highest total points wins. That total is
             calculated in two steps, in order: first add up the value of every painting you hold
             plus a Passe's −5 (if you hold one); only then does any Prestige Card (×2) or Scandale

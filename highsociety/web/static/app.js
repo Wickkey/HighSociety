@@ -118,7 +118,7 @@ function cardEl(card, big) {
 function cardBackEl() {
   const div = document.createElement('div');
   div.className = 'card-back';
-  div.title = 'Hidden — enable "Reveal cards" to see what this is';
+  div.title = 'Hidden. Enable "Reveal cards" to see what this is.';
   return div;
 }
 
@@ -514,6 +514,15 @@ function resetGameState(myUsername, status) {
     maxBid: 0,
     myAuctionBid: 0, // my own cumulative committed bid for the *current* auction only
     turnPlayer: null,
+    // When the current turnPlayer's turn actually started, client-side --
+    // lets renderOpponents show a live countdown for *whoever's* turn it
+    // is, the same math startMoveTimer already uses for your own turn,
+    // just anchored to this instead of a server-sent deadline. Approximate
+    // (a few hundred ms of real network latency before this client even
+    // saw the turn_start that set it), which is fine for a glance at an
+    // opponent's clock -- the real deadline enforced server-side never
+    // depends on this.
+    turnStartedAt: null,
     myUsername,
     myPoints: 0,
     myStatusCards: [],
@@ -529,7 +538,40 @@ function resetGameState(myUsername, status) {
     // limit) — used only to scale the move-timer's "urgent" warning window
     // (see urgentWindowSeconds), not re-sent per move.
     turnTimeLimit: status ? status.turn_time_limit : null,
+    // Shown in-game (see applyRoomDisplaySettings) so a game can be
+    // reported/reproduced precisely -- "it happened in seed 12345" -- even
+    // if nobody thought to set one deliberately when hosting.
+    seed: status ? status.seed : null,
   };
+  // logLine()/appendChatLine() only ever append — without this, a rematch
+  // (or any other resetGameState call, e.g. reconnecting into a genuinely
+  // new game) left the previous game's whole narration log, and chat,
+  // sitting above whatever the new game starts writing underneath it.
+  ['game-log', 'spec-game-log', 'player-chat-log', 'spec-chat-log'].forEach((id) => { $(id).innerHTML = ''; });
+  // resetGameState only just rebuilt the in-memory `game` object above --
+  // the DOM itself still shows whatever the *previous* game (or, for a
+  // spectator/reconnect, whatever this tab happened to render before)
+  // last rendered: the old auction card, opponents, points. That stays
+  // visible until the new game's first live event overwrites it, which
+  // can be a couple of seconds away (see countdown_to_start) -- long
+  // enough to visibly flash stale state right as a new game starts.
+  // Re-rendering both prefixes now (this call doesn't know in advance
+  // whether it's for a player or spectator context, and doing the
+  // "wrong" one is harmless -- those elements just stay hidden until
+  // actually needed) forces every panel to reflect the fresh, empty
+  // state immediately instead.
+  hide($('move-panel'));
+  $('move-panel').classList.remove('pending');
+  renderAuctionPanel(false);
+  renderAuctionPanel(true);
+  renderMyPanel();
+  renderMoneyChips([]);
+  // See style.css's .move-panel.has-timer rule: reserves the move-timer
+  // badge's own layout space for the whole game so it starting/stopping
+  // doesn't resize the panel, but only in rooms that actually have a
+  // per-move timer -- an untimed room's panel never shows this badge at
+  // all, so it should stay exactly as compact as it always was.
+  $('move-panel').classList.toggle('has-timer', !!game.turnTimeLimit);
   applyRoomDisplaySettings();
 }
 
@@ -545,6 +587,10 @@ function applyRoomDisplaySettings() {
   $('reveal-cards-status').textContent = label;
   $('spec-reveal-cards-status').textContent = label;
   $('game-log').closest('details').classList.toggle('hidden', !game.showLogs);
+
+  const seedLabel = game.seed != null ? `(Seed: ${game.seed})` : '';
+  $('seed-display').textContent = seedLabel;
+  $('spec-seed-display').textContent = seedLabel;
 }
 
 function seedOpponents(status, myUsername) {
@@ -667,7 +713,7 @@ async function onHomeLinkClick() {
   const midGame = isActivelyPlayingLiveGame();
   if (midGame) {
     const ok = await confirmDialog(
-      'Leave this game? You can rejoin from this device later.',
+      'Leave the game? You can rejoin later.',
       'Leave',
     );
     if (!ok) return;
@@ -699,7 +745,7 @@ function renderRoomsList(rooms) {
   updateJoinTileLiveBadge(rooms.length);
   const container = $('public-rooms-list');
   if (!rooms.length) {
-    container.innerHTML = '<p class="muted">No public games open right now — host one below!</p>';
+    container.innerHTML = '<p class="muted">No public games right now.</p>';
     return;
   }
   container.innerHTML = '';
@@ -707,7 +753,7 @@ function renderRoomsList(rooms) {
     const row = document.createElement('div');
     row.className = 'room-row';
     const label = document.createElement('span');
-    label.textContent = `Room ${r.room_code} — ${r.joined}/${r.seats} seats filled`;
+    label.textContent = `Room ${r.room_code} (${r.joined}/${r.seats} seats filled)`;
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'secondary';
@@ -793,8 +839,8 @@ function renderForStatus(status) {
     $('join-form').classList.add('hidden');
     $('join-waiting').classList.add('hidden');
     $('lobby-status').textContent = hasResigned
-      ? "You resigned from this game — you can watch as a spectator."
-      : 'A game is already in progress — you can watch as a spectator.';
+      ? "You resigned from this game. You can watch as a spectator."
+      : 'A game is already in progress. You can watch as a spectator.';
   }
 }
 
@@ -827,7 +873,7 @@ async function _tickWaitingRoomStatus() {
     return;
   }
   const names = status.joined.map((p) => `${p.name}${p.is_bot ? ' 🤖' : ''}`).join(', ') || 'nobody yet';
-  $('lobby-status').textContent = `Seats filled: ${status.joined.length}/${status.seats} — ${names}`;
+  $('lobby-status').textContent = `Seats filled: ${status.joined.length}/${status.seats} (${names})`;
 }
 
 function startWaitingRoomPolling() {
@@ -866,11 +912,13 @@ function renderLobby(status) {
   $('join-form').classList.remove('hidden');
   $('join-waiting').classList.add('hidden');
   applyJoinIdentityDefaults();
-  const visibilityNote = status.visibility === 'private' ? ' (private — share this code with friends)' : ' (public)';
+  const visibilityNote = status.visibility === 'private' ? ' (private, share this code with friends)' : ' (public)';
   $('room-code-text').textContent = `Room code: ${status.room_code}${visibilityNote}`;
   show($('room-code-display'));
+  $('room-link-input').value = `${location.origin}${location.pathname}?room=${encodeURIComponent(status.room_code)}`;
+  show($('room-link-row'));
   const names = status.joined.map((p) => `${p.name}${p.is_bot ? ' 🤖' : ''}`).join(', ') || 'nobody yet';
-  $('lobby-status').textContent = `Seats filled: ${status.joined.length}/${status.seats} — ${names}`;
+  $('lobby-status').textContent = `Seats filled: ${status.joined.length}/${status.seats} (${names})`;
   if (pendingIdentifyError) {
     showError($('join-error'), pendingIdentifyError);
     pendingIdentifyError = null;
@@ -974,7 +1022,7 @@ function renderRematchPanel() {
     hide(voteActions);
     $('rematch-status-text').textContent = waitingOn.length
       ? `Waiting on ${waitingOn.join(', ')} to accept the rematch…`
-      : 'Everyone accepted — starting the rematch…';
+      : 'Everyone accepted. Starting the rematch…';
   } else {
     show(voteActions);
     $('rematch-status-text').textContent = `${requestedBy} wants a rematch. Accept?`;
@@ -988,8 +1036,8 @@ function fillRematchBotForm(mix) {
   $('rematch-bot-medium').value = counts.medium;
   $('rematch-bot-hard').value = counts.hard;
   $('rematch-bot-hint').textContent = rematchBotSeats
-    ? `${rematchBotSeats} bot seat${rematchBotSeats === 1 ? '' : 's'} to fill — same as last time by default, but changeable.`
-    : 'No bot seats this time — every seat is a returning player.';
+    ? `${rematchBotSeats} bot seat${rematchBotSeats === 1 ? '' : 's'} to fill (same as last time by default, but changeable).`
+    : 'No bot seats this time. Every seat is a returning player.';
 }
 
 function onRequestRematchClick() {
@@ -1056,9 +1104,22 @@ function wireStaticHandlers() {
   document.querySelectorAll('.home-back').forEach((btn) => {
     btn.addEventListener('click', showHomeTiles);
   });
+  // Same visual style as .home-back, but a different destination: this one
+  // lives on the lobby screen (already past home-tile selection, possibly
+  // already holding an open socket), so it needs onHomeLinkClick's real
+  // "leave the room" behavior (closes the socket, confirms first if a game
+  // is actually in progress) rather than just switching which home panel
+  // is showing.
+  $('btn-leave-lobby-back').addEventListener('click', onHomeLinkClick);
   $('btn-create-game').addEventListener('click', onCreateGame);
   $('btn-join-by-code').addEventListener('click', onJoinByCode);
   $('btn-copy-room-link').addEventListener('click', onCopyRoomLink);
+  // A readonly field can still be selected and copied by hand (Ctrl/Cmd+C)
+  // even where the Clipboard API used by the button above is blocked --
+  // select-all on focus/click means that always works with zero extra
+  // taps, not just for whoever specifically clicks into the text first.
+  $('room-link-input').addEventListener('focus', (e) => e.target.select());
+  $('room-link-input').addEventListener('click', (e) => e.target.select());
   $('btn-add-bot').addEventListener('click', onAddBot);
   $('btn-join').addEventListener('click', onJoin);
   $('btn-spectate-link').addEventListener('click', () => {
@@ -1103,7 +1164,7 @@ function wireStaticHandlers() {
   window.addEventListener('beforeunload', (e) => {
     if (isActivelyPlayingLiveGame()) {
       e.preventDefault();
-      e.returnValue = 'Leaving now drops you from the game — there is no reconnect.';
+      e.returnValue = 'Leaving now drops you from the game. There is no reconnect.';
     }
   });
 }
@@ -1121,18 +1182,17 @@ async function onCreateGame(event) {
   for (const [type, n] of Object.entries(counts)) for (let i = 0; i < n; i += 1) botMix.push(type);
 
   const turnTimeRaw = $('host-turn-time').value;
+  const seedRaw = $('host-seed').value;
   const body = {
     seats,
     bot_mix: botMix,
-    // No seed field in the UI on purpose — a reproducible game is a
-    // developer/testing concern (real training/testing can go through the
-    // backend directly), not something a hosting player needs to see.
     bot_think_time: parseFloat($('host-think-time').value || '1.5'),
     visibility: $('host-visibility-private').checked ? 'private' : 'public',
     turn_time_limit: turnTimeRaw ? parseFloat(turnTimeRaw) : null,
     reveal_cards: $('host-reveal-cards').checked,
     show_logs: $('host-show-logs').checked,
   };
+  if (seedRaw) body.seed = parseInt(seedRaw, 10);
   try {
     const status = await fetchJSON('/api/create_game', {
       method: 'POST',
@@ -1163,9 +1223,12 @@ function onJoinByCode(event) {
 // versus a bare code which still makes the recipient find the site
 // themselves and type it in. The code itself is still visible as plain
 // text right next to this button for anyone who'd rather read it aloud.
+// Reads from #room-link-input (renderLobby already fills it in) rather
+// than rebuilding the URL again here, so there's exactly one place that
+// knows how to construct it.
 async function onCopyRoomLink() {
-  if (!currentRoomCode) return;
-  const url = `${location.origin}${location.pathname}?room=${encodeURIComponent(currentRoomCode)}`;
+  const url = $('room-link-input').value;
+  if (!url) return;
   try {
     await navigator.clipboard.writeText(url);
   } catch (e) {
@@ -1251,7 +1314,7 @@ function handlePlayerMessage(msg) {
         showScreen('screen-join');
         $('join-form').classList.add('hidden');
         $('join-waiting').classList.add('hidden');
-        $('lobby-status').textContent = msg.prompt || 'A game is already in progress — you can watch as a spectator.';
+        $('lobby-status').textContent = msg.prompt || 'A game is already in progress. You can watch as a spectator.';
       } else {
         pendingIdentifyError = msg.prompt;
         ws.close();
@@ -1290,17 +1353,6 @@ function handlePlayerMessage(msg) {
       currentRematch = null;
       const myUsername = game.myUsername;
       resetGameState(myUsername, lastStatus);
-      // resetGameState only resets the in-memory model — the DOM still shows
-      // whatever the *previous* game last rendered (final points, opponents'
-      // won cards, auction count) until the new game's first live event
-      // overwrites it, which can be a couple of seconds away (see
-      // countdown_to_start). Force it to reflect the fresh, empty state
-      // immediately instead of flashing the old game's numbers first.
-      hide($('move-panel'));
-      $('move-panel').classList.remove('pending');
-      renderAuctionPanel(false);
-      renderMyPanel();
-      renderMoneyChips([]);
       // Resign works anytime once in a game (see onResign) -- re-enable it
       // for the fresh game immediately rather than waiting for its first
       // PLAYER_STATE/PLAYER_MOVE.
@@ -1618,6 +1670,7 @@ function applyAuctionUpdate(msg, isSpectator) {
     game.maxBid = 0;
     game.myAuctionBid = 0;
     game.turnPlayer = d.starting_player;
+    game.turnStartedAt = Date.now();
     if (d.starting_player !== game.myUsername) ensureOpponent(d.starting_player);
     // Everyone's back in for the new auction — clear last round's greyed-out state.
     Object.values(game.opponents).forEach((o) => { o.outOfAuction = false; });
@@ -1625,6 +1678,7 @@ function applyAuctionUpdate(msg, isSpectator) {
     logLine(`🃏 Auction #${d.round_number}: ${describeCard(d.card)}`, isSpectator);
   } else if (d.kind === 'turn_start') {
     game.turnPlayer = d.player;
+    game.turnStartedAt = Date.now();
     if (d.player !== game.myUsername) ensureOpponent(d.player);
   } else if (d.kind === 'bid') {
     if (d.player === game.myUsername) {
@@ -1715,6 +1769,43 @@ function applyPlayerState(msg) {
 }
 
 function applyPlayerMove(msg) {
+  const moveSeq = msg.data && msg.data.move_seq;
+  if (moveSeq != null && lastAnsweredMoveSeq != null && moveSeq <= lastAnsweredMoveSeq) {
+    // A stale re-send, over the network, of the exact prompt already
+    // answered (see currentMoveSeq's own comment) -- our own answer
+    // simply hasn't reached/been processed by the server yet, or crossed
+    // this message in flight. Applying it anyway would re-open an
+    // already-answered, already-greyed move panel right after the player
+    // acted on it -- a real, live-reproduced bug ("I placed my bid, panel
+    // didn't grey out"). Ignore entirely; the panel is already correct.
+    return;
+  }
+  currentMoveSeq = moveSeq;
+
+  // A genuinely new prompt (either the next real turn, or a re-prompt after
+  // an invalid bid) is exactly the one place it's safe to allow another
+  // submission -- see hasSubmittedCurrentMove's own definition below for
+  // why this guard exists at all.
+  hasSubmittedCurrentMove = false;
+
+  // Self-healing guarantee, independent of any other message: receiving a
+  // PLAYER_MOVE is unambiguous proof it's this player's own turn right now,
+  // so the header can be corrected from this message alone rather than
+  // depending on a *separate* AUCTION_UPDATE (broadcast or sync) having
+  // also landed and rendered successfully. Closes a real, live-reproduced
+  // bug where the bid panel opened correctly (this message got through)
+  // while the header above it stayed on an earlier round/player -- even
+  // after gameplay.py started sending an accompanying "sync" AUCTION_UPDATE
+  // alongside every PLAYER_MOVE (see _handle_player_turn), since that's
+  // still a second, independent send() that isn't guaranteed to survive
+  // whatever dropped the original broadcast on a flaky connection. This
+  // doesn't by itself fix a stale round number/card image if that
+  // broadcast never arrives, but it eliminates the most confusing and
+  // dangerous half of the symptom -- the panel and the "whose turn" label
+  // disagreeing -- unconditionally.
+  game.turnPlayer = game.myUsername;
+  renderAuctionPanel(false);
+
   $('move-panel').classList.remove('hidden', 'pending');
   const bidControls = $('bid-controls');
   const discardControls = $('discard-controls');
@@ -1757,6 +1848,35 @@ function applyPlayerMove(msg) {
 // never appears — the feature is a no-op unless a host opts in.
 let moveTimerInterval = null;
 let moveTimerDeadline = null;
+// Hard guard against sending more than one RESPONSE per prompt, independent
+// of the move-panel's own CSS greying-out (.pending's pointer-events:none)
+// — a real, live-reproduced bug: a player unsure whether their first click
+// registered (e.g. during the brief window before the panel visibly greys)
+// clicking Pass/Place Bid again didn't just get ignored -- both clicks were
+// genuine RESPONSE messages sent over the wire. The server only reads one
+// at a time (see NetworkPlayer.get_bid()'s blocking receive()), so the
+// *second* one just sat queued and got silently consumed as the answer to
+// whatever this player's next real prompt turned out to be -- a totally
+// different round/card/decision than the one they thought they were
+// answering. Set the instant any move is submitted (or the local clock
+// hits 0); cleared only when a genuinely new PLAYER_MOVE arrives
+// (applyPlayerMove) for the *next* prompt, so at most one RESPONSE can ever
+// be in flight per prompt.
+let hasSubmittedCurrentMove = false;
+// The move_seq (see gameplay.py's _current_move_seq) of whichever prompt
+// is currently open, and of the last one actually answered. Distinct from
+// hasSubmittedCurrentMove above: that guards *this browser's own* double
+// click; these two let applyPlayerMove tell "a stale re-send, over the
+// network, of the exact prompt I already answered" apart from "a
+// genuinely new prompt" -- something timing alone can't do reliably (an
+// answer sent just as the server's own second prompt was already in
+// flight arrives at the client *after* it, looking identical to a fresh
+// turn unless the two carry different ids). Both start null; a msg with
+// no move_seq at all (e.g. a test double, or an older deployed version
+// briefly mismatched with this client during a rollout) is always treated
+// as fresh, matching this feature's total absence today.
+let currentMoveSeq = null;
+let lastAnsweredMoveSeq = null;
 // Whether the double-beep has already fired for the *current* move's urgent
 // window — set once on the transition into "urgent", not per second, so it
 // never repeats every tick (see updateMoveTimerDisplay).
@@ -1845,6 +1965,26 @@ function playUrgentDoubleBeep() {
 // rather than disappearing entirely between your turns.
 function setMovePending() {
   clearMoveTimer(); // acted — no need to keep counting down what's already submitted
+  // Covers the local clock reaching 0 (an anticipated auto-pass — the
+  // player never acted, so onPass()/onPlaceBid() never got a chance to
+  // clear this themselves): without this, a rejected bid's "Insufficient
+  // bid" error stayed on screen through the auto-pass and into this
+  // player's *next* real turn, a stale message next to a completely fresh
+  // prompt. Redundant (but harmless) on the submit-handler paths, which
+  // already hide() this themselves before calling here. Still correctly
+  // left up through an immediate same-turn retry after a rejected bid —
+  // that path (INPUT_ERROR) never calls setMovePending() at all.
+  hide($('move-error'));
+  // Also reachable when the local clock hits 0 (see updateMoveTimerDisplay)
+  // *before* any of this player's own clicks -- belt-and-suspenders
+  // alongside the .pending CSS lock below (pointer-events:none) so a click
+  // landing in whatever gap exists before that takes effect still can't
+  // send a second RESPONSE (see hasSubmittedCurrentMove's own comment).
+  hasSubmittedCurrentMove = true;
+  // Records this as the last-answered prompt (see currentMoveSeq's own
+  // comment) so a stale re-send of it arriving afterward gets ignored by
+  // applyPlayerMove instead of re-opening this now-pending panel.
+  lastAnsweredMoveSeq = currentMoveSeq;
   $('move-panel').classList.add('pending');
   // The panel is now correctly blocked, but the server's broadcast of what
   // actually happens next (whose turn it really is) hasn't arrived yet --
@@ -1903,10 +2043,10 @@ function renderAuctionPanel(isSpectator) {
 // obvious from the card's face value alone.
 const CARD_INFO_TEXT = {
   Painting: 'Normal auction. Highest bidder wins and pays their bid. Worth its printed value in points.',
-  PrestigeCard: 'Normal auction. Highest bidder wins and pays their bid. Doubles your entire final score — high stakes!',
-  FauxPas: "Disgrace auction — opposite rules! The FIRST player to pass takes this card, and everyone who raised loses that money for nothing. Taking it means you must immediately discard a Painting you own (or your next one, if you don't have one yet).",
-  Passe: 'Disgrace auction — opposite rules! The FIRST player to pass takes this card, and everyone who raised loses that money for nothing. Costs you 5 points.',
-  Scandale: 'Disgrace auction — opposite rules! The FIRST player to pass takes this card, and everyone who raised loses that money for nothing. Halves your entire final score.',
+  PrestigeCard: 'Normal auction. Highest bidder wins and pays their bid. Doubles your entire final score. High stakes!',
+  FauxPas: "Disgrace auction: opposite rules! The FIRST player to pass takes this card, and everyone who raised loses that money for nothing. Taking it means you must immediately discard a Painting you own (or your next one, if you don't have one yet).",
+  Passe: 'Disgrace auction: opposite rules! The FIRST player to pass takes this card, and everyone who raised loses that money for nothing. Costs you 5 points.',
+  Scandale: 'Disgrace auction: opposite rules! The FIRST player to pass takes this card, and everyone who raised loses that money for nothing. Halves your entire final score.',
 };
 
 // Keeps the ⓘ button (and its popover's contents) next to the auction card
@@ -1975,7 +2115,7 @@ function renderOpponents(isSpectator) {
     if (!row) {
       row = document.createElement('div');
       row.dataset.username = username;
-      row.innerHTML = '<div class="opponent-header"><span class="name"></span><span class="pts"></span></div>'
+      row.innerHTML = '<div class="opponent-header"><span class="name"></span><span class="opp-timer"></span><span class="pts"></span></div>'
         + '<div class="chip-row small"></div>';
     }
     // appendChild on an already-attached node moves it -- calling this
@@ -2003,6 +2143,22 @@ function renderOpponents(isSpectator) {
     row.querySelector('.name').textContent = `${o.name}${statusSuffix}`;
     row.querySelector('.pts').textContent = ptsLabel;
 
+    // Live countdown for whichever opponent's turn it currently is —
+    // same math as your own move-timer (startMoveTimer), just anchored to
+    // game.turnStartedAt (set when their turn_start/auction_start arrived)
+    // instead of a value this specific client was sent. Only meaningful
+    // for a timed room; untimed rooms never set turnTimeLimit, so this
+    // stays blank for everyone, same as today.
+    const timerEl = row.querySelector('.opp-timer');
+    if (isCurrentTurn && game.turnTimeLimit && game.turnStartedAt) {
+      const remaining = Math.max(0, game.turnTimeLimit - (Date.now() - game.turnStartedAt) / 1000);
+      timerEl.textContent = `⏰ ${Math.ceil(remaining)}s`;
+      timerEl.classList.toggle('urgent', remaining > 0 && remaining <= urgentWindowSeconds());
+    } else {
+      timerEl.textContent = '';
+      timerEl.classList.remove('urgent');
+    }
+
     const chips = row.querySelector('.chip-row');
     chips.innerHTML = '';
     o.statusCards.forEach((c) => chips.appendChild(game.revealCards ? cardEl(c) : cardBackEl()));
@@ -2012,6 +2168,18 @@ function renderOpponents(isSpectator) {
     if (!seenUsernames.has(row.dataset.username)) row.remove();
   });
 }
+
+// Ticks the opponents list often enough for the live per-opponent
+// countdown above to actually look live, rather than only updating
+// whenever some unrelated event happens to trigger a re-render. Runs
+// unconditionally for the life of the page — renderOpponents() itself
+// already no-ops immediately if there's no game in progress, and once
+// there is one, this is the same cheap "update existing rows in place"
+// path every other event already drives, just on a timer instead of an
+// event. Coarser than your own move-timer's 250ms tick (that one gates a
+// real auto-pass-adjacent deadline you're expected to act on; this is
+// just a glance at someone else's).
+setInterval(() => { renderOpponents(false); renderOpponents(true); }, 500);
 
 function renderMyPanel() {
   $('my-username-label').textContent = game.myUsername || '';
@@ -2087,7 +2255,9 @@ function renderPaintingChoices(values) {
 }
 
 function onDiscardPainting() {
+  if (hasSubmittedCurrentMove) return;
   if (selectedDiscardValue === null) return;
+  hasSubmittedCurrentMove = true;
   ws.send(JSON.stringify({ message_type: 'RESPONSE', prompt: String(selectedDiscardValue) }));
   setMovePending();
 }
@@ -2095,9 +2265,11 @@ function onDiscardPainting() {
 // ------------------------------------------------------------- controls --
 
 function onPlaceBid() {
+  if (hasSubmittedCurrentMove) return;
   hide($('move-error'));
   const values = [...game.selectedBid];
   if (values.length === 0) { showError($('move-error'), 'Select at least one money card.'); return; }
+  hasSubmittedCurrentMove = true;
   ws.send(JSON.stringify({ message_type: 'RESPONSE', prompt: JSON.stringify(values) }));
   // Once sent, these chips are no longer "being added on top" — they're
   // already part of the committed bid. Without clearing this, the server's
@@ -2111,7 +2283,9 @@ function onPlaceBid() {
 }
 
 function onPass() {
+  if (hasSubmittedCurrentMove) return;
   hide($('move-error'));
+  hasSubmittedCurrentMove = true;
   ws.send(JSON.stringify({ message_type: 'RESPONSE', prompt: 'pass' }));
   setMovePending();
 }

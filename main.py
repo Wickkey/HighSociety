@@ -1,5 +1,6 @@
 import random
 
+from highsociety.code.gamecore.game_manager.auction_history import AuctionHistory
 from highsociety.code.gamecore.game_manager.gameplay import PlayGame
 from highsociety.code.common.utils.utility import get_all_configurations, validate_player_count
 from highsociety.code.common.logger_module.logger.logging_manager import LoggingManager
@@ -84,7 +85,7 @@ if __name__ == '__main__':
         recording = SessionRecorder.load(args.replay)
         players = build_replay_players(recording)
         print(f"▶️  Replaying {args.replay} (seed={recording['seed']}, {len(players)} players)")
-        game = PlayGame(players=players, mode='cli', seed=recording['seed'])
+        game = PlayGame(players=players, mode='cli', seed=recording['seed'], auction_history=AuctionHistory())
         game.play_game()
     else:
         bot_mix = [b.strip() for b in args.bots.split(',') if b.strip()] if args.bots else []
@@ -104,5 +105,5 @@ if __name__ == '__main__':
             players = [RecordingPlayer(p, recorder) for p in players]
             print(f"⏺️  Recording this session to {args.record} (seed={seed})")
 
-        game = PlayGame(players=players, mode='cli', seed=seed)
+        game = PlayGame(players=players, mode='cli', seed=seed, auction_history=AuctionHistory())
         game.play_game()

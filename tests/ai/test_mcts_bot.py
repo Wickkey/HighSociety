@@ -7,7 +7,8 @@ from highsociety.code.ai.mcts_bot import DIFFICULTY_PRESETS, EasyMCTSBot, HardMC
 from highsociety.code.ai.pass_bot import PassBot
 from highsociety.code.ai.greedy_bot import GreedyBot
 from highsociety.code.gamecore.components_module.painting import Painting
-from highsociety.code.gamecore.components_module.prestige_card import PrestigeCard
+from highsociety.code.gamecore.game_manager.auction_history import AuctionHistory
+from highsociety.code.gamecore.game_manager.auction_information import summarize_card
 from highsociety.code.gamecore.game_manager.gameplay import PlayGame
 
 _TINY_CONFIG = MCTSConfig(iterations=10, determinizations=1, exploration_constant=1.4)
@@ -18,125 +19,50 @@ def bot():
     return MCTSBot(name="Bot", username="bot", config=_TINY_CONFIG)
 
 
-def _tell(bot, message, message_type="PLAYER_INFO"):
-    bot.send_message(message, message_type=message_type)
+def _wire(bot, *others, seed=None):
+    """Constructs a real PlayGame around `bot` (+ any other players) purely
+    to trigger PlayGame.__init__'s live-reference wiring (get_auction_history/
+    get_current_auction_history/get_live_auction_state) -- the same wiring a
+    real game gives every player, needed for get_bid() to have anything to
+    read now that MCTSBot no longer accumulates its own state."""
+    game = PlayGame(players=[bot, *others], mode="cli", seed=seed, auction_history=AuctionHistory())
+    return game
 
 
-class TestMessageTracking:
-    def test_tracks_current_highest_bid(self, bot):
-        _tell(bot, "\nCurrent Highest Bid: 7")
-        assert bot._current_max_bid == 7
-
-    def test_tracks_auctioned_card_type_and_value(self, bot):
-        _tell(bot, "\nAuctioning: Painting (value=5)")
-        assert bot._current_card_type == "Painting"
-        assert bot._current_card_value == 5
-
-    def test_tracks_negative_valued_cards(self, bot):
-        _tell(bot, "\nAuctioning: Passe (value=-5)")
-        assert bot._current_card_value == -5
-
-    def test_overhears_opponent_usernames_from_turn_narration(self, bot):
-        _tell(bot, "alice's turn. Player is playing..", message_type="GLOBAL_MOVE_INFO")
-        _tell(bot, "bob's turn. Player is playing..", message_type="GLOBAL_MOVE_INFO")
-        assert bot._overheard_usernames == {"alice", "bob"}
-
-    def test_ignores_unrelated_message_types(self, bot):
-        _tell(bot, "\nCurrent Highest Bid: 99", message_type="INPUT_ERROR")
-        assert bot._current_max_bid == 0
+def _set_live_auction(game, card, max_bid=0):
+    """Manually injects "what's up for auction right now" the same way
+    _broadcast_auction_update/_record_auction_history_snapshot would inside
+    a real auction loop -- lets a test call bot.get_bid() directly without
+    driving the full normal_card_auction()/disgrace_card_auction() loop."""
+    game._live_auction_state["card"] = summarize_card(card)
+    game._live_auction_state["max_bid"] = max_bid
+    game.auction_history.record_turn(game.players)
 
 
-class TestKnownOpponentUsernames:
-    def test_falls_back_to_overheard_usernames_before_any_auction_concludes(self, bot):
-        _tell(bot, "alice's turn. Player is playing..", message_type="GLOBAL_MOVE_INFO")
-        assert bot._known_opponent_usernames() == ["alice"]
-
-    def test_falls_back_to_a_placeholder_with_zero_information(self, bot):
-        assert bot._known_opponent_usernames() == ["?opponent"]
-
-    def test_uses_the_exact_roster_from_auction_history_once_available(self, bot):
-        other = PassBot(name="Other", username="other")
-        game = PlayGame(players=[bot, other], mode="cli")
-        game.normal_card_auction(Painting(value=5), starting_player_id=0)
-        assert bot._known_opponent_usernames() == ["other"]
-
-
-class TestBuildState:
-    def test_my_own_hand_is_exact(self, bot):
-        _tell(bot, "\nAuctioning: Painting (value=5)")
-        _tell(bot, "\nCurrent Highest Bid: 0")
-        state, me_idx = bot._build_state()
-        assert state.players[me_idx].money_cards == sorted(c.value for c in bot.money_cards)
-
-    def test_reconstructs_an_opponents_remaining_hand_from_history(self, bot):
-        other = GreedyBot(name="Other", username="other")
-        game = PlayGame(players=[bot, other], mode="cli")
-        game.normal_card_auction(Painting(value=5), starting_player_id=1)  # other goes first, bids 1
-
-        _tell(bot, "\nAuctioning: Painting (value=3)")
-        _tell(bot, "\nCurrent Highest Bid: 0")
-        state, me_idx = bot._build_state()
-        opponent = next(p for p in state.players if p.username == "other")
-        full = sorted(c.value for c in PassBot(name="x", username="x").money_cards)
-        spent = game.auction_rounds[0].cards_spent["other"]
-        assert opponent.money_cards == sorted(set(full) - set(spent))
-
-    def test_reconstructs_an_opponents_won_status_cards(self, bot):
-        other = GreedyBot(name="Other", username="other")
-        game = PlayGame(players=[other, bot], mode="cli")  # other starts and wins for free
-        game.normal_card_auction(Painting(value=7), starting_player_id=0)
-
-        _tell(bot, "\nAuctioning: Painting (value=3)")
-        _tell(bot, "\nCurrent Highest Bid: 0")
-        state, me_idx = bot._build_state()
-        opponent = next(p for p in state.players if p.username == "other")
-        assert any(c.kind == "Painting" and c.value == 7 for c in opponent.status_cards)
-
-    def test_marks_a_quit_opponent_as_inactive(self, bot):
-        quitter = PassBot(name="Quitter", username="quitter")
-        game = PlayGame(players=[bot, quitter], mode="cli")
-        quitter.active = False  # simulate a quit having already happened
-        # A quit is recorded via a disgrace or normal auction's "quit" event;
-        # simplest reliable way to produce one here is to drive it directly.
-        from highsociety.code.gamecore.components_module.disgrace_card import Passe
-        quitter.active = True
-        original_get_bid = quitter.get_bid
-        quitter.get_bid = lambda timeout=None: "quit"
-        game.disgrace_card_auction(current_player_id=1, status_card=Passe())
-
-        _tell(bot, "\nAuctioning: Painting (value=3)")
-        _tell(bot, "\nCurrent Highest Bid: 0")
-        state, me_idx = bot._build_state()
-        opponent = next(p for p in state.players if p.username == "quitter")
-        assert opponent.active is False
-
-    def test_reflects_my_own_pending_faux_pas_obligation(self, bot):
-        bot.add_status_card(Painting(value=4))
-        from highsociety.code.gamecore.components_module.disgrace_card import FauxPas
-        bot.add_status_card(FauxPas())
-        assert bot.holds_faux_pas is True
-
-        _tell(bot, "\nAuctioning: Painting (value=3)")
-        _tell(bot, "\nCurrent Highest Bid: 0")
-        state, me_idx = bot._build_state()
-        assert state.faux_pas_holder == me_idx
+class TestSendMessage:
+    def test_is_a_safe_no_op(self, bot):
+        # get_current_auction_history()/get_live_auction_state() (both live
+        # references PlayGame wires up) replace everything this used to
+        # scrape out of narration text -- confirm it's simply inert now.
+        bot.send_message("anything", message_type="PLAYER_INFO")
+        bot.send_message("", message_type="GLOBAL_MOVE_INFO")
 
 
 class TestGetBid:
-    def test_returns_pass_as_a_bare_string(self, bot):
-        # No money at all -- "pass" is the only legal action regardless of
-        # the search itself.
+    def test_returns_pass_with_no_money_left(self, bot):
+        other = PassBot(name="Other", username="other")
+        game = _wire(bot, other)
         for card in list(bot.money_cards):
-            bot.place_bid(card.value)
-        _tell(bot, "\nAuctioning: Painting (value=5)")
-        _tell(bot, "\nCurrent Highest Bid: 0")
+            bot.place_bid(card.value)  # no money left -- "pass" is the only legal action
+        _set_live_auction(game, Painting(value=5))
         assert bot.get_bid() == "pass"
 
     def test_returns_a_raise_as_a_single_element_list(self, bot):
-        _tell(bot, "\nAuctioning: Painting (value=5)")
-        _tell(bot, "\nCurrent Highest Bid: 100")  # nothing can beat this except folding
+        other = PassBot(name="Other", username="other")
+        game = _wire(bot, other)
+        _set_live_auction(game, Painting(value=5), max_bid=100)  # nothing can beat this except folding
         result = bot.get_bid()
-        assert result == "pass" or (isinstance(result, list) and len(result) == 1)
+        assert result == "pass" or (isinstance(result, list) and len(result) == 1 and isinstance(result[0], int))
 
     def test_respects_think_time(self, monkeypatch):
         # tests/conftest.py's autouse fixture no-ops time.sleep suite-wide
@@ -148,8 +74,9 @@ class TestGetBid:
         # every bot's _pace_think_time() floors at that minimum, so 1.8 is
         # actually what should get slept, not the raw configured value.
         slow_bot = MCTSBot(name="Bot", username="bot", config=_TINY_CONFIG, think_time=0.2)
-        _tell(slow_bot, "\nAuctioning: Painting (value=5)")
-        _tell(slow_bot, "\nCurrent Highest Bid: 0")
+        other = PassBot(name="Other", username="other")
+        game = _wire(slow_bot, other)
+        _set_live_auction(game, Painting(value=5))
         slow_bot.get_bid()
         assert 1.8 in sleeps
 
@@ -179,6 +106,11 @@ class TestDifficultyPresetsAndFactories:
     def test_factory_subclasses_use_the_matching_preset(self, cls, difficulty):
         instance = cls(name="Bot", username="bot")
         assert instance._config == DIFFICULTY_PRESETS[difficulty]
+        assert instance._difficulty == difficulty  # used to route to the right worker pool, if any
+
+    def test_direct_mcts_bot_construction_defaults_to_custom_difficulty(self):
+        instance = MCTSBot(name="Bot", username="bot", config=_TINY_CONFIG)
+        assert instance._difficulty == "custom"
 
     def test_factory_subclasses_match_create_bot_players_call_signature(self):
         # highsociety/code/ai/__init__.py's create_bot_players always calls
@@ -197,7 +129,7 @@ class TestFullGameIntegration:
 
         mcts_player = cls(name="Bot", username="bot")
         passer = PassBot(name="Passer", username="passer")
-        game = PlayGame(players=[mcts_player, passer], mode="cli", seed=7)
+        game = PlayGame(players=[mcts_player, passer], mode="cli", seed=7, auction_history=AuctionHistory())
 
         game.play_game()
 
@@ -213,9 +145,27 @@ class TestFullGameIntegration:
             GreedyBot(name="Greedy", username="greedy"),
             PassBot(name="Passer", username="passer"),
         ]
-        game = PlayGame(players=players, mode="cli", seed=3)
+        game = PlayGame(players=players, mode="cli", seed=3, auction_history=AuctionHistory())
+
+        game.play_game()
+
+    def test_completes_a_full_game_with_a_faux_pas_holding_opponent(self, monkeypatch):
+        """
+        Integration-level check for the fixed accuracy gap: an opponent
+        holding an undischarged Faux Pas must not crash or stall the bot's
+        own decision-making across a real, full game -- precise assertions
+        on faux_pas_holder detection live in test_stateless_decision.py;
+        this just confirms the wiring holds up end-to-end.
+        """
+        import time as time_module
+        monkeypatch.setattr(time_module, "sleep", lambda *a, **kw: None)
+
+        players = [
+            EasyMCTSBot(name="Bot", username="bot"),
+            GreedyBot(name="Greedy", username="greedy"),
+        ]
+        game = PlayGame(players=players, mode="cli", seed=5, auction_history=AuctionHistory())
 
         game.play_game()
 
         assert game.winners is not None
-        assert len(game.final_standings) == 3

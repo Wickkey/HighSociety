@@ -23,12 +23,28 @@ def test_record_turn_snapshots_every_player_field(make_player):
     assert snap.username == "alice"
     assert snap.is_bot is False  # ScriptedPlayer extends CLIPlayer
     assert sorted(snap.money_cards) == sorted(c.value for c in alice.money_cards)
-    assert [p["type"] for p in snap.paintings] == ["Painting"]
-    assert snap.paintings[0]["value"] == 7
+    # status_cards covers every kind held, not just Paintings.
+    assert sorted(c["type"] for c in snap.status_cards) == ["FauxPas", "Painting"]
+    painting_summary = next(c for c in snap.status_cards if c["type"] == "Painting")
+    assert painting_summary["value"] == 7
+    assert snap.current_money_card_bids == []  # nothing committed to a live bid
     assert snap.points == alice.points
     assert snap.holds_faux_pas is True
     assert snap.faux_pas_discarded is False  # matches has_discarded_card
     assert snap.active is True
+
+
+def test_record_turn_captures_cards_committed_to_a_live_bid(make_player):
+    alice = make_player("Alice", username="alice")
+    alice.place_bid(3)  # commits the 3-value money card to a live, unresolved bid
+
+    history = AuctionHistory()
+    history.record_turn([alice])
+
+    snap = history.player_snapshots["alice"]
+    assert snap.current_money_card_bids == [3]
+    # money_cards correctly excludes the committed card, same as BasePlayer.money_cards itself.
+    assert 3 not in snap.money_cards
 
 
 def test_record_turn_marks_a_real_bot_as_is_bot():

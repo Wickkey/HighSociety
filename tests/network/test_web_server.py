@@ -236,6 +236,26 @@ def test_create_game_validates_and_normalizes_turn_time_limit(running_web_server
     assert no_limit_specified["turn_time_limit"] is None
 
 
+def test_seed_is_reported_explicit_or_random(running_web_server):
+    """The seed is shown in-game (see app.js's seed-display) so a game can
+    be reported/reproduced precisely -- confirm both an explicitly chosen
+    seed and an auto-generated one round-trip correctly through
+    /api/create_game and /api/status."""
+    client = web_server.app.test_client()
+
+    explicit = client.post(
+        "/api/create_game", json={"seats": 2, "bot_mix": ["pass"], "seed": 424242}
+    ).get_json()
+    assert explicit["seed"] == 424242
+    status = client.get(f"/api/status?room={explicit['room_code']}").get_json()
+    assert status["seed"] == 424242
+
+    random_seed = client.post(
+        "/api/create_game", json={"seats": 2, "bot_mix": ["pass"]}
+    ).get_json()
+    assert isinstance(random_seed["seed"], int)  # some real seed was picked, not null/omitted
+
+
 def test_add_bot_fills_an_empty_seat_and_can_start_the_game(running_web_server):
     client = web_server.app.test_client()
 

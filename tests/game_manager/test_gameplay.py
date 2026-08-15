@@ -2,6 +2,7 @@ import time
 
 import pytest
 
+from highsociety.code.ai.pass_bot import PassBot
 from highsociety.code.gamecore.game_manager.gameplay import PlayGame
 from highsociety.code.gamecore.game_manager.turn_clock import TurnClock
 from highsociety.code.gamecore.components_module.painting import Painting
@@ -80,6 +81,64 @@ class TestNormalCardAuction:
 
         assert p1.current_participation_in_auction is True
         assert p2.current_participation_in_auction is True
+
+    def test_player_gets_a_fresh_sync_of_round_and_card_before_their_own_turn(self, make_player):
+        """
+        Regression test for a real, live-reproduced bug: a player's own
+        turn prompt (which opens their bid panel -- for a NetworkPlayer,
+        get_bid()'s own PLAYER_MOVE) and the broadcast AUCTION_UPDATE
+        (which drives everyone's round/card/"whose turn" header) are two
+        independent messages. On a flaky connection, the broadcast can be
+        lost or fail to render while the direct prompt still gets through
+        -- leaving a player looking at a live, working bid panel under a
+        header frozen on an earlier round's card. See _handle_player_turn's
+        own comment for the full story.
+
+        Fix: _handle_player_turn sends a "sync" AUCTION_UPDATE (ground-truth
+        round/card/max_bid/turn_player for exactly this turn) directly to
+        the player right before their own turn prompt -- so their panel can
+        never be stale relative to the prompt they're about to see,
+        regardless of what happened to the broadcast.
+        """
+        painting = Painting(value=5)
+        bidder = make_player("Bidder", actions=[[10], "pass"])
+        rival = make_player("Rival", actions=["pass"])
+        game = make_game([bidder, rival])
+
+        game.normal_card_auction(painting, starting_player_id=0)
+
+        for player in (bidder, rival):
+            syncs = [m for m in player.sent_messages
+                     if m["message_type"] == "AUCTION_UPDATE" and m.get("data", {}).get("kind") == "sync"]
+            assert syncs, f"{player.username} never got a sync before their turn"
+            for sync in syncs:
+                assert sync["data"]["turn_player"] == player.username
+                assert sync["data"]["card"]["value"] == 5
+                assert sync["data"]["round_number"] == 1
+
+    def test_each_turn_gets_its_own_increasing_move_sequence(self, make_player):
+        """
+        Regression test for a real, live-reproduced bug (narrower than the
+        one above): a player's own answer can cross a re-sent prompt for
+        the same turn in flight over a real network. Without a way to
+        recognize a re-send as still the *same* decision, a naive client
+        could treat it as a fresh turn and re-open an already-answered,
+        already-greyed move panel. _handle_player_turn stamps
+        player._current_move_seq with a value from
+        PlayGame._next_move_sequence() before every turn -- this pins that
+        each distinct decision gets a strictly increasing one.
+        """
+        painting = Painting(value=5)
+        bidder = make_player("Bidder", actions=[[10], "pass"])
+        rival = make_player("Rival", actions=["pass"])
+        game = make_game([bidder, rival])
+
+        before = game._move_sequence
+        game.normal_card_auction(painting, starting_player_id=0)
+
+        # bidder acts first (starting_player_id=0), so their turn must have
+        # claimed the lower of the two sequence numbers handed out here.
+        assert before < bidder._current_move_seq < rival._current_move_seq
 
 
 class TestOutOfTurnDeparture:
@@ -330,6 +389,23 @@ class TestFauxPasPenalty:
         assert game.handle_faux_pas_penalty(0) is True
         assert player.status_cards == ()
 
+    def test_discard_prompt_gets_its_own_move_sequence(self, make_player):
+        """
+        Same wiring as normal_card_auction's turn prompts (see
+        TestNormalCardAuction.test_each_turn_gets_its_own_increasing_move_sequence)
+        applies to the Faux Pas discard prompt too -- handle_faux_pas_penalty
+        is a completely separate call site from _handle_player_turn, so it
+        needs its own PlayGame._next_move_sequence() call rather than
+        accidentally reusing/skipping a value.
+        """
+        player = make_player("P")
+        player.add_status_card(Painting(value=5))
+        game = make_game([player, make_player("Q")])
+
+        game.handle_faux_pas_penalty(0)
+
+        assert isinstance(player._current_move_seq, int)
+
     def test_none_choice_is_handled_without_crashing(self, make_player):
         """
         Regression test: choose_painting_to_discard() can legitimately return
@@ -501,6 +577,53 @@ class TestSeededDeterminism:
             return [(p.username, p.points, p.money_left()) for p in game.players]
 
         assert run() == run()
+
+    def test_same_seed_produces_the_same_turn_order_regardless_of_join_order(self, make_player):
+        """
+        For a real web room, humans get appended to PlayGame.players in
+        whatever real-world order their own connection happens to finish
+        joining (see web_server.py's ws_player) -- not something the seed has
+        any influence over. shuffle_players() must sort by username first so
+        the SAME seed reproduces the SAME final turn order regardless of that
+        real-world timing, not just when players happen to be constructed in
+        the same relative order every time.
+        """
+        alice1, bob1 = make_player("Alice", username="alice"), make_player("Bob", username="bob")
+        game1 = PlayGame(players=[alice1, bob1], mode="cli", seed=123)  # alice, bob
+        order1 = [p.username for p in game1.shuffle_players()]
+
+        bob2, alice2 = make_player("Bob", username="bob"), make_player("Alice", username="alice")
+        game2 = PlayGame(players=[bob2, alice2], mode="cli", seed=123)  # bob, alice -- reversed
+        order2 = [p.username for p in game2.shuffle_players()]
+
+        assert order1 == order2
+
+    def test_bot_shuffle_result_depends_on_creation_order_not_random_names(self):
+        """
+        A bot's own username is randomly assigned at creation (see
+        highsociety/code/ai/bot_names.py), unrelated to the game's seed --
+        sorting bots by that name would make the shuffle's *input* order
+        (and therefore its result) depend on the random name, not just the
+        seed and creation order. Two games with the same seed and the same
+        bot creation order, but different (here, deliberately swapped)
+        usernames, must still shuffle the "first created" bot to the same
+        final position both times -- confirming bot ordering is a function
+        of creation order, never of the name they happened to get.
+        """
+        def make_two_bots(name1, name2):
+            return [PassBot(name="Bot1", username=name1), PassBot(name="Bot2", username=name2)]
+
+        players_a = make_two_bots("zeta_bot", "alpha_bot")
+        game_a = PlayGame(players=players_a, mode="cli", seed=7)
+        game_a.shuffle_players()
+        first_created_position_a = game_a.players.index(players_a[0])
+
+        players_b = make_two_bots("alpha_bot", "zeta_bot")  # same creation order, swapped names
+        game_b = PlayGame(players=players_b, mode="cli", seed=7)
+        game_b.shuffle_players()
+        first_created_position_b = game_b.players.index(players_b[0])
+
+        assert first_created_position_a == first_created_position_b
 
 
 class TestTurnDuration:
