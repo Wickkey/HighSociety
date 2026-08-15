@@ -359,6 +359,35 @@ class PlayGame():
                 created_at = created_at)
             else:
                 p.send_message(f"Your Turn!", message_type = "PLAYER_MOVE", created_at = created_at)
+                # Defensive resync sent straight to this player alongside
+                # their own turn prompt: guarantees their auction panel
+                # (round #, card shown, "whose turn" label) matches what
+                # they're about to act on, even if the broadcast
+                # auction_start/turn_start for this exact turn never
+                # actually lands or renders on their end (a dropped
+                # WebSocket frame on a flaky connection, a client-side
+                # exception mid-render, etc.) — a real, reproduced bug
+                # where a player's move panel opened live and correct
+                # while the auction panel above it stayed frozen on a
+                # previous round's card and a stale "X's turn" label,
+                # since those two panels are populated by two independent
+                # messages and only one of them got through. Same message
+                # shape as web_server.py's reconnect catch-up
+                # (_send_reconnect_catchup/get_live_auction_state), just
+                # sent proactively on every turn instead of only after a
+                # reconnect. Built directly from this call's own
+                # arguments (not self._live_auction_state) so it can't be
+                # stale relative to *this* turn regardless of call order.
+                p.send_message(
+                    "", message_type="AUCTION_UPDATE",
+                    data={
+                        "round_number": len(self.auction_rounds) + 1,
+                        "kind": "sync",
+                        "card": summarize_card(status_card),
+                        "max_bid": max_bid,
+                        "turn_player": player.username,
+                    },
+                )
         for s in (self.spectators or []):
             if not s.active:
                 continue

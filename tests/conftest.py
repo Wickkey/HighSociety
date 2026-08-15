@@ -74,6 +74,11 @@ class ScriptedPlayer(CLIPlayer):
         self._actions = list(actions or [])
         self._default_action = default_action
         self.messages = []
+        # Full record of every send_message() call (message_type/data
+        # included, not just the string) -- .messages above only ever kept
+        # the plain-text prompt, which can't tell apart e.g. two different
+        # AUCTION_UPDATE kinds sent with the same empty prompt string.
+        self.sent_messages = []
 
     def get_bid(self, timeout=None):
         if self._actions:
@@ -82,6 +87,7 @@ class ScriptedPlayer(CLIPlayer):
 
     def send_message(self, message, message_type=None, created_at=None, **kwargs):
         self.messages.append(message)
+        self.sent_messages.append({"message": message, "message_type": message_type, **kwargs})
 
     def choose_painting_to_discard(self):
         paintings = [c for c in self.status_cards if isinstance(c, Painting)]

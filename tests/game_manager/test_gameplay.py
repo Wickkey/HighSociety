@@ -82,6 +82,41 @@ class TestNormalCardAuction:
         assert p1.current_participation_in_auction is True
         assert p2.current_participation_in_auction is True
 
+    def test_player_move_is_always_accompanied_by_a_fresh_sync_of_round_and_card(self, make_player):
+        """
+        Regression test for a real, live-reproduced bug: a player's own
+        PLAYER_MOVE prompt (which opens their bid panel) and the broadcast
+        AUCTION_UPDATE (which drives everyone's round/card/"whose turn"
+        header) are two independent messages. On a flaky connection, the
+        broadcast can be lost or fail to render while the direct prompt
+        still gets through -- leaving a player looking at a live, working
+        bid panel under a header frozen on an earlier round's card. See
+        _handle_player_turn's own comment for the full story.
+
+        Fix: every PLAYER_MOVE is now immediately followed, on that same
+        player's own connection, by a "sync" AUCTION_UPDATE carrying the
+        ground-truth round/card/max_bid/turn_player for exactly this turn
+        -- so their panel can never be stale relative to the prompt they're
+        actually looking at, regardless of what happened to the broadcast.
+        """
+        painting = Painting(value=5)
+        bidder = make_player("Bidder", actions=[[10], "pass"])
+        rival = make_player("Rival", actions=["pass"])
+        game = make_game([bidder, rival])
+
+        game.normal_card_auction(painting, starting_player_id=0)
+
+        for player in (bidder, rival):
+            move_indices = [i for i, m in enumerate(player.sent_messages) if m["message_type"] == "PLAYER_MOVE"]
+            assert move_indices, f"{player.username} was never prompted"
+            for i in move_indices:
+                sync = player.sent_messages[i + 1]
+                assert sync["message_type"] == "AUCTION_UPDATE"
+                assert sync["data"]["kind"] == "sync"
+                assert sync["data"]["turn_player"] == player.username
+                assert sync["data"]["card"]["value"] == 5
+                assert sync["data"]["round_number"] == 1
+
 
 class TestOutOfTurnDeparture:
     """
