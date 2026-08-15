@@ -118,7 +118,7 @@ function cardEl(card, big) {
 function cardBackEl() {
   const div = document.createElement('div');
   div.className = 'card-back';
-  div.title = 'Hidden — enable "Reveal cards" to see what this is';
+  div.title = 'Hidden. Enable "Reveal cards" to see what this is.';
   return div;
 }
 
@@ -588,7 +588,7 @@ function applyRoomDisplaySettings() {
   $('spec-reveal-cards-status').textContent = label;
   $('game-log').closest('details').classList.toggle('hidden', !game.showLogs);
 
-  const seedLabel = game.seed != null ? `— Seed: ${game.seed}` : '';
+  const seedLabel = game.seed != null ? `(Seed: ${game.seed})` : '';
   $('seed-display').textContent = seedLabel;
   $('spec-seed-display').textContent = seedLabel;
 }
@@ -753,7 +753,7 @@ function renderRoomsList(rooms) {
     const row = document.createElement('div');
     row.className = 'room-row';
     const label = document.createElement('span');
-    label.textContent = `Room ${r.room_code} — ${r.joined}/${r.seats} seats filled`;
+    label.textContent = `Room ${r.room_code} (${r.joined}/${r.seats} seats filled)`;
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'secondary';
@@ -839,8 +839,8 @@ function renderForStatus(status) {
     $('join-form').classList.add('hidden');
     $('join-waiting').classList.add('hidden');
     $('lobby-status').textContent = hasResigned
-      ? "You resigned from this game — you can watch as a spectator."
-      : 'A game is already in progress — you can watch as a spectator.';
+      ? "You resigned from this game. You can watch as a spectator."
+      : 'A game is already in progress. You can watch as a spectator.';
   }
 }
 
@@ -873,7 +873,7 @@ async function _tickWaitingRoomStatus() {
     return;
   }
   const names = status.joined.map((p) => `${p.name}${p.is_bot ? ' 🤖' : ''}`).join(', ') || 'nobody yet';
-  $('lobby-status').textContent = `Seats filled: ${status.joined.length}/${status.seats} — ${names}`;
+  $('lobby-status').textContent = `Seats filled: ${status.joined.length}/${status.seats} (${names})`;
 }
 
 function startWaitingRoomPolling() {
@@ -912,11 +912,11 @@ function renderLobby(status) {
   $('join-form').classList.remove('hidden');
   $('join-waiting').classList.add('hidden');
   applyJoinIdentityDefaults();
-  const visibilityNote = status.visibility === 'private' ? ' (private — share this code with friends)' : ' (public)';
+  const visibilityNote = status.visibility === 'private' ? ' (private, share this code with friends)' : ' (public)';
   $('room-code-text').textContent = `Room code: ${status.room_code}${visibilityNote}`;
   show($('room-code-display'));
   const names = status.joined.map((p) => `${p.name}${p.is_bot ? ' 🤖' : ''}`).join(', ') || 'nobody yet';
-  $('lobby-status').textContent = `Seats filled: ${status.joined.length}/${status.seats} — ${names}`;
+  $('lobby-status').textContent = `Seats filled: ${status.joined.length}/${status.seats} (${names})`;
   if (pendingIdentifyError) {
     showError($('join-error'), pendingIdentifyError);
     pendingIdentifyError = null;
@@ -1020,7 +1020,7 @@ function renderRematchPanel() {
     hide(voteActions);
     $('rematch-status-text').textContent = waitingOn.length
       ? `Waiting on ${waitingOn.join(', ')} to accept the rematch…`
-      : 'Everyone accepted — starting the rematch…';
+      : 'Everyone accepted. Starting the rematch…';
   } else {
     show(voteActions);
     $('rematch-status-text').textContent = `${requestedBy} wants a rematch. Accept?`;
@@ -1034,8 +1034,8 @@ function fillRematchBotForm(mix) {
   $('rematch-bot-medium').value = counts.medium;
   $('rematch-bot-hard').value = counts.hard;
   $('rematch-bot-hint').textContent = rematchBotSeats
-    ? `${rematchBotSeats} bot seat${rematchBotSeats === 1 ? '' : 's'} to fill — same as last time by default, but changeable.`
-    : 'No bot seats this time — every seat is a returning player.';
+    ? `${rematchBotSeats} bot seat${rematchBotSeats === 1 ? '' : 's'} to fill (same as last time by default, but changeable).`
+    : 'No bot seats this time. Every seat is a returning player.';
 }
 
 function onRequestRematchClick() {
@@ -1149,7 +1149,7 @@ function wireStaticHandlers() {
   window.addEventListener('beforeunload', (e) => {
     if (isActivelyPlayingLiveGame()) {
       e.preventDefault();
-      e.returnValue = 'Leaving now drops you from the game — there is no reconnect.';
+      e.returnValue = 'Leaving now drops you from the game. There is no reconnect.';
     }
   });
 }
@@ -1296,7 +1296,7 @@ function handlePlayerMessage(msg) {
         showScreen('screen-join');
         $('join-form').classList.add('hidden');
         $('join-waiting').classList.add('hidden');
-        $('lobby-status').textContent = msg.prompt || 'A game is already in progress — you can watch as a spectator.';
+        $('lobby-status').textContent = msg.prompt || 'A game is already in progress. You can watch as a spectator.';
       } else {
         pendingIdentifyError = msg.prompt;
         ws.close();
@@ -2025,10 +2025,10 @@ function renderAuctionPanel(isSpectator) {
 // obvious from the card's face value alone.
 const CARD_INFO_TEXT = {
   Painting: 'Normal auction. Highest bidder wins and pays their bid. Worth its printed value in points.',
-  PrestigeCard: 'Normal auction. Highest bidder wins and pays their bid. Doubles your entire final score — high stakes!',
-  FauxPas: "Disgrace auction — opposite rules! The FIRST player to pass takes this card, and everyone who raised loses that money for nothing. Taking it means you must immediately discard a Painting you own (or your next one, if you don't have one yet).",
-  Passe: 'Disgrace auction — opposite rules! The FIRST player to pass takes this card, and everyone who raised loses that money for nothing. Costs you 5 points.',
-  Scandale: 'Disgrace auction — opposite rules! The FIRST player to pass takes this card, and everyone who raised loses that money for nothing. Halves your entire final score.',
+  PrestigeCard: 'Normal auction. Highest bidder wins and pays their bid. Doubles your entire final score. High stakes!',
+  FauxPas: "Disgrace auction: opposite rules! The FIRST player to pass takes this card, and everyone who raised loses that money for nothing. Taking it means you must immediately discard a Painting you own (or your next one, if you don't have one yet).",
+  Passe: 'Disgrace auction: opposite rules! The FIRST player to pass takes this card, and everyone who raised loses that money for nothing. Costs you 5 points.',
+  Scandale: 'Disgrace auction: opposite rules! The FIRST player to pass takes this card, and everyone who raised loses that money for nothing. Halves your entire final score.',
 };
 
 // Keeps the ⓘ button (and its popover's contents) next to the auction card
