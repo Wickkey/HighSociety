@@ -1,4 +1,5 @@
 import random
+import threading
 import time
 
 import pytest
@@ -134,3 +135,68 @@ class TestBaseServiceIgnoresDifficulty:
                                      difficulty="hard")
         direct = decide_bid_direct(history, [], live_state, "bot", _TINY_CONFIG, random.Random(1))
         assert action == direct  # same seed, same everything -- identical result
+
+
+def _broke_game_facing_a_high_bid():
+    """Bot down to a single 1-value card; opponent already bid 50 -- the
+    only correct decision is "pass" (no single card can legally beat 50)."""
+    bot = PassBot(name="BotA", username="bot_a")
+    for card in list(bot.money_cards):
+        if card.value != 1:
+            bot.place_bid(card.value)  # commit away everything except the 1
+    other = PassBot(name="OtherA", username="other_a")
+    history = AuctionHistory()
+    history.record_turn([bot, other])
+    live_state = {"round_number": 1, "card": summarize_card(Painting(value=8)),
+                  "max_bid": 50, "turn_player": "bot_a"}
+    return history, live_state, "bot_a"
+
+
+def _rich_uncontested_game():
+    """Bot has its full starting hand; nobody has bid yet -- the only
+    sensible decision is a raise (a [value] list), never "pass"."""
+    bot = PassBot(name="BotB", username="bot_b")
+    other = PassBot(name="OtherB", username="other_b")
+    history = AuctionHistory()
+    history.record_turn([bot, other])
+    live_state = {"round_number": 1, "card": summarize_card(Painting(value=8)),
+                  "max_bid": 0, "turn_player": "bot_b"}
+    return history, live_state, "bot_b"
+
+
+class TestConcurrentGamesDontCrossContaminate:
+    """
+    Two deliberately different, easily-distinguishable game states, decided
+    concurrently (two real threads, sharing one pool) many times over --
+    if the shared pool ever mixed up which response belongs to which
+    request, it would show up as an obviously wrong decision (the broke bot
+    "raising" with money it doesn't have, or the rich uncontested bot
+    inexplicably "passing"), not just a subtly-off one.
+    """
+
+    def test_two_concurrent_games_each_get_their_own_correct_decision(self):
+        config = MCTSConfig(iterations=30, determinizations=2, exploration_constant=1.4)
+        service = WorkerPoolBotDecisionService(pool_size=2, request_timeout_seconds=15.0)
+        results = {}
+
+        def run_many(make_game, key, rounds=8):
+            outcomes = []
+            for i in range(rounds):
+                history, live_state, username = make_game()
+                outcomes.append(
+                    service.decide_bid(history, [], live_state, username, config,
+                                        random.Random(i), difficulty="medium")
+                )
+            results[key] = outcomes
+
+        t_broke = threading.Thread(target=run_many, args=(_broke_game_facing_a_high_bid, "broke"))
+        t_rich = threading.Thread(target=run_many, args=(_rich_uncontested_game, "rich"))
+        t_broke.start()
+        t_rich.start()
+        t_broke.join(timeout=60)
+        t_rich.join(timeout=60)
+
+        assert results["broke"] == ["pass"] * 8, \
+            f"broke bot should always pass -- got {results['broke']}"
+        assert all(isinstance(o, list) for o in results["rich"]), \
+            f"rich, uncontested bot should always raise, never pass -- got {results['rich']}"
