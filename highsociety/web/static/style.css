@@ -98,7 +98,7 @@ body {
 .sidebar-item:hover { background: rgba(255, 255, 255, 0.08); color: #f5f1e6; }
 .sidebar-item:active { transform: translateY(1px); }
 .sidebar-item.active { background: var(--accent-soft); border-color: var(--accent-light); color: #f5f1e6; }
-.sidebar-icon { font-size: 1.35rem; line-height: 1; }
+.sidebar-icon { width: 21px; height: 21px; flex-shrink: 0; }
 .sidebar-item-disabled {
   cursor: default;
   opacity: 0.5;
@@ -107,7 +107,7 @@ body {
 @media (max-width: 520px) {
   .app-sidebar { width: 60px; padding: 0.9rem 0.3rem; }
   .sidebar-label { display: none; }
-  .sidebar-icon { font-size: 1.5rem; }
+  .sidebar-icon { width: 23px; height: 23px; }
 }
 
 .topbar {
@@ -489,9 +489,11 @@ input.needs-attention {
   width: auto;
   margin-top: 0;
   padding: 0.5rem 0.7rem;
-  font-size: 1.1rem;
-  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
+.shuffle-btn svg { width: 17px; height: 17px; }
 
 /* ---------------- account screen ---------------- */
 

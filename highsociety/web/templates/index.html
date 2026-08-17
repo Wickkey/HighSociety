@@ -49,19 +49,43 @@
          in style.css; see app.js's updateSidebarVisibility). -->
     <nav id="app-sidebar" class="app-sidebar">
       <button type="button" class="sidebar-item" id="sidebar-play" title="Play">
-        <span class="sidebar-icon">🎮</span><span class="sidebar-label">Play</span>
+        <svg class="sidebar-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <rect x="4" y="6" width="12" height="15" rx="2"/>
+          <rect x="8" y="3" width="12" height="15" rx="2"/>
+        </svg>
+        <span class="sidebar-label">Play</span>
       </button>
       <button type="button" class="sidebar-item" id="sidebar-join" title="Join a Game">
-        <span class="sidebar-icon">🚪</span><span class="sidebar-label">Join</span>
+        <svg class="sidebar-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+          <polyline points="16 17 21 12 16 7"/>
+          <line x1="21" y1="12" x2="9" y2="12"/>
+        </svg>
+        <span class="sidebar-label">Join</span>
       </button>
       <button type="button" class="sidebar-item sidebar-item-disabled" title="Leaderboard — coming soon" disabled>
-        <span class="sidebar-icon">😴</span><span class="sidebar-label">Leaderboard</span>
+        <svg class="sidebar-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M7 4h10v5a5 5 0 0 1-10 0V4z"/>
+          <path d="M7 5H4a2 2 0 0 0 0 4h1"/>
+          <path d="M17 5h3a2 2 0 0 1 0 4h-1"/>
+          <path d="M12 14v4"/>
+          <path d="M8 21h8"/>
+        </svg>
+        <span class="sidebar-label">Leaderboard</span>
       </button>
       <button type="button" class="sidebar-item" id="sidebar-rules" title="How to Play">
-        <span class="sidebar-icon">📜</span><span class="sidebar-label">How to Play</span>
+        <svg class="sidebar-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M12 6.5S9.5 5 4 5v13c5.5 0 8 1.5 8 1.5s2.5-1.5 8-1.5V5c-5.5 0-8 1.5-8 1.5z"/>
+          <line x1="12" y1="6.5" x2="12" y2="20"/>
+        </svg>
+        <span class="sidebar-label">How to Play</span>
       </button>
       <button type="button" class="sidebar-item" id="sidebar-account" title="Account">
-        <span class="sidebar-icon">👤</span><span class="sidebar-label">Account</span>
+        <svg class="sidebar-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <circle cx="12" cy="8" r="3.2"/>
+          <path d="M5 20c0-3.5 3.1-6 7-6s7 2.5 7 6"/>
+        </svg>
+        <span class="sidebar-label">Account</span>
       </button>
     </nav>
     <div class="app-main-col">
@@ -107,7 +131,14 @@
           <label>Username
             <div class="username-input-row">
               <input type="text" id="login-username" placeholder="e.g. alex" autocomplete="off" maxlength="24">
-              <button type="button" id="btn-shuffle-username" class="secondary shuffle-btn hidden" title="Get a different name" aria-label="Get a different name">&#128256;</button>
+              <button type="button" id="btn-shuffle-username" class="secondary shuffle-btn hidden" title="Get a different name" aria-label="Get a different name">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M3 6h3.5c2 0 3 1 4 2.5l5 8c1 1.5 2 2.5 4 2.5H21"/>
+                  <path d="M3 18h3.5c2 0 3-1 4-2.5"/>
+                  <polyline points="18 3 21 6 18 9"/>
+                  <polyline points="18 15 21 18 18 21"/>
+                </svg>
+              </button>
             </div>
           </label>
           <button type="button" id="btn-login-continue" class="primary">Continue</button>
