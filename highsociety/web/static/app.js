@@ -582,6 +582,7 @@ function openProfilePopover() {
   const profile = loadProfile();
   // Nothing to log out of until a profile actually exists.
   $('btn-logout').classList.toggle('hidden', !profile);
+  $('popover-menu-divider').classList.toggle('hidden', !profile);
   show($('profile-popover'));
 }
 

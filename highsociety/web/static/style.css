@@ -68,12 +68,12 @@ body {
    of the layout. */
 .app-sidebar {
   flex: 0 0 auto;
-  width: 76px;
+  width: 96px;
   display: flex;
   flex-direction: column;
   align-items: stretch;
-  gap: 0.3rem;
-  padding: 1.1rem 0.5rem;
+  gap: 0.5rem;
+  padding: 1.4rem 0.6rem;
   background: rgba(0, 0, 0, 0.14);
   border-right: 1px solid rgba(255, 255, 255, 0.08);
 }
@@ -82,32 +82,33 @@ body {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 0.25rem;
+  gap: 0.45rem;
   background: transparent;
   border: 1px solid transparent;
-  border-radius: var(--radius-sm);
-  padding: 0.55rem 0.3rem;
-  color: rgba(245, 241, 230, 0.75);
-  font-size: 0.68rem;
+  border-radius: var(--radius-card);
+  padding: 0.75rem 0.4rem;
+  color: rgba(245, 241, 230, 0.72);
+  font-size: 0.7rem;
   font-weight: 600;
-  letter-spacing: 0.01em;
+  letter-spacing: 0.015em;
   cursor: pointer;
-  transition: background 0.15s ease, color 0.15s ease, transform 0.1s ease;
+  transition: background 0.15s ease, color 0.15s ease, transform 0.1s ease, border-color 0.15s ease;
   margin-top: 0;
 }
 .sidebar-item:hover { background: rgba(255, 255, 255, 0.08); color: #f5f1e6; }
 .sidebar-item:active { transform: translateY(1px); }
 .sidebar-item.active { background: var(--accent-soft); border-color: var(--accent-light); color: #f5f1e6; }
-.sidebar-icon { width: 21px; height: 21px; flex-shrink: 0; }
+.sidebar-icon { width: 27px; height: 27px; flex-shrink: 0; }
 .sidebar-item-disabled {
   cursor: default;
-  opacity: 0.5;
+  opacity: 0.45;
 }
-.sidebar-item-disabled:hover { background: transparent; color: rgba(245, 241, 230, 0.75); }
+.sidebar-item-disabled:hover { background: transparent; color: rgba(245, 241, 230, 0.72); }
 @media (max-width: 520px) {
-  .app-sidebar { width: 60px; padding: 0.9rem 0.3rem; }
+  .app-sidebar { width: 68px; padding: 1.1rem 0.4rem; gap: 0.4rem; }
+  .sidebar-item { padding: 0.65rem 0.3rem; }
   .sidebar-label { display: none; }
-  .sidebar-icon { width: 23px; height: 23px; }
+  .sidebar-icon { width: 25px; height: 25px; }
 }
 
 .topbar {
@@ -270,31 +271,49 @@ body {
   position: absolute;
   top: calc(100% + 0.6rem);
   right: 0;
-  width: 200px;
+  width: 230px;
   z-index: 200;
   text-align: left;
-  padding: 0.6rem;
+  padding: 0.5rem;
   margin-bottom: 0;
   display: flex;
   flex-direction: column;
-  gap: 0.1rem;
+  gap: 0.15rem;
   /* .topbar sets a light color for its own dark background — reset back to
      the standard panel text color here, since this popover has the usual
      light .panel background despite living inside the dark header. */
   color: var(--text);
 }
-/* A simple menu now (Account / Log out) rather than inline edit fields --
-   editing itself moved to the Account screen (see .account-panel). */
+/* A real menu (Account / Log out) rather than inline edit fields --
+   editing itself moved to the Account screen (see .account-panel).
+   Deliberately its own look, not .link-button's underlined-inline-text
+   style (that read as a bare hyperlink, not a menu row) -- resets every
+   default <button> property (background/border/margin) that would
+   otherwise leak in. */
 .popover-menu-item {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
   width: 100%;
   text-align: left;
-  padding: 0.55rem 0.6rem;
+  padding: 0.75rem 0.8rem;
+  margin: 0;
   border-radius: var(--radius-sm);
+  background: none;
+  border: none;
+  font: inherit;
   font-weight: 500;
-  text-decoration: none;
+  font-size: 0.92rem;
+  color: var(--text);
+  cursor: pointer;
+  transition: background 0.12s ease;
 }
-.popover-menu-item:hover { background: var(--panel-bg-soft); text-decoration: none; }
+.popover-menu-item svg { width: 18px; height: 18px; flex-shrink: 0; opacity: 0.7; }
+.popover-menu-item:hover { background: var(--panel-bg-soft); }
+.popover-menu-item-danger { color: var(--danger); }
+.popover-menu-item-danger svg { opacity: 0.85; }
+.popover-menu-item-danger:hover { background: var(--danger-soft); }
+.popover-menu-divider { height: 1px; background: var(--panel-border); margin: 0.3rem 0.3rem; }
 
 /* Active nudge: applied to a username field when a host/join click was
    intercepted for having no saved profile yet (see app.js's
@@ -550,7 +569,23 @@ input.needs-attention {
   box-shadow: var(--shadow);
   outline: none;
 }
-.home-tile-icon { font-size: 2rem; line-height: 1; }
+/* A colored badge behind the line icon rather than a bare glyph -- gives
+   the tile a focal point and ties the icon to the app's own gold accent
+   instead of it just floating there at whatever color an emoji happened
+   to render in. */
+.home-tile-icon {
+  width: 56px;
+  height: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-light);
+  color: var(--accent-strong);
+  margin-bottom: 0.2rem;
+}
+.home-tile-icon svg { width: 27px; height: 27px; }
 .home-tile-title { font-weight: 700; font-size: 1.05rem; }
 .home-tile-sub { color: var(--muted); font-size: 0.82rem; }
 .home-tile-sub.has-live { color: var(--accent-strong); font-weight: 600; }
