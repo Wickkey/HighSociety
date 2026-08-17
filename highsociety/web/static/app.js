@@ -8,6 +8,11 @@ const $ = (id) => document.getElementById(id);
 function showScreen(id) {
   document.querySelectorAll('.screen').forEach((s) => s.classList.add('hidden'));
   $(id).classList.remove('hidden');
+  // The profile chip has nothing meaningful to show yet on the login screen
+  // itself (no profile exists before it's gotten past) -- a "Username"
+  // placeholder chip sitting in the header there just looks like stray,
+  // half-set-up state rather than an intentional part of the screen.
+  $('profile-chip-wrap').classList.toggle('hidden', id === 'screen-login');
 }
 
 function hide(el) { el.classList.add('hidden'); }
@@ -498,7 +503,9 @@ async function handleGoogleCredential(response) {
 function initGoogleSignIn() {
   if (!window.GOOGLE_CLIENT_ID || !window.google || !window.google.accounts) return;
   google.accounts.id.initialize({ client_id: window.GOOGLE_CLIENT_ID, callback: handleGoogleCredential });
-  google.accounts.id.renderButton($('google-signin-container'), { theme: 'outline', size: 'large', width: 280 });
+  google.accounts.id.renderButton($('google-signin-container'), {
+    theme: 'filled_black', size: 'large', width: 280, text: 'continue_with',
+  });
 }
 
 // Whether the join/spectate screens' "not you?" link has been clicked since
@@ -770,10 +777,14 @@ document.addEventListener('DOMContentLoaded', () => {
   wireStaticHandlers();
   renderProfileChip();
   currentRoomCode = new URLSearchParams(location.search).get('room');
-  // Every visitor sees the login screen first, even one with an existing
-  // saved profile and even one opening a direct room-invite link -- see
-  // proceedPastLogin for what used to run unconditionally right here.
-  showScreen('screen-login');
+  // A returning visitor who already has a saved profile (guest or Google)
+  // skips straight past #screen-login -- only a genuinely new visitor, or
+  // someone who explicitly logged out, sees it.
+  if (loadProfile()) {
+    proceedPastLogin();
+  } else {
+    showScreen('screen-login');
+  }
 });
 
 async function fetchJSON(url, opts) {
