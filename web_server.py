@@ -35,6 +35,7 @@ from flask_sock import Sock
 from highsociety.code.ai import BOT_TYPES, create_bot_players
 from highsociety.code.ai.mcts import decision_service
 from highsociety.code.ai.mcts.worker_pool_decision_service import WorkerPoolBotDecisionService
+from highsociety.code.common import matchmaking
 from highsociety.code.common.db import game_history
 from highsociety.code.common.guest_username import generate_guest_username
 from highsociety.code.common.logger_module.logger.logging_manager import LoggingManager, LogType
@@ -640,6 +641,59 @@ def api_auth_username_change():
         return jsonify({"error": "That username is already taken."}), 409
 
     return jsonify({"username": new_username})
+
+
+# --------------------------------------------------------- matchmaking --
+
+def _create_matchmaking_room(usernames: list[str]) -> str:
+    """
+    The create_room_fn matchmaking.py's status()/_try_match() call once
+    enough similarly-rated players are waiting -- this is the one place
+    that actually knows what a "room" is; matchmaking.py itself never
+    imports GameRoom or anything game-specific. Private (not listed in
+    /api/rooms) since only the matched players ever receive this room's
+    code, no bots (every seat is a real matched human), no turn timer by
+    default -- same as a plain hosted game.
+    """
+    room = _create_room(seats=len(usernames), bot_mix=[], seed=None, bot_think_time=1.5,
+                         visibility="private")
+    return room.room_code
+
+
+@app.route("/api/matchmaking/join", methods=["POST"])
+def api_matchmaking_join():
+    body = request.get_json(silent=True) or {}
+    username = (body.get("username") or "").strip()
+    if not username:
+        return jsonify({"error": "username is required"}), 400
+
+    try:
+        seats = int(body.get("seats"))
+    except (TypeError, ValueError):
+        return jsonify({"error": "seats must be an integer"}), 400
+    error = validate_player_count(seats)
+    if error:
+        return jsonify({"error": error}), 400
+
+    elo = game_history.get_player_elo(username)
+    ticket_id = matchmaking.join(username, elo, seats)
+    return jsonify({"ticket_id": ticket_id})
+
+
+@app.route("/api/matchmaking/status")
+def api_matchmaking_status():
+    ticket_id = request.args.get("ticket")
+    result = matchmaking.status(ticket_id, _create_matchmaking_room)
+    if result is None:
+        return jsonify({"error": "Unknown or cancelled matchmaking ticket."}), 404
+    return jsonify(result)
+
+
+@app.route("/api/matchmaking/cancel", methods=["POST"])
+def api_matchmaking_cancel():
+    body = request.get_json(silent=True) or {}
+    matchmaking.cancel(body.get("ticket_id"))
+    return jsonify({})
 
 
 @app.route("/")

@@ -69,6 +69,13 @@ _SCHEMA_STATEMENTS = [
     """,
     "CREATE INDEX IF NOT EXISTS idx_player_games_player_id ON player_games (player_id)",
     "CREATE INDEX IF NOT EXISTS idx_player_games_game_id ON player_games (game_id)",
+    # A migration, not part of the original CREATE TABLE -- IF NOT EXISTS
+    # there only skips the whole statement for a table that already exists
+    # in production, so a new column needs its own idempotent ALTER TABLE
+    # to actually reach it. 1000 is a placeholder starting rating (see
+    # matchmaking.py's docstring) -- every player starts equal until
+    # there's real post-match rating logic to diverge them.
+    "ALTER TABLE players ADD COLUMN IF NOT EXISTS elo INTEGER NOT NULL DEFAULT 1000",
 ]
 
 _schema_ready = False
@@ -206,6 +213,40 @@ def username_is_taken(username: str) -> bool:
     except Exception as e:  # noqa: BLE001
         LoggingManager.warning(f"game_history.username_is_taken failed: {e}")
         return True
+    finally:
+        if conn is not None:
+            conn.close()
+
+
+_DEFAULT_ELO = 1000
+
+
+def get_player_elo(username: str) -> int:
+    """
+    A player's current rating, for matchmaking.py to pair by -- 1000 (the
+    same default every new row gets, see the players table's own DEFAULT)
+    whenever there's nothing better to go on: no database, the player
+    genuinely doesn't have a row yet (a matchmaking ticket can exist before
+    any players write has happened, e.g. DATABASE_URL unset locally), or
+    the lookup itself errors. Matchmaking degrades gracefully to "everyone
+    is equal" in every one of those cases rather than failing to queue at
+    all.
+    """
+    if not is_configured():
+        return _DEFAULT_ELO
+    ensure_schema()
+    if not _schema_ready:
+        return _DEFAULT_ELO
+    conn = None
+    try:
+        conn = _connect()
+        with conn, conn.cursor() as cur:
+            cur.execute("SELECT elo FROM players WHERE username = %s", (username,))
+            row = cur.fetchone()
+            return row[0] if row is not None else _DEFAULT_ELO
+    except Exception as e:  # noqa: BLE001
+        LoggingManager.warning(f"game_history.get_player_elo failed: {e}")
+        return _DEFAULT_ELO
     finally:
         if conn is not None:
             conn.close()

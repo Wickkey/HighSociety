@@ -203,6 +203,34 @@ def test_username_is_taken_fails_safe_toward_taken_on_a_db_error(database_url):
         assert game_history.username_is_taken("alice") is True
 
 
+def test_get_player_elo_defaults_to_1000_without_a_database(no_database_url):
+    assert game_history.get_player_elo("alice") == 1000
+
+
+def test_get_player_elo_returns_the_stored_value(database_url):
+    game_history._schema_ready = True
+    conn, cursor = _fake_connection()
+    cursor.fetchone.side_effect = None
+    cursor.fetchone.return_value = (1234,)
+    with patch.object(game_history, "_connect", return_value=conn):
+        assert game_history.get_player_elo("alice") == 1234
+
+
+def test_get_player_elo_defaults_to_1000_when_the_player_has_no_row(database_url):
+    game_history._schema_ready = True
+    conn, cursor = _fake_connection()
+    cursor.fetchone.side_effect = None
+    cursor.fetchone.return_value = None
+    with patch.object(game_history, "_connect", return_value=conn):
+        assert game_history.get_player_elo("nobody") == 1000
+
+
+def test_get_player_elo_defaults_to_1000_on_a_db_error(database_url):
+    game_history._schema_ready = True
+    with patch.object(game_history, "_connect", side_effect=RuntimeError("unreachable")):
+        assert game_history.get_player_elo("alice") == 1000
+
+
 def test_create_google_player_is_a_no_op_without_a_database(no_database_url):
     assert game_history.create_google_player("g-123", "a@example.com", "alice", "Alice") is False
 

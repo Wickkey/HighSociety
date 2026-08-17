@@ -6,6 +6,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from highsociety.code.common import matchmaking
 from highsociety.code.common.db import game_history
 from highsociety.code.gamecore.card_manager.money_card_manager import MoneyCardManager
 
@@ -1559,3 +1560,91 @@ def test_username_change_renames_the_account(monkeypatch):
     assert resp.status_code == 200
     assert resp.get_json() == {"username": "bob"}
     assert renamed == {"old": "alice", "new": "bob"}
+
+
+# --------------------------------------------------------- matchmaking --
+
+@pytest.fixture
+def clean_matchmaking_queue():
+    """matchmaking._tickets is module-level, shared, in-memory state --
+    reset it around every test so one test's queued players can't leak
+    into the next."""
+    matchmaking._tickets.clear()
+    yield
+    matchmaking._tickets.clear()
+
+
+def test_matchmaking_join_requires_a_username(clean_matchmaking_queue):
+    resp = web_server.app.test_client().post("/api/matchmaking/join", json={"username": "", "seats": 3})
+    assert resp.status_code == 400
+
+
+def test_matchmaking_join_validates_seats(clean_matchmaking_queue):
+    resp = web_server.app.test_client().post(
+        "/api/matchmaking/join", json={"username": "alice", "seats": 99}
+    )
+    assert resp.status_code == 400
+
+
+def test_matchmaking_join_returns_a_ticket_id(clean_matchmaking_queue, monkeypatch):
+    monkeypatch.setattr(game_history, "get_player_elo", lambda username: 1000)
+    resp = web_server.app.test_client().post(
+        "/api/matchmaking/join", json={"username": "alice", "seats": 2}
+    )
+    assert resp.status_code == 200
+    assert resp.get_json()["ticket_id"]
+
+
+def test_matchmaking_status_404s_for_an_unknown_ticket(clean_matchmaking_queue):
+    resp = web_server.app.test_client().get("/api/matchmaking/status?ticket=nope")
+    assert resp.status_code == 404
+
+
+def test_matchmaking_status_reports_waiting_below_the_seat_count(clean_matchmaking_queue, monkeypatch):
+    monkeypatch.setattr(game_history, "get_player_elo", lambda username: 1000)
+    client = web_server.app.test_client()
+    ticket_id = client.post("/api/matchmaking/join", json={"username": "alice", "seats": 2}).get_json()["ticket_id"]
+
+    resp = client.get(f"/api/matchmaking/status?ticket={ticket_id}")
+    assert resp.status_code == 200
+    body = resp.get_json()
+    assert body["matched"] is False
+    assert body["room_code"] is None
+    assert body["waiting_count"] == 1
+
+
+def test_matchmaking_matches_two_waiting_players_into_a_real_private_room(clean_matchmaking_queue, monkeypatch):
+    web_server._rooms.clear()
+    monkeypatch.setattr(game_history, "get_player_elo", lambda username: 1000)
+    client = web_server.app.test_client()
+    ticket_a = client.post("/api/matchmaking/join", json={"username": "alice", "seats": 2}).get_json()["ticket_id"]
+    ticket_b = client.post("/api/matchmaking/join", json={"username": "bob", "seats": 2}).get_json()["ticket_id"]
+
+    status_a = client.get(f"/api/matchmaking/status?ticket={ticket_a}").get_json()
+    status_b = client.get(f"/api/matchmaking/status?ticket={ticket_b}").get_json()
+
+    assert status_a["matched"] is True
+    assert status_b["matched"] is True
+    assert status_a["room_code"] == status_b["room_code"]
+
+    room = web_server._get_room(status_a["room_code"])
+    assert room is not None
+    assert room.seats == 2
+    assert room.visibility == "private"
+    assert room.players == []  # no bots -- both seats wait for the real matched humans to connect
+
+
+def test_matchmaking_cancel_is_idempotent_and_removes_the_ticket(clean_matchmaking_queue, monkeypatch):
+    monkeypatch.setattr(game_history, "get_player_elo", lambda username: 1000)
+    client = web_server.app.test_client()
+    ticket_id = client.post("/api/matchmaking/join", json={"username": "alice", "seats": 2}).get_json()["ticket_id"]
+
+    resp = client.post("/api/matchmaking/cancel", json={"ticket_id": ticket_id})
+    assert resp.status_code == 200
+    assert client.get(f"/api/matchmaking/status?ticket={ticket_id}").status_code == 404
+
+    # Cancelling again, or a ticket that never existed, must not error.
+    resp = client.post("/api/matchmaking/cancel", json={"ticket_id": ticket_id})
+    assert resp.status_code == 200
+    resp = client.post("/api/matchmaking/cancel", json={"ticket_id": "never-existed"})
+    assert resp.status_code == 200
