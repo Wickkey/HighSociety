@@ -114,7 +114,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 1rem;
+  gap: 0.75rem;
   padding: 1.1rem 1.75rem;
   color: #f5f1e6;
 }
@@ -123,6 +123,15 @@ body {
   margin: 0;
   letter-spacing: 0.04em;
   font-weight: 700;
+  /* Flex items don't shrink below their content's natural width unless
+     min-width is reset -- without this the profile chip on the other end
+     gets pushed past the viewport edge instead of the title ever giving
+     up room, confirmed clipped off-screen on a 375px-wide phone. */
+  flex-shrink: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 .topbar h1::before {
   content: "♠";
@@ -174,6 +183,9 @@ body {
     display: flex; /* block-level, so margin:auto below actually centers it -- inline-flex (the default) wouldn't */
     margin: 2rem auto 1.5rem;
   }
+  .topbar { padding: 1rem 1rem; }
+  .profile-chip { padding: 0.55rem 0.9rem; }
+  .profile-chip-name { max-width: 84px; }
 }
 .badge {
   font-size: 0.75rem;
@@ -191,7 +203,7 @@ body {
    point into editing the saved device identity (see app.js's
    renderProfileChip/loadProfile) — sized and positioned so it visibly
    reads as "the profile area" rather than a small aside. */
-.profile-chip-wrap { position: relative; }
+.profile-chip-wrap { position: relative; min-width: 0; flex-shrink: 1; }
 .profile-chip {
   font: inherit;
   font-size: 0.95rem;
@@ -202,6 +214,7 @@ body {
   display: inline-flex;
   align-items: center;
   gap: 0.55rem;
+  max-width: 100%;
 }
 .profile-chip.editable {
   cursor: pointer;
