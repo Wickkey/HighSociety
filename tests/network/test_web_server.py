@@ -1456,3 +1456,106 @@ def test_claim_username_handles_a_uniqueness_race_at_the_database_level(monkeypa
         "/api/auth/google/claim_username", json={"id_token": "valid", "username": "alice"}
     )
     assert resp.status_code == 409
+
+
+# ------------------------------------------------------- /api/auth/guest --
+
+def test_guest_suggest_returns_a_username_without_a_database(monkeypatch):
+    monkeypatch.setattr(game_history, "is_configured", lambda: False)
+    resp = web_server.app.test_client().get("/api/auth/guest/suggest")
+    assert resp.status_code == 200
+    assert resp.get_json()["username"]  # non-empty, no DB round-trip needed
+
+
+def test_guest_suggest_retries_past_a_taken_candidate(monkeypatch):
+    monkeypatch.setattr(game_history, "is_configured", lambda: True)
+    taken = {"AzureNaruto111"}
+    monkeypatch.setattr(game_history, "username_is_taken", lambda username: username in taken)
+    monkeypatch.setattr(web_server, "generate_guest_username",
+                         iter(["AzureNaruto111", "CoralGoku222"]).__next__)
+
+    resp = web_server.app.test_client().get("/api/auth/guest/suggest")
+    assert resp.status_code == 200
+    assert resp.get_json() == {"username": "CoralGoku222"}
+
+
+def test_guest_claim_requires_a_non_empty_username():
+    resp = web_server.app.test_client().post("/api/auth/guest/claim", json={"username": "   "})
+    assert resp.status_code == 400
+
+
+def test_guest_claim_accepts_unchecked_without_a_database(monkeypatch):
+    monkeypatch.setattr(game_history, "is_configured", lambda: False)
+    resp = web_server.app.test_client().post("/api/auth/guest/claim", json={"username": "alice"})
+    assert resp.status_code == 200
+    assert resp.get_json() == {"username": "alice"}
+
+
+def test_guest_claim_rejects_an_already_taken_name(monkeypatch):
+    monkeypatch.setattr(game_history, "is_configured", lambda: True)
+    monkeypatch.setattr(game_history, "username_is_taken", lambda username: True)
+    resp = web_server.app.test_client().post("/api/auth/guest/claim", json={"username": "alice"})
+    assert resp.status_code == 409
+
+
+def test_guest_claim_creates_the_account(monkeypatch):
+    monkeypatch.setattr(game_history, "is_configured", lambda: True)
+    monkeypatch.setattr(game_history, "username_is_taken", lambda username: False)
+    created = {}
+    monkeypatch.setattr(game_history, "create_guest_player",
+                         lambda username: created.setdefault("username", username) or True)
+
+    resp = web_server.app.test_client().post("/api/auth/guest/claim", json={"username": "alice"})
+    assert resp.status_code == 200
+    assert resp.get_json() == {"username": "alice"}
+    assert created == {"username": "alice"}
+
+
+def test_guest_claim_handles_a_uniqueness_race_at_the_database_level(monkeypatch):
+    monkeypatch.setattr(game_history, "is_configured", lambda: True)
+    monkeypatch.setattr(game_history, "username_is_taken", lambda username: False)
+    monkeypatch.setattr(game_history, "create_guest_player", lambda username: False)
+
+    resp = web_server.app.test_client().post("/api/auth/guest/claim", json={"username": "alice"})
+    assert resp.status_code == 409
+
+
+# --------------------------------------------------- /api/auth/username/change --
+
+def test_username_change_requires_a_non_empty_new_username():
+    resp = web_server.app.test_client().post(
+        "/api/auth/username/change", json={"old_username": "alice", "new_username": "  "}
+    )
+    assert resp.status_code == 400
+
+
+def test_username_change_accepts_unchecked_without_a_database(monkeypatch):
+    monkeypatch.setattr(game_history, "is_configured", lambda: False)
+    resp = web_server.app.test_client().post(
+        "/api/auth/username/change", json={"old_username": "alice", "new_username": "bob"}
+    )
+    assert resp.status_code == 200
+    assert resp.get_json() == {"username": "bob"}
+
+
+def test_username_change_rejects_an_already_taken_name(monkeypatch):
+    monkeypatch.setattr(game_history, "is_configured", lambda: True)
+    monkeypatch.setattr(game_history, "rename_player", lambda old, new: False)
+    resp = web_server.app.test_client().post(
+        "/api/auth/username/change", json={"old_username": "alice", "new_username": "bob"}
+    )
+    assert resp.status_code == 409
+
+
+def test_username_change_renames_the_account(monkeypatch):
+    monkeypatch.setattr(game_history, "is_configured", lambda: True)
+    renamed = {}
+    monkeypatch.setattr(game_history, "rename_player",
+                         lambda old, new: renamed.update(old=old, new=new) or True)
+
+    resp = web_server.app.test_client().post(
+        "/api/auth/username/change", json={"old_username": "alice", "new_username": "bob"}
+    )
+    assert resp.status_code == 200
+    assert resp.get_json() == {"username": "bob"}
+    assert renamed == {"old": "alice", "new": "bob"}

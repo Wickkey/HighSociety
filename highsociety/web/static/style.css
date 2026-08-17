@@ -330,6 +330,17 @@ body {
 
 #login-username-form { margin-top: 1.1rem; text-align: left; }
 
+.username-input-row { display: flex; gap: 0.5rem; margin-top: 0.3rem; }
+.username-input-row input { flex: 1 1 auto; margin-top: 0; }
+.shuffle-btn {
+  flex: 0 0 auto;
+  width: auto;
+  margin-top: 0;
+  padding: 0.5rem 0.7rem;
+  font-size: 1.1rem;
+  line-height: 1;
+}
+
 .home-tiles {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));

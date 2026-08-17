@@ -36,6 +36,7 @@ from highsociety.code.ai import BOT_TYPES, create_bot_players
 from highsociety.code.ai.mcts import decision_service
 from highsociety.code.ai.mcts.worker_pool_decision_service import WorkerPoolBotDecisionService
 from highsociety.code.common.db import game_history
+from highsociety.code.common.guest_username import generate_guest_username
 from highsociety.code.common.logger_module.logger.logging_manager import LoggingManager, LogType
 from highsociety.code.common.utils.network_utility import get_local_ip
 from highsociety.code.common.utils.utility import (
@@ -561,6 +562,84 @@ def api_auth_google_claim_username():
         return jsonify({"error": "That username is already taken."}), 409
 
     return jsonify({"username": username, "display_name": display_name})
+
+
+def _generate_unique_guest_username() -> Optional[str]:
+    """
+    No database means nothing to check a candidate against -- just hand
+    back a fresh one so the guest flow keeps working under this app's
+    established DATABASE_URL="" local-testing convention. With a real
+    database, retries a handful of times against username_is_taken;
+    with ~30 colors * ~50 names * 900 numbers, a collision on every one
+    of 20 random tries is effectively impossible.
+    """
+    if not game_history.is_configured():
+        return generate_guest_username()
+    for _ in range(20):
+        candidate = generate_guest_username()
+        if not game_history.username_is_taken(candidate):
+            return candidate
+    return None
+
+
+@app.route("/api/auth/guest/suggest")
+def api_auth_guest_suggest():
+    username = _generate_unique_guest_username()
+    if username is None:
+        return jsonify({"error": "Couldn't generate a username right now. Please try again."}), 503
+    return jsonify({"username": username})
+
+
+@app.route("/api/auth/guest/claim", methods=["POST"])
+def api_auth_guest_claim():
+    """
+    Reserves a guest username -- either the one /api/auth/guest/suggest
+    handed back, or one the visitor typed themselves (the field is
+    freely editable, see the login screen). No database means nothing to
+    reserve against, so this just echoes the username back unchecked,
+    same as the suggest endpoint above.
+    """
+    body = request.get_json(silent=True) or {}
+    username = (body.get("username") or "").strip()
+    if not username or len(username) > _MAX_USERNAME_LENGTH:
+        return jsonify({"error": f"Username must be 1-{_MAX_USERNAME_LENGTH} characters"}), 400
+
+    if not game_history.is_configured():
+        return jsonify({"username": username})
+
+    if game_history.username_is_taken(username):
+        return jsonify({"error": "That username is already taken."}), 409
+
+    ok = game_history.create_guest_player(username)
+    if not ok:
+        return jsonify({"error": "That username is already taken."}), 409
+
+    return jsonify({"username": username})
+
+
+@app.route("/api/auth/username/change", methods=["POST"])
+def api_auth_username_change():
+    """
+    Renames an existing profile's username -- guest or Google-linked
+    alike (see game_history.rename_player). Used by the profile
+    popover's Save button, and only reached when the new username
+    actually differs from the current one (app.js skips the round-trip
+    otherwise).
+    """
+    body = request.get_json(silent=True) or {}
+    old_username = (body.get("old_username") or "").strip()
+    new_username = (body.get("new_username") or "").strip()
+    if not new_username or len(new_username) > _MAX_USERNAME_LENGTH:
+        return jsonify({"error": f"Username must be 1-{_MAX_USERNAME_LENGTH} characters"}), 400
+
+    if not game_history.is_configured():
+        return jsonify({"username": new_username})
+
+    ok = game_history.rename_player(old_username, new_username)
+    if not ok:
+        return jsonify({"error": "That username is already taken."}), 409
+
+    return jsonify({"username": new_username})
 
 
 @app.route("/")

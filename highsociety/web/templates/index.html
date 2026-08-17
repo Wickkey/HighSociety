@@ -53,8 +53,7 @@
         </svg>
       </button>
       <div id="profile-popover" class="profile-popover card panel hidden">
-        <label>Username <input type="text" id="profile-username" placeholder="e.g. alex" autocomplete="off"></label>
-        <label>Display name <input type="text" id="profile-display-name" placeholder="e.g. Alex" autocomplete="off"></label>
+        <label>Username <input type="text" id="profile-username" placeholder="e.g. alex" autocomplete="off" maxlength="24"></label>
         <div class="button-row">
           <button type="button" id="btn-save-profile" class="primary">Save</button>
           <button type="button" id="btn-cancel-profile-edit" class="secondary">Cancel</button>
@@ -91,7 +90,10 @@
 
         <div id="login-username-form" class="hidden">
           <label>Username
-            <input type="text" id="login-username" placeholder="e.g. alex" autocomplete="off" maxlength="24">
+            <div class="username-input-row">
+              <input type="text" id="login-username" placeholder="e.g. alex" autocomplete="off" maxlength="24">
+              <button type="button" id="btn-shuffle-username" class="secondary shuffle-btn hidden" title="Get a different name" aria-label="Get a different name">&#128256;</button>
+            </div>
           </label>
           <button type="button" id="btn-login-continue" class="primary">Continue</button>
           <p id="login-username-error" class="error hidden"></p>
@@ -243,8 +245,7 @@
           <p id="join-as-label" class="hidden">Joining as <strong id="join-as-name"></strong>.
             <button type="button" id="btn-change-join-identity" class="link-button">Not you?</button></p>
           <div id="join-identity-fields">
-            <label>Username <input type="text" id="join-username" placeholder="e.g. alex" autocomplete="off"></label>
-            <label>Display name <input type="text" id="join-name" placeholder="e.g. Alex" autocomplete="off"></label>
+            <label>Username <input type="text" id="join-username" placeholder="e.g. alex" autocomplete="off" maxlength="24"></label>
           </div>
           <button id="btn-join" class="primary">Join Game</button>
           <p id="join-error" class="error hidden"></p>
@@ -279,8 +280,7 @@
         <p id="spectate-as-label" class="hidden">Watching as <strong id="spectate-as-name"></strong>.
           <button type="button" id="btn-change-spectate-identity" class="link-button">Not you?</button></p>
         <div id="spectate-identity-fields">
-          <label>Your name <input type="text" id="spectate-name" placeholder="e.g. Sam" autocomplete="off"></label>
-          <label>Username <input type="text" id="spectate-username" placeholder="e.g. sam" autocomplete="off"></label>
+          <label>Username <input type="text" id="spectate-username" placeholder="e.g. sam" autocomplete="off" maxlength="24"></label>
         </div>
         <button id="btn-spectate-join" class="primary">Watch</button>
         <p id="spectate-error" class="error hidden"></p>

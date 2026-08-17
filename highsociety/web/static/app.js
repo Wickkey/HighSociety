@@ -405,6 +405,9 @@ let _pendingGoogleIdToken = null;
 // resolves to a profile, via either path below, instead of running
 // unconditionally at boot.
 function proceedPastLogin() {
+  renderProfileChip(); // the header chip was last rendered at boot, before
+                        // this browser had a profile at all -- refresh it
+                        // now that saveProfile has actually run.
   if (currentRoomCode) {
     refreshStatus();
     startPolling();
@@ -415,24 +418,40 @@ function proceedPastLogin() {
   }
 }
 
-function showLoginUsernameForm(prefillUsername) {
+// showShuffle: only the guest path offers a "get a different name" reroll
+// -- a first-time Google sign-in is picking their own real username, not
+// an anonymous quirky one, so that button stays hidden there (see
+// handleGoogleCredential).
+function showLoginUsernameForm(prefillUsername, showShuffle) {
   hide($('login-username-error'));
   $('login-username').value = prefillUsername || '';
+  $('btn-shuffle-username').classList.toggle('hidden', !showShuffle);
   show($('login-username-form'));
   $('login-username').focus();
 }
 
-// "Continue as Guest": today's exact mechanism (a bare username, no
-// account behind it), just reached via an explicit choice now instead of
-// being the only option. Pre-fills from any already-saved profile on this
-// browser purely as a convenience default -- everyone still sees and
-// clicks through this screen (see the login-screen boot change below),
-// this just saves returning players from re-typing a name this browser
-// already told the app once.
-function onContinueAsGuest() {
+async function fetchSuggestedGuestUsername() {
+  try {
+    const result = await fetchJSON('/api/auth/guest/suggest');
+    return result.username || '';
+  } catch (e) {
+    return ''; // still a normal free-text field -- they can just type one
+  }
+}
+
+// "Continue as Guest": a random, DB-reserved username (color + anime
+// character + number) instead of asking someone to come up with one --
+// see /api/auth/guest/suggest. Still a normal free-text field underneath
+// (shuffle for a different one, or just type over it entirely).
+async function onContinueAsGuest() {
   _pendingGoogleIdToken = null;
-  const existing = loadProfile();
-  showLoginUsernameForm(existing ? existing.username : '');
+  showLoginUsernameForm('', true);
+  $('login-username').value = await fetchSuggestedGuestUsername();
+}
+
+async function onShuffleUsername() {
+  $('login-username').value = await fetchSuggestedGuestUsername();
+  $('login-username').focus();
 }
 
 async function onLoginUsernameContinue() {
@@ -451,7 +470,7 @@ async function onLoginUsernameContinue() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id_token: token, username }),
       });
-      saveProfile(result.username, result.display_name, decodeJwtPayload(token).sub);
+      saveProfile(result.username, result.username, decodeJwtPayload(token).sub);
       _pendingGoogleIdToken = null;
       proceedPastLogin();
     } catch (e) {
@@ -460,11 +479,20 @@ async function onLoginUsernameContinue() {
     return;
   }
 
-  // Guest path -- display name defaults to the username itself (see the
-  // user's own "display name... ideally not required" ask); editable
-  // later via the existing profile-chip popover, unchanged from today.
-  saveProfile(username, username, null);
-  proceedPastLogin();
+  // Guest path -- reserves the username in the same players table Google
+  // accounts use (see /api/auth/guest/claim), so "unique username" is a
+  // real, database-enforced guarantee rather than just a local label.
+  try {
+    const result = await fetchJSON('/api/auth/guest/claim', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username }),
+    });
+    saveProfile(result.username, result.username, null);
+    proceedPastLogin();
+  } catch (e) {
+    showError($('login-username-error'), e.message);
+  }
 }
 
 // Google Identity Services calls this once the visitor actually picks an
@@ -482,14 +510,14 @@ async function handleGoogleCredential(response) {
     });
     if (result.needs_username) {
       _pendingGoogleIdToken = response.credential;
-      showLoginUsernameForm(result.suggested_display_name);
+      showLoginUsernameForm(result.suggested_display_name, false);
     } else {
-      saveProfile(result.username, result.display_name, decodeJwtPayload(response.credential).sub);
+      saveProfile(result.username, result.username, decodeJwtPayload(response.credential).sub);
       proceedPastLogin();
     }
   } catch (e) {
     _pendingGoogleIdToken = null;
-    showLoginUsernameForm('');
+    showLoginUsernameForm('', false);
     showError($('login-username-error'), e.message);
   }
 }
@@ -539,7 +567,6 @@ function renderProfileChip() {
 function openProfilePopover() {
   const profile = loadProfile();
   $('profile-username').value = profile ? profile.username : '';
-  $('profile-display-name').value = profile ? profile.name : '';
   hide($('profile-error'));
   // Nothing to log out of until a profile actually exists.
   $('btn-logout').classList.toggle('hidden', !profile);
@@ -588,13 +615,29 @@ function onCancelProfileEdit() {
   closeProfilePopover();
 }
 
-function onSaveProfileClick() {
+// Only round-trips to the server when the username actually changed --
+// re-saving an unchanged one (e.g. just glancing at the popover and
+// clicking Save) shouldn't cost a network call or risk a spurious 409.
+async function onSaveProfileClick() {
   hide($('profile-error'));
   const username = $('profile-username').value.trim();
-  const name = $('profile-display-name').value.trim() || username;
   if (!username) { showError($('profile-error'), 'Username is required.'); return; }
-  saveProfile(username, name);
-  renderProfileChip();
+  const existing = loadProfile();
+  if (existing && existing.username === username) {
+    closeProfilePopover();
+    return;
+  }
+  try {
+    const result = await fetchJSON('/api/auth/username/change', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ old_username: existing ? existing.username : username, new_username: username }),
+    });
+    saveProfile(result.username, result.username);
+    renderProfileChip(); // also closes the popover -- see its own closeProfilePopover() call
+  } catch (e) {
+    showError($('profile-error'), e.message);
+  }
 }
 
 // Clears this browser's saved identity entirely (both localStorage and
@@ -626,8 +669,7 @@ function applyJoinIdentityDefaults() {
   const profile = loadProfile();
   if (profile) {
     $('join-username').value = profile.username;
-    $('join-name').value = profile.name;
-    $('join-as-name').textContent = profile.name;
+    $('join-as-name').textContent = profile.username;
     show($('join-as-label'));
     hide($('join-identity-fields'));
   } else {
@@ -650,8 +692,7 @@ function applySpectateIdentityDefaults() {
   const profile = loadProfile();
   if (profile) {
     $('spectate-username').value = profile.username;
-    $('spectate-name').value = profile.name;
-    $('spectate-as-name').textContent = profile.name;
+    $('spectate-as-name').textContent = profile.username;
     show($('spectate-as-label'));
     hide($('spectate-identity-fields'));
   } else {
@@ -1263,6 +1304,7 @@ function wireStaticHandlers() {
   $('confirm-modal-cancel').addEventListener('click', () => _resolveConfirmDialog(false));
   $('confirm-modal-confirm').addEventListener('click', () => _resolveConfirmDialog(true));
   $('btn-continue-guest').addEventListener('click', onContinueAsGuest);
+  $('btn-shuffle-username').addEventListener('click', onShuffleUsername);
   $('btn-login-continue').addEventListener('click', onLoginUsernameContinue);
   $('login-username').addEventListener('keydown', (e) => { if (e.key === 'Enter') onLoginUsernameContinue(); });
   document.querySelectorAll('.home-tile').forEach((btn) => {
@@ -1423,10 +1465,9 @@ function respondIdentify(socket, pending, msg) {
 function onJoin() {
   hide($('join-error'));
   const username = $('join-username').value.trim();
-  const name = $('join-name').value.trim() || username;
   if (!username) { showError($('join-error'), 'Username is required.'); return; }
-  pendingJoin = { username, name };
-  saveProfile(username, name); // this device's identity going forward — see loadProfile
+  pendingJoin = { username, name: username };
+  saveProfile(username, username); // this device's identity going forward — see loadProfile
   stopPolling();
   resetGameState(username, lastStatus);
   if (lastStatus) seedOpponents(lastStatus, username);
@@ -1542,11 +1583,10 @@ function handlePlayerMessage(msg) {
 
 function onSpectateJoin() {
   hide($('spectate-error'));
-  const name = $('spectate-name').value.trim();
   const username = $('spectate-username').value.trim();
-  if (!name || !username) { showError($('spectate-error'), 'Both fields are required.'); return; }
-  pendingSpectate = { username, name };
-  saveProfile(username, name); // this device's identity going forward — see loadProfile
+  if (!username) { showError($('spectate-error'), 'Username is required.'); return; }
+  pendingSpectate = { username, name: username };
+  saveProfile(username, username); // this device's identity going forward — see loadProfile
   stopPolling();
   resetGameState(null, lastStatus);
   fetchJSON(`/api/status?room=${encodeURIComponent(currentRoomCode)}`)

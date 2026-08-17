@@ -231,3 +231,79 @@ def test_create_google_player_returns_false_instead_of_raising_on_a_uniqueness_r
     with patch.object(game_history, "_connect", side_effect=RuntimeError("duplicate key value")):
         result = game_history.create_google_player("g-123", "a@example.com", "alice", "Alice")
     assert result is False
+
+
+# ---------------------------------------------------------------- guests --
+
+def test_create_guest_player_is_a_no_op_without_a_database(no_database_url):
+    assert game_history.create_guest_player("alice") is False
+
+
+def test_create_guest_player_inserts_a_row_with_no_google_id_or_email(database_url):
+    game_history._schema_ready = True
+    conn, cursor = _fake_connection()
+    with patch.object(game_history, "_connect", return_value=conn):
+        result = game_history.create_guest_player("CrimsonNaruto482")
+    assert result is True
+    query, params = cursor.execute.call_args.args
+    assert "INSERT INTO players" in query
+    assert params == ("CrimsonNaruto482", "CrimsonNaruto482")
+    conn.close.assert_called_once()
+
+
+def test_create_guest_player_returns_false_instead_of_raising_on_a_uniqueness_race(database_url):
+    game_history._schema_ready = True
+    with patch.object(game_history, "_connect", side_effect=RuntimeError("duplicate key value")):
+        result = game_history.create_guest_player("alice")
+    assert result is False
+
+
+def test_rename_player_is_a_no_op_without_a_database(no_database_url):
+    assert game_history.rename_player("alice", "bob") is False
+
+
+def test_rename_player_refuses_when_the_new_username_is_taken(database_url):
+    game_history._schema_ready = True
+    with patch.object(game_history, "username_is_taken", return_value=True):
+        assert game_history.rename_player("alice", "bob") is False
+
+
+def test_rename_player_updates_the_existing_row(database_url):
+    game_history._schema_ready = True
+    conn, cursor = _fake_connection()
+    cursor.rowcount = 1
+    with patch.object(game_history, "username_is_taken", return_value=False), \
+            patch.object(game_history, "_connect", return_value=conn):
+        result = game_history.rename_player("alice", "bob")
+    assert result is True
+    query, params = cursor.execute.call_args_list[0].args
+    assert "UPDATE players" in query
+    assert params == ("bob", "bob", "alice")
+    conn.close.assert_called_once()
+
+
+def test_rename_player_falls_back_to_inserting_when_the_old_username_never_existed(database_url):
+    """
+    A profile that predates this reservation system (or was created while
+    the database was unconfigured) has no players row to UPDATE -- the
+    rename should still succeed by just reserving new_username fresh
+    rather than failing outright.
+    """
+    game_history._schema_ready = True
+    conn, cursor = _fake_connection()
+    cursor.rowcount = 0
+    with patch.object(game_history, "username_is_taken", return_value=False), \
+            patch.object(game_history, "_connect", return_value=conn):
+        result = game_history.rename_player("never-reserved", "bob")
+    assert result is True
+    queries = [call.args[0] for call in cursor.execute.call_args_list]
+    assert sum("UPDATE players" in q for q in queries) == 1
+    assert sum("INSERT INTO players" in q for q in queries) == 1
+
+
+def test_rename_player_returns_false_instead_of_raising_on_a_uniqueness_race(database_url):
+    game_history._schema_ready = True
+    with patch.object(game_history, "username_is_taken", return_value=False), \
+            patch.object(game_history, "_connect", side_effect=RuntimeError("duplicate key value")):
+        result = game_history.rename_player("alice", "bob")
+    assert result is False

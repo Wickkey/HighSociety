@@ -249,6 +249,75 @@ def create_google_player(google_id: str, email: str, username: str, display_name
             conn.close()
 
 
+def create_guest_player(username: str) -> bool:
+    """
+    Reserves a username for a guest (no google_id/email) -- see
+    web_server.py's /api/auth/guest/claim. Same shape and error handling
+    as create_google_player, just without a linked account behind it.
+    """
+    if not is_configured():
+        return False
+    ensure_schema()
+    if not _schema_ready:
+        return False
+    conn = None
+    try:
+        conn = _connect()
+        with conn, conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO players (username, display_name) VALUES (%s, %s)",
+                (username, username),
+            )
+        return True
+    except Exception as e:  # noqa: BLE001 -- includes a uniqueness-constraint race, deliberately not special-cased
+        LoggingManager.warning(f"game_history.create_guest_player failed: {e}")
+        return False
+    finally:
+        if conn is not None:
+            conn.close()
+
+
+def rename_player(old_username: str, new_username: str) -> bool:
+    """
+    Renames an existing players row from old_username to new_username
+    (guest or Google-linked alike) -- see web_server.py's
+    /api/auth/username/change. If old_username was never actually
+    reserved (a profile that predates this reservation system, or one
+    created while the database was unconfigured), falls back to just
+    inserting new_username fresh instead of failing outright. No
+    server-side proof of ownership beyond the caller already knowing the
+    current username -- consistent with the rest of this app's stateless,
+    sessionless identity model.
+    """
+    if not is_configured():
+        return False
+    ensure_schema()
+    if not _schema_ready:
+        return False
+    if username_is_taken(new_username):
+        return False
+    conn = None
+    try:
+        conn = _connect()
+        with conn, conn.cursor() as cur:
+            cur.execute(
+                "UPDATE players SET username = %s, display_name = %s, last_seen_at = now() WHERE username = %s",
+                (new_username, new_username, old_username),
+            )
+            if cur.rowcount == 0:
+                cur.execute(
+                    "INSERT INTO players (username, display_name) VALUES (%s, %s)",
+                    (new_username, new_username),
+                )
+        return True
+    except Exception as e:  # noqa: BLE001 -- includes a uniqueness-constraint race, deliberately not special-cased
+        LoggingManager.warning(f"game_history.rename_player failed: {e}")
+        return False
+    finally:
+        if conn is not None:
+            conn.close()
+
+
 def record_finished_game(*, room_code: str, seats: int, bot_mix: list,
                           started_at: datetime.datetime, finished_at: datetime.datetime,
                           participants: list) -> None:
