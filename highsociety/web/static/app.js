@@ -5,7 +5,17 @@
 
 const $ = (id) => document.getElementById(id);
 
+// No identity yet to act on (screen-login) or the table needs the width
+// (screen-game, already tight -- see the move-panel sizing history in
+// style.css) -- everywhere else the nav rail is a fixed part of the layout.
+const SIDEBAR_HIDDEN_SCREENS = new Set(['screen-login', 'screen-game']);
+
 function showScreen(id) {
+  // See cancelMatchmakingTicketQuietly's own comment -- catches every way
+  // off this screen that isn't the Cancel/Add-bots buttons themselves.
+  if (id !== 'screen-matchmaking' && !$('screen-matchmaking').classList.contains('hidden')) {
+    cancelMatchmakingTicketQuietly();
+  }
   document.querySelectorAll('.screen').forEach((s) => s.classList.add('hidden'));
   $(id).classList.remove('hidden');
   // The profile chip has nothing meaningful to show yet on the login screen
@@ -13,6 +23,7 @@ function showScreen(id) {
   // placeholder chip sitting in the header there just looks like stray,
   // half-set-up state rather than an intentional part of the screen.
   $('profile-chip-wrap').classList.toggle('hidden', id === 'screen-login');
+  document.querySelector('.app-shell').classList.toggle('sidebar-hidden', SIDEBAR_HIDDEN_SCREENS.has(id));
 }
 
 function hide(el) { el.classList.add('hidden'); }
@@ -554,20 +565,21 @@ let joinIdentityOverridden = false;
 function renderProfileChip() {
   const badge = $('connection-badge');
   const profile = loadProfile();
+  $('connection-badge-avatar').textContent = profile ? profile.username.charAt(0).toUpperCase() : '?';
   $('connection-badge-text').textContent = profile ? profile.name : 'Username';
   badge.classList.remove('hidden');
   badge.classList.add('editable');
-  // Glows until a real profile is saved (see ensureProfileSet/onSaveProfileClick)
+  // Glows until a real profile is saved (see ensureProfileSet/onAccountSaveClick)
   // -- a passive "this still needs you" cue, gone for good the moment one exists.
   badge.classList.toggle('needs-attention', !profile);
   closeProfilePopover();
   applyJoinIdentityDefaults();
 }
 
+// A short menu (Account / Log out) now, not inline edit fields -- editing
+// itself lives on the Account screen (see showAccountScreen).
 function openProfilePopover() {
   const profile = loadProfile();
-  $('profile-username').value = profile ? profile.username : '';
-  hide($('profile-error'));
   // Nothing to log out of until a profile actually exists.
   $('btn-logout').classList.toggle('hidden', !profile);
   show($('profile-popover'));
@@ -575,30 +587,20 @@ function openProfilePopover() {
 
 function closeProfilePopover() {
   hide($('profile-popover'));
-  $('profile-username').classList.remove('needs-attention');
 }
 
 // Guards the "Host Game" / "Join" actions on the home screen: if this
-// browser has never saved a profile, a click would otherwise silently go
-// through under the generic "Username" placeholder (see renderProfileChip).
-// Opens the popover and glows the username field instead of proceeding, so
-// a first-time visitor gets one clear nudge before their first game starts.
+// browser has somehow reached them with no saved profile (should be rare
+// now that login is mandatory before the home screen is ever reachable --
+// this is a defensive fallback, not the normal path), send it back to
+// login rather than the home action proceeding under no identity at all.
 // Purely a client-side check against the already-cached profile (see
 // loadProfile) -- no network round-trip, so it adds no latency/backend load
 // to the host/join request it's guarding. Returns true if the action should
-// be aborted (popover opened) so callers can `if (ensureProfileSet(event)) return;`.
-// Takes the triggering click event so it can stop it from bubbling up to
-// the document-level "click outside the chip closes the popover" listener
-// below -- without this, that same click (button, then document, in one
-// synchronous dispatch) would close the popover the instant it opens.
-function ensureProfileSet(event) {
+// be aborted so callers can `if (ensureProfileSet()) return;`.
+function ensureProfileSet() {
   if (loadProfile()) return false;
-  if (event) event.stopPropagation();
-  openProfilePopover();
-  const input = $('profile-username');
-  input.classList.add('needs-attention');
-  input.focus();
-  input.addEventListener('input', () => input.classList.remove('needs-attention'), { once: true });
+  showScreen('screen-login');
   return true;
 }
 
@@ -611,20 +613,31 @@ function onProfileChipClick() {
   }
 }
 
-function onCancelProfileEdit() {
-  closeProfilePopover();
+// Reached via the popover's "Account" item or the sidebar's Account tab
+// (see navigateFromSidebar) -- a full screen rather than the old inline
+// popover fields, room to grow into "possibly do much more in future"
+// (match history, stats, ...) without cramming it into a 260px dropdown.
+function showAccountScreen() {
+  const profile = loadProfile();
+  $('account-avatar').textContent = profile ? profile.username.charAt(0).toUpperCase() : '?';
+  $('account-username-display').textContent = profile ? profile.username : '';
+  $('account-username-input').value = profile ? profile.username : '';
+  hide($('account-error'));
+  hide($('account-saved'));
+  showScreen('screen-account');
 }
 
 // Only round-trips to the server when the username actually changed --
-// re-saving an unchanged one (e.g. just glancing at the popover and
-// clicking Save) shouldn't cost a network call or risk a spurious 409.
-async function onSaveProfileClick() {
-  hide($('profile-error'));
-  const username = $('profile-username').value.trim();
-  if (!username) { showError($('profile-error'), 'Username is required.'); return; }
+// re-saving an unchanged one (e.g. just opening the screen and clicking
+// Save) shouldn't cost a network call or risk a spurious 409.
+async function onAccountSaveClick() {
+  hide($('account-error'));
+  hide($('account-saved'));
+  const username = $('account-username-input').value.trim();
+  if (!username) { showError($('account-error'), 'Username is required.'); return; }
   const existing = loadProfile();
   if (existing && existing.username === username) {
-    closeProfilePopover();
+    show($('account-saved'));
     return;
   }
   try {
@@ -634,9 +647,133 @@ async function onSaveProfileClick() {
       body: JSON.stringify({ old_username: existing ? existing.username : username, new_username: username }),
     });
     saveProfile(result.username, result.username);
-    renderProfileChip(); // also closes the popover -- see its own closeProfilePopover() call
+    renderProfileChip();
+    $('account-username-display').textContent = result.username;
+    show($('account-saved'));
   } catch (e) {
-    showError($('profile-error'), e.message);
+    showError($('account-error'), e.message);
+  }
+}
+
+// ------------------------------------------------------- matchmaking --
+
+let matchmakingTicketId = null;
+let matchmakingPollTimer = null;
+let matchmakingSeats = null;
+
+function onPlayClick() {
+  showScreen('screen-matchmaking');
+  show($('matchmaking-setup'));
+  hide($('matchmaking-waiting'));
+}
+
+async function onFindMatch() {
+  const profile = loadProfile();
+  if (!profile) { showScreen('screen-login'); return; } // defensive -- see ensureProfileSet
+  const seats = parseInt($('matchmaking-seats').value, 10) || 3;
+  matchmakingSeats = seats;
+  hide($('matchmaking-setup'));
+  hide($('matchmaking-timeout-options'));
+  $('matchmaking-status-text').textContent = 'Finding you an opponent…';
+  show($('matchmaking-waiting'));
+  try {
+    const result = await fetchJSON('/api/matchmaking/join', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: profile.username, seats }),
+    });
+    matchmakingTicketId = result.ticket_id;
+    startMatchmakingPolling();
+  } catch (e) {
+    $('matchmaking-status-text').textContent = e.message;
+  }
+}
+
+function startMatchmakingPolling() {
+  stopMatchmakingPolling();
+  pollMatchmakingStatus();
+  matchmakingPollTimer = setInterval(pollMatchmakingStatus, 1200);
+}
+
+function stopMatchmakingPolling() {
+  if (matchmakingPollTimer) { clearInterval(matchmakingPollTimer); matchmakingPollTimer = null; }
+}
+
+async function pollMatchmakingStatus() {
+  if (!matchmakingTicketId) return;
+  let status;
+  try {
+    status = await fetchJSON(`/api/matchmaking/status?ticket=${encodeURIComponent(matchmakingTicketId)}`);
+  } catch (e) {
+    return; // transient network hiccup -- the next poll just tries again
+  }
+  if (status.matched) {
+    stopMatchmakingPolling();
+    matchmakingTicketId = null;
+    $('matchmaking-status-text').textContent = 'Match found!';
+    await enterJustMatchedRoom(status.room_code);
+    return;
+  }
+  $('matchmaking-status-text').textContent = status.waiting_count > 1
+    ? `Finding you an opponent… (${status.waiting_count} in queue)`
+    : 'Finding you an opponent…';
+  $('matchmaking-timeout-options').classList.toggle('hidden', !status.timed_out);
+}
+
+// Shared by both a real match and the "fill with bots" fallback below --
+// enterRoom() (the same function a manual room-code join uses) lands on
+// the join screen pre-filled with this browser's saved identity (see
+// applyJoinIdentityDefaults/renderLobby), so an immediate onJoin() call
+// completes the connection with no extra click, matching what a
+// matchmade match should feel like. Guarded on actually landing on
+// #screen-join in case the room's state has somehow already moved past
+// "lobby" by the time this resolves.
+async function enterJustMatchedRoom(roomCode) {
+  await enterRoom(roomCode);
+  if (!$('screen-join').classList.contains('hidden')) onJoin();
+}
+
+// Also called from showScreen() itself whenever navigation away from
+// #screen-matchmaking happens through some *other* route (a sidebar
+// click, the header title, browser back via a room-code URL, ...) --
+// without this, an abandoned ticket would sit in the queue indefinitely,
+// polling in the background from a screen the user can no longer see.
+function cancelMatchmakingTicketQuietly() {
+  stopMatchmakingPolling();
+  const ticketId = matchmakingTicketId;
+  matchmakingTicketId = null;
+  if (ticketId) {
+    fetchJSON('/api/matchmaking/cancel', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ticket_id: ticketId }),
+    }).catch(() => {}); // best-effort -- worst case the ticket just sits unmatched
+  }
+}
+
+function onMatchmakingCancel() {
+  cancelMatchmakingTicketQuietly();
+  showScreen('screen-host-setup');
+  showHomeTiles();
+  startRoomsPolling();
+}
+
+// Reuses the normal host-a-game path (/api/create_game) rather than
+// inventing a second way to seat bots -- "medium" matches the web
+// lobby's own default difficulty for the waiting-room's "Add a bot"
+// picker, since this screen has no UI of its own to choose one.
+async function onMatchmakingAddBots() {
+  cancelMatchmakingTicketQuietly();
+  const seats = matchmakingSeats || 3;
+  try {
+    const room = await fetchJSON('/api/create_game', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ seats, bot_mix: Array(seats - 1).fill('medium'), visibility: 'private' }),
+    });
+    await enterJustMatchedRoom(room.room_code);
+  } catch (e) {
+    $('matchmaking-status-text').textContent = e.message;
   }
 }
 
@@ -842,7 +979,7 @@ async function fetchJSON(url, opts) {
 // room code gets a clear error right on the home screen instead of silently
 // doing nothing.
 async function enterRoom(roomCode, event) {
-  if (ensureProfileSet(event)) return;
+  if (ensureProfileSet()) return;
   let status;
   try {
     status = await fetchJSON(`/api/status?room=${encodeURIComponent(roomCode)}`);
@@ -914,6 +1051,10 @@ function isActivelyPlayingLiveGame() {
 // resigning) is deliberate: this should behave exactly like closing the
 // tab would — recoverable via the room's own reconnect flow — not like
 // clicking Resign, which is permanent.
+// Returns whether it actually left (false only if a mid-game confirm was
+// shown and declined) -- callers that need to chain a further navigation
+// afterward (see navigateFromSidebar) can check this instead of assuming
+// the leave always happened.
 async function onHomeLinkClick() {
   const midGame = isActivelyPlayingLiveGame();
   if (midGame) {
@@ -921,10 +1062,21 @@ async function onHomeLinkClick() {
       'Leave the game? You can rejoin later.',
       'Leave',
     );
-    if (!ok) return;
+    if (!ok) return false;
   }
   if (ws) { ws.close(); ws = null; }
   leaveToHome(!midGame);
+  return true;
+}
+
+// Sidebar items are reachable from any screen, some of which (an active
+// lobby wait, a live game) hold an open connection -- route through the
+// same safe "leave" path the header title/lobby back-button already use
+// (confirms first if actually mid-game) before jumping to the target,
+// rather than yanking the screen out from under an open socket.
+async function navigateFromSidebar(afterHome) {
+  const left = await onHomeLinkClick();
+  if (left) afterHome();
 }
 
 function startRoomsPolling() {
@@ -1310,6 +1462,14 @@ function wireStaticHandlers() {
   document.querySelectorAll('.home-tile').forEach((btn) => {
     btn.addEventListener('click', () => showHomeTile(btn.dataset.homeTarget));
   });
+  $('sidebar-play').addEventListener('click', () => navigateFromSidebar(onPlayClick));
+  $('sidebar-join').addEventListener('click', () => navigateFromSidebar(() => {
+    showScreen('screen-host-setup'); showHomeTile('join'); startRoomsPolling();
+  }));
+  $('sidebar-rules').addEventListener('click', () => navigateFromSidebar(() => {
+    showScreen('screen-host-setup'); showHomeTile('rules');
+  }));
+  $('sidebar-account').addEventListener('click', () => navigateFromSidebar(showAccountScreen));
   document.querySelectorAll('.home-back').forEach((btn) => {
     btn.addEventListener('click', showHomeTiles);
   });
@@ -1339,8 +1499,16 @@ function wireStaticHandlers() {
   $('btn-spectate-join').addEventListener('click', onSpectateJoin);
   $('btn-new-game').addEventListener('click', () => leaveToHome());
   $('connection-badge').addEventListener('click', onProfileChipClick);
-  $('btn-cancel-profile-edit').addEventListener('click', onCancelProfileEdit);
-  $('btn-save-profile').addEventListener('click', onSaveProfileClick);
+  $('btn-open-account').addEventListener('click', () => { closeProfilePopover(); showAccountScreen(); });
+  $('btn-account-back').addEventListener('click', () => navigateFromSidebar(() => {
+    showScreen('screen-host-setup'); showHomeTiles(); startRoomsPolling();
+  }));
+  $('btn-account-save').addEventListener('click', onAccountSaveClick);
+  $('btn-account-logout').addEventListener('click', onLogout);
+  $('btn-find-match').addEventListener('click', onFindMatch);
+  $('btn-matchmaking-cancel').addEventListener('click', onMatchmakingCancel);
+  $('btn-matchmaking-back').addEventListener('click', onMatchmakingCancel);
+  $('btn-matchmaking-add-bots').addEventListener('click', onMatchmakingAddBots);
   $('btn-logout').addEventListener('click', onLogout);
   // Standard popover UX: a click anywhere outside the chip/popover itself
   // closes it, same as a browser's own menus.
@@ -1380,7 +1548,7 @@ function wireStaticHandlers() {
 }
 
 async function onCreateGame(event) {
-  if (ensureProfileSet(event)) return;
+  if (ensureProfileSet()) return;
   hide($('host-error'));
   const seats = parseInt($('host-seats').value, 10);
   const counts = {

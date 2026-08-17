@@ -42,24 +42,39 @@
   <meta name="twitter:image" content="{{ request.url_root }}static/og-image.png">
 </head>
 <body>
+  <div class="app-shell">
+    <!-- Persistent nav rail -- present on every screen except login (no
+         identity yet to act on) and the live game table (screen real
+         estate is already tight there, see the move-panel sizing history
+         in style.css; see app.js's updateSidebarVisibility). -->
+    <nav id="app-sidebar" class="app-sidebar">
+      <button type="button" class="sidebar-item" id="sidebar-play" title="Play">
+        <span class="sidebar-icon">🎮</span><span class="sidebar-label">Play</span>
+      </button>
+      <button type="button" class="sidebar-item" id="sidebar-join" title="Join a Game">
+        <span class="sidebar-icon">🚪</span><span class="sidebar-label">Join</span>
+      </button>
+      <button type="button" class="sidebar-item sidebar-item-disabled" title="Leaderboard — coming soon" disabled>
+        <span class="sidebar-icon">😴</span><span class="sidebar-label">Leaderboard</span>
+      </button>
+      <button type="button" class="sidebar-item" id="sidebar-rules" title="How to Play">
+        <span class="sidebar-icon">📜</span><span class="sidebar-label">How to Play</span>
+      </button>
+      <button type="button" class="sidebar-item" id="sidebar-account" title="Account">
+        <span class="sidebar-icon">👤</span><span class="sidebar-label">Account</span>
+      </button>
+    </nav>
+    <div class="app-main-col">
   <header class="topbar">
     <h1 id="home-link" class="home-link" role="link" tabindex="0">High&nbsp;Society</h1>
     <div id="profile-chip-wrap" class="profile-chip-wrap">
       <button type="button" id="connection-badge" class="badge profile-chip">
-        <span id="connection-badge-text"></span>
-        <svg class="profile-chip-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-             stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/>
-        </svg>
+        <span id="connection-badge-avatar" class="profile-chip-avatar"></span>
+        <span id="connection-badge-text" class="profile-chip-name"></span>
       </button>
       <div id="profile-popover" class="profile-popover card panel hidden">
-        <label>Username <input type="text" id="profile-username" placeholder="e.g. alex" autocomplete="off" maxlength="24"></label>
-        <div class="button-row">
-          <button type="button" id="btn-save-profile" class="primary">Save</button>
-          <button type="button" id="btn-cancel-profile-edit" class="secondary">Cancel</button>
-        </div>
-        <p id="profile-error" class="error hidden"></p>
-        <button type="button" id="btn-logout" class="link-button hidden">Log out</button>
+        <button type="button" id="btn-open-account" class="link-button popover-menu-item">Account</button>
+        <button type="button" id="btn-logout" class="link-button popover-menu-item hidden">Log out</button>
       </div>
     </div>
   </header>
@@ -97,6 +112,67 @@
           </label>
           <button type="button" id="btn-login-continue" class="primary">Continue</button>
           <p id="login-username-error" class="error hidden"></p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== ACCOUNT ===================== -->
+    <section id="screen-account" class="screen hidden">
+      <div class="card panel account-panel">
+        <button type="button" class="screen-back" id="btn-account-back">← Back</button>
+        <div class="account-header">
+          <span id="account-avatar" class="profile-chip-avatar account-avatar"></span>
+          <div>
+            <h2 id="account-username-display"></h2>
+            <p class="muted">Elo <span id="account-elo">1000</span> <span class="account-elo-note">(placeholder — updates after real matches, coming soon)</span></p>
+          </div>
+        </div>
+
+        <label>Username
+          <input type="text" id="account-username-input" placeholder="e.g. alex" autocomplete="off" maxlength="24">
+        </label>
+        <div class="button-row">
+          <button type="button" id="btn-account-save" class="primary">Save</button>
+        </div>
+        <p id="account-error" class="error hidden"></p>
+        <p id="account-saved" class="account-saved hidden">Saved.</p>
+
+        <div class="account-more">
+          <p class="muted">More account features — match history, stats, avatars — coming soon.</p>
+        </div>
+
+        <button type="button" id="btn-account-logout" class="secondary standalone">Log out</button>
+      </div>
+    </section>
+
+    <!-- ===================== MATCHMAKING (Play) ===================== -->
+    <section id="screen-matchmaking" class="screen hidden">
+      <div class="card panel matchmaking-panel">
+        <button type="button" class="screen-back" id="btn-matchmaking-back">← Back</button>
+
+        <div id="matchmaking-setup">
+          <h2>Play</h2>
+          <p class="muted">Find an opponent close to your rating.</p>
+          <label>Players
+            <input type="number" id="matchmaking-seats" min="2" max="5" value="3">
+          </label>
+          <button type="button" id="btn-find-match" class="primary">Find Match</button>
+        </div>
+
+        <div id="matchmaking-waiting" class="hidden">
+          <div class="shuffle-anim" aria-hidden="true">
+            <span class="card-back shuffle-card shuffle-card-1"></span>
+            <span class="card-back shuffle-card shuffle-card-2"></span>
+            <span class="card-back shuffle-card shuffle-card-3"></span>
+          </div>
+          <p id="matchmaking-status-text" class="matchmaking-status-text">Finding you an opponent…</p>
+
+          <div id="matchmaking-timeout-options" class="hidden">
+            <p class="muted">Still looking — you can keep waiting, or:</p>
+            <button type="button" id="btn-matchmaking-add-bots" class="primary">Fill with bots and start</button>
+          </div>
+
+          <button type="button" id="btn-matchmaking-cancel" class="link-button matchmaking-cancel-link">Cancel</button>
         </div>
       </div>
     </section>
@@ -526,6 +602,8 @@
     </section>
 
   </main>
+    </div>
+  </div>
 
   <!-- Moved out of a fixed-position overlay on narrow screens (see
        .github-link's @media rule in style.css) -- floating fixed over the
