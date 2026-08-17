@@ -8,6 +8,11 @@ const $ = (id) => document.getElementById(id);
 function showScreen(id) {
   document.querySelectorAll('.screen').forEach((s) => s.classList.add('hidden'));
   $(id).classList.remove('hidden');
+  // The profile chip has nothing meaningful to show yet on the login screen
+  // itself (no profile exists before it's gotten past) -- a "Username"
+  // placeholder chip sitting in the header there just looks like stray,
+  // half-set-up state rather than an intentional part of the screen.
+  $('profile-chip-wrap').classList.toggle('hidden', id === 'screen-login');
 }
 
 function hide(el) { el.classList.add('hidden'); }
@@ -357,10 +362,178 @@ function loadProfile() {
   }
 }
 
-function saveProfile(username, name) {
-  const value = JSON.stringify({ username, name });
+// googleId: omit entirely to leave whatever was already stored alone
+// (e.g. onSaveProfileClick editing just the display name shouldn't wipe
+// out "this profile came from a real Google account"); pass null
+// explicitly for a guest profile with no account behind it at all.
+function saveProfile(username, name, googleId) {
+  const existing = loadProfile();
+  const resolvedGoogleId = googleId !== undefined ? googleId : (existing ? existing.google_id : null) || null;
+  const value = JSON.stringify({ username, name, google_id: resolvedGoogleId });
   try { localStorage.setItem(PROFILE_STORAGE_KEY, value); } catch (e) { /* fall through to the cookie */ }
   writeCookie(PROFILE_STORAGE_KEY, value, 365);
+}
+
+// Decodes a JWT's payload (base64url) WITHOUT verifying its signature --
+// only ever used to read "sub" (Google's own stable per-user id) for this
+// browser's own local bookkeeping (see saveProfile's google_id), *after*
+// the server has already verified the very same token via
+// /api/auth/google or /api/auth/google/claim_username. Never used for
+// anything security-sensitive -- the server's own verification is what
+// actually matters; this is just so the client doesn't have to ask the
+// server to repeat back a claim already sitting in the token it already
+// has.
+function decodeJwtPayload(token) {
+  try {
+    const base64 = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+    return JSON.parse(atob(base64));
+  } catch (e) {
+    return {};
+  }
+}
+
+// -------------------------------------------------------- login screen --
+
+// Set while the login screen's username form is collecting a name for a
+// first-time Google sign-in (see handleGoogleCredential) rather than a
+// plain Guest continuation -- onLoginUsernameContinue branches on this to
+// decide which endpoint (if any) the submitted username actually goes to.
+let _pendingGoogleIdToken = null;
+
+// The boot handler's own pre-login continuation (join a room already in
+// the URL, or show the home tiles) -- now reached only once #screen-login
+// resolves to a profile, via either path below, instead of running
+// unconditionally at boot.
+function proceedPastLogin() {
+  renderProfileChip(); // the header chip was last rendered at boot, before
+                        // this browser had a profile at all -- refresh it
+                        // now that saveProfile has actually run.
+  if (currentRoomCode) {
+    refreshStatus();
+    startPolling();
+  } else {
+    showScreen('screen-host-setup');
+    showHomeTiles();
+    startRoomsPolling();
+  }
+}
+
+// showShuffle: only the guest path offers a "get a different name" reroll
+// -- a first-time Google sign-in is picking their own real username, not
+// an anonymous quirky one, so that button stays hidden there (see
+// handleGoogleCredential).
+function showLoginUsernameForm(prefillUsername, showShuffle) {
+  hide($('login-username-error'));
+  $('login-username').value = prefillUsername || '';
+  $('btn-shuffle-username').classList.toggle('hidden', !showShuffle);
+  show($('login-username-form'));
+  $('login-username').focus();
+}
+
+async function fetchSuggestedGuestUsername() {
+  try {
+    const result = await fetchJSON('/api/auth/guest/suggest');
+    return result.username || '';
+  } catch (e) {
+    return ''; // still a normal free-text field -- they can just type one
+  }
+}
+
+// "Continue as Guest": a random, DB-reserved username (color + anime
+// character + number) instead of asking someone to come up with one --
+// see /api/auth/guest/suggest. Still a normal free-text field underneath
+// (shuffle for a different one, or just type over it entirely).
+async function onContinueAsGuest() {
+  _pendingGoogleIdToken = null;
+  showLoginUsernameForm('', true);
+  $('login-username').value = await fetchSuggestedGuestUsername();
+}
+
+async function onShuffleUsername() {
+  $('login-username').value = await fetchSuggestedGuestUsername();
+  $('login-username').focus();
+}
+
+async function onLoginUsernameContinue() {
+  const username = $('login-username').value.trim();
+  hide($('login-username-error'));
+  if (!username) { showError($('login-username-error'), 'Username is required.'); return; }
+
+  if (_pendingGoogleIdToken) {
+    // Second step of a first-time Google sign-in: claim this username
+    // for the account handleGoogleCredential already verified server-side
+    // a moment ago.
+    const token = _pendingGoogleIdToken;
+    try {
+      const result = await fetchJSON('/api/auth/google/claim_username', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id_token: token, username }),
+      });
+      saveProfile(result.username, result.username, decodeJwtPayload(token).sub);
+      _pendingGoogleIdToken = null;
+      proceedPastLogin();
+    } catch (e) {
+      showError($('login-username-error'), e.message);
+    }
+    return;
+  }
+
+  // Guest path -- reserves the username in the same players table Google
+  // accounts use (see /api/auth/guest/claim), so "unique username" is a
+  // real, database-enforced guarantee rather than just a local label.
+  try {
+    const result = await fetchJSON('/api/auth/guest/claim', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username }),
+    });
+    saveProfile(result.username, result.username, null);
+    proceedPastLogin();
+  } catch (e) {
+    showError($('login-username-error'), e.message);
+  }
+}
+
+// Google Identity Services calls this once the visitor actually picks an
+// account in its own popup/One Tap UI (wired up by initGoogleSignIn below)
+// -- response.credential is a signed ID token this browser never needs to
+// (and can't meaningfully) verify itself; /api/auth/google does that
+// server-side before this client trusts anything in it.
+async function handleGoogleCredential(response) {
+  hide($('login-username-error'));
+  try {
+    const result = await fetchJSON('/api/auth/google', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id_token: response.credential }),
+    });
+    if (result.needs_username) {
+      _pendingGoogleIdToken = response.credential;
+      showLoginUsernameForm(result.suggested_display_name, false);
+    } else {
+      saveProfile(result.username, result.username, decodeJwtPayload(response.credential).sub);
+      proceedPastLogin();
+    }
+  } catch (e) {
+    _pendingGoogleIdToken = null;
+    showLoginUsernameForm('', false);
+    showError($('login-username-error'), e.message);
+  }
+}
+
+// Invoked by index.html's own GIS <script> tag via its onload attribute --
+// runs the instant the library is actually ready rather than guessing at
+// a fixed delay, and only exists on the page at all when GOOGLE_CLIENT_ID
+// was configured server-side (see web_server.py); window.GOOGLE_CLIENT_ID
+// is simply never set otherwise, so this quietly does nothing everywhere
+// else (every local dev run and the whole test suite included).
+function initGoogleSignIn() {
+  if (!window.GOOGLE_CLIENT_ID || !window.google || !window.google.accounts) return;
+  google.accounts.id.initialize({ client_id: window.GOOGLE_CLIENT_ID, callback: handleGoogleCredential });
+  google.accounts.id.renderButton($('google-signin-container'), {
+    theme: 'filled_black', size: 'large', width: 280, text: 'continue_with',
+  });
 }
 
 // Whether the join/spectate screens' "not you?" link has been clicked since
@@ -394,8 +567,9 @@ function renderProfileChip() {
 function openProfilePopover() {
   const profile = loadProfile();
   $('profile-username').value = profile ? profile.username : '';
-  $('profile-display-name').value = profile ? profile.name : '';
   hide($('profile-error'));
+  // Nothing to log out of until a profile actually exists.
+  $('btn-logout').classList.toggle('hidden', !profile);
   show($('profile-popover'));
 }
 
@@ -441,13 +615,46 @@ function onCancelProfileEdit() {
   closeProfilePopover();
 }
 
-function onSaveProfileClick() {
+// Only round-trips to the server when the username actually changed --
+// re-saving an unchanged one (e.g. just glancing at the popover and
+// clicking Save) shouldn't cost a network call or risk a spurious 409.
+async function onSaveProfileClick() {
   hide($('profile-error'));
   const username = $('profile-username').value.trim();
-  const name = $('profile-display-name').value.trim() || username;
   if (!username) { showError($('profile-error'), 'Username is required.'); return; }
-  saveProfile(username, name);
+  const existing = loadProfile();
+  if (existing && existing.username === username) {
+    closeProfilePopover();
+    return;
+  }
+  try {
+    const result = await fetchJSON('/api/auth/username/change', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ old_username: existing ? existing.username : username, new_username: username }),
+    });
+    saveProfile(result.username, result.username);
+    renderProfileChip(); // also closes the popover -- see its own closeProfilePopover() call
+  } catch (e) {
+    showError($('profile-error'), e.message);
+  }
+}
+
+// Clears this browser's saved identity entirely (both localStorage and
+// the cookie fallback -- see saveProfile/loadProfile) and returns to the
+// login screen so a different account/guest name can be chosen. Doesn't
+// touch anything server-side -- a Google account itself isn't "logged
+// out" of, only this browser's own cached association with it, exactly
+// mirroring how loadProfile/saveProfile never talked to the server for
+// a guest profile either.
+function onLogout() {
+  try { localStorage.removeItem(PROFILE_STORAGE_KEY); } catch (e) { /* private mode, etc. */ }
+  writeCookie(PROFILE_STORAGE_KEY, '', -1);
+  closeProfilePopover();
   renderProfileChip();
+  currentRoomCode = null;
+  history.replaceState(null, '', location.pathname);
+  showScreen('screen-login');
 }
 
 // Pre-fills the join screen's username/name fields from the saved profile
@@ -462,8 +669,7 @@ function applyJoinIdentityDefaults() {
   const profile = loadProfile();
   if (profile) {
     $('join-username').value = profile.username;
-    $('join-name').value = profile.name;
-    $('join-as-name').textContent = profile.name;
+    $('join-as-name').textContent = profile.username;
     show($('join-as-label'));
     hide($('join-identity-fields'));
   } else {
@@ -486,8 +692,7 @@ function applySpectateIdentityDefaults() {
   const profile = loadProfile();
   if (profile) {
     $('spectate-username').value = profile.username;
-    $('spectate-name').value = profile.name;
-    $('spectate-as-name').textContent = profile.name;
+    $('spectate-as-name').textContent = profile.username;
     show($('spectate-as-label'));
     hide($('spectate-identity-fields'));
   } else {
@@ -613,13 +818,13 @@ document.addEventListener('DOMContentLoaded', () => {
   wireStaticHandlers();
   renderProfileChip();
   currentRoomCode = new URLSearchParams(location.search).get('room');
-  if (currentRoomCode) {
-    refreshStatus();
-    startPolling();
+  // A returning visitor who already has a saved profile (guest or Google)
+  // skips straight past #screen-login -- only a genuinely new visitor, or
+  // someone who explicitly logged out, sees it.
+  if (loadProfile()) {
+    proceedPastLogin();
   } else {
-    showScreen('screen-host-setup');
-    showHomeTiles();
-    startRoomsPolling();
+    showScreen('screen-login');
   }
 });
 
@@ -1098,6 +1303,10 @@ function showRematchDeclinedNotice(declinedBy) {
 function wireStaticHandlers() {
   $('confirm-modal-cancel').addEventListener('click', () => _resolveConfirmDialog(false));
   $('confirm-modal-confirm').addEventListener('click', () => _resolveConfirmDialog(true));
+  $('btn-continue-guest').addEventListener('click', onContinueAsGuest);
+  $('btn-shuffle-username').addEventListener('click', onShuffleUsername);
+  $('btn-login-continue').addEventListener('click', onLoginUsernameContinue);
+  $('login-username').addEventListener('keydown', (e) => { if (e.key === 'Enter') onLoginUsernameContinue(); });
   document.querySelectorAll('.home-tile').forEach((btn) => {
     btn.addEventListener('click', () => showHomeTile(btn.dataset.homeTarget));
   });
@@ -1132,6 +1341,7 @@ function wireStaticHandlers() {
   $('connection-badge').addEventListener('click', onProfileChipClick);
   $('btn-cancel-profile-edit').addEventListener('click', onCancelProfileEdit);
   $('btn-save-profile').addEventListener('click', onSaveProfileClick);
+  $('btn-logout').addEventListener('click', onLogout);
   // Standard popover UX: a click anywhere outside the chip/popover itself
   // closes it, same as a browser's own menus.
   document.addEventListener('click', (e) => {
@@ -1255,10 +1465,9 @@ function respondIdentify(socket, pending, msg) {
 function onJoin() {
   hide($('join-error'));
   const username = $('join-username').value.trim();
-  const name = $('join-name').value.trim() || username;
   if (!username) { showError($('join-error'), 'Username is required.'); return; }
-  pendingJoin = { username, name };
-  saveProfile(username, name); // this device's identity going forward — see loadProfile
+  pendingJoin = { username, name: username };
+  saveProfile(username, username); // this device's identity going forward — see loadProfile
   stopPolling();
   resetGameState(username, lastStatus);
   if (lastStatus) seedOpponents(lastStatus, username);
@@ -1374,11 +1583,10 @@ function handlePlayerMessage(msg) {
 
 function onSpectateJoin() {
   hide($('spectate-error'));
-  const name = $('spectate-name').value.trim();
   const username = $('spectate-username').value.trim();
-  if (!name || !username) { showError($('spectate-error'), 'Both fields are required.'); return; }
-  pendingSpectate = { username, name };
-  saveProfile(username, name); // this device's identity going forward — see loadProfile
+  if (!username) { showError($('spectate-error'), 'Username is required.'); return; }
+  pendingSpectate = { username, name: username };
+  saveProfile(username, username); // this device's identity going forward — see loadProfile
   stopPolling();
   resetGameState(null, lastStatus);
   fetchJSON(`/api/status?room=${encodeURIComponent(currentRoomCode)}`)

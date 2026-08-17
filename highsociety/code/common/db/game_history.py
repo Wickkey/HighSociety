@@ -26,6 +26,7 @@ import datetime
 import json
 import os
 import threading
+from typing import Optional
 
 from highsociety.code.common.logger_module.logger.logging_manager import LoggingManager
 
@@ -143,6 +144,178 @@ def _upsert_player(cur, username: str, display_name: str) -> int:
         (username, display_name),
     )
     return cur.fetchone()[0]
+
+
+def find_player_by_google_id(google_id: str) -> Optional[dict]:
+    """
+    Looks up an existing account by Google's stable per-user id (the
+    verified ID token's "sub" claim -- see web_server.py's
+    /api/auth/google). Returns {"username", "display_name"} if this
+    Google account has signed in before, or None otherwise -- covering
+    both "no database configured" and "genuinely a first-time sign-in"
+    the same way, since the caller treats them identically either way
+    (both mean "ask for a username").
+    """
+    if not is_configured():
+        return None
+    ensure_schema()
+    if not _schema_ready:
+        return None
+    conn = None
+    try:
+        conn = _connect()
+        with conn, conn.cursor() as cur:
+            cur.execute("SELECT username, display_name FROM players WHERE google_id = %s", (google_id,))
+            row = cur.fetchone()
+            if row is None:
+                return None
+            return {"username": row[0], "display_name": row[1]}
+    except Exception as e:  # noqa: BLE001 -- a DB hiccup here must never crash the sign-in request
+        LoggingManager.warning(f"game_history.find_player_by_google_id failed: {e}")
+        return None
+    finally:
+        if conn is not None:
+            conn.close()
+
+
+def username_is_taken(username: str) -> bool:
+    """
+    Whether `username` is already claimed by any existing players row
+    (Google-linked, or a plain guest who's simply finished a game before
+    -- see _upsert_player). Checked before create_google_player commits
+    to one, so a first-time Google sign-in gets a clear "pick another
+    name" instead of a raw uniqueness-constraint error surfacing as a
+    generic failure.
+
+    Fails safe toward "taken": no database, or the check itself erroring,
+    both report True. A false "taken" just means the caller has to try a
+    different name; a false "available" would let create_google_player's
+    own INSERT crash on the exact constraint this was meant to head off.
+    """
+    if not is_configured():
+        return True
+    ensure_schema()
+    if not _schema_ready:
+        return True
+    conn = None
+    try:
+        conn = _connect()
+        with conn, conn.cursor() as cur:
+            cur.execute("SELECT 1 FROM players WHERE username = %s", (username,))
+            return cur.fetchone() is not None
+    except Exception as e:  # noqa: BLE001
+        LoggingManager.warning(f"game_history.username_is_taken failed: {e}")
+        return True
+    finally:
+        if conn is not None:
+            conn.close()
+
+
+def create_google_player(google_id: str, email: str, username: str, display_name: str) -> bool:
+    """
+    Creates a new players row for a first-time Google sign-in -- see
+    web_server.py's /api/auth/google/claim_username, which already
+    re-checked username_is_taken moments before calling this. Still
+    relies on the table's own UNIQUE constraints (username, google_id,
+    email) to catch the same race at the database level (two tabs
+    claiming the same username within the same instant) rather than
+    trusting that earlier check alone: returns False on any failure,
+    including a uniqueness violation, so the caller can just re-prompt
+    for a different username without needing to tell "the database is
+    down" apart from "someone else just took that name".
+    """
+    if not is_configured():
+        return False
+    ensure_schema()
+    if not _schema_ready:
+        return False
+    conn = None
+    try:
+        conn = _connect()
+        with conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO players (username, display_name, google_id, email)
+                VALUES (%s, %s, %s, %s)
+                """,
+                (username, display_name, google_id, email),
+            )
+        return True
+    except Exception as e:  # noqa: BLE001 -- includes a uniqueness-constraint race, deliberately not special-cased
+        LoggingManager.warning(f"game_history.create_google_player failed: {e}")
+        return False
+    finally:
+        if conn is not None:
+            conn.close()
+
+
+def create_guest_player(username: str) -> bool:
+    """
+    Reserves a username for a guest (no google_id/email) -- see
+    web_server.py's /api/auth/guest/claim. Same shape and error handling
+    as create_google_player, just without a linked account behind it.
+    """
+    if not is_configured():
+        return False
+    ensure_schema()
+    if not _schema_ready:
+        return False
+    conn = None
+    try:
+        conn = _connect()
+        with conn, conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO players (username, display_name) VALUES (%s, %s)",
+                (username, username),
+            )
+        return True
+    except Exception as e:  # noqa: BLE001 -- includes a uniqueness-constraint race, deliberately not special-cased
+        LoggingManager.warning(f"game_history.create_guest_player failed: {e}")
+        return False
+    finally:
+        if conn is not None:
+            conn.close()
+
+
+def rename_player(old_username: str, new_username: str) -> bool:
+    """
+    Renames an existing players row from old_username to new_username
+    (guest or Google-linked alike) -- see web_server.py's
+    /api/auth/username/change. If old_username was never actually
+    reserved (a profile that predates this reservation system, or one
+    created while the database was unconfigured), falls back to just
+    inserting new_username fresh instead of failing outright. No
+    server-side proof of ownership beyond the caller already knowing the
+    current username -- consistent with the rest of this app's stateless,
+    sessionless identity model.
+    """
+    if not is_configured():
+        return False
+    ensure_schema()
+    if not _schema_ready:
+        return False
+    if username_is_taken(new_username):
+        return False
+    conn = None
+    try:
+        conn = _connect()
+        with conn, conn.cursor() as cur:
+            cur.execute(
+                "UPDATE players SET username = %s, display_name = %s, last_seen_at = now() WHERE username = %s",
+                (new_username, new_username, old_username),
+            )
+            if cur.rowcount == 0:
+                cur.execute(
+                    "INSERT INTO players (username, display_name) VALUES (%s, %s)",
+                    (new_username, new_username),
+                )
+        return True
+    except Exception as e:  # noqa: BLE001 -- includes a uniqueness-constraint race, deliberately not special-cased
+        LoggingManager.warning(f"game_history.rename_player failed: {e}")
+        return False
+    finally:
+        if conn is not None:
+            conn.close()
 
 
 def record_finished_game(*, room_code: str, seats: int, bot_mix: list,
