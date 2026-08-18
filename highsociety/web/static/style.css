@@ -58,7 +58,7 @@ body {
 /* ---------------- app shell / sidebar ---------------- */
 
 .app-shell { display: flex; min-height: 100vh; }
-.app-main-col { flex: 1 1 auto; min-width: 0; }
+.app-main-col { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; min-height: 100vh; }
 
 /* A slim, always-icon rail (chess.com-style) rather than a wide expanding
    drawer — one width works at every viewport size, so there's no separate
@@ -351,8 +351,18 @@ input.needs-attention {
 
 #app {
   max-width: 1120px;
+  width: 100%;
   margin: 0 auto;
   padding: 0 1.25rem 3rem;
+  /* Lets a "hero centered" screen (login, matchmaking) fill exactly
+     whatever vertical space is actually left below the header and center
+     within it -- precise regardless of the header's real rendered
+     height, instead of guessing that height as a fixed number to
+     subtract from 100vh (previously off by however wrong the guess was,
+     confirmed visibly not-centered on some viewport sizes). */
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
 }
 
 .screen { width: 100%; }
@@ -386,7 +396,7 @@ input.needs-attention {
   display: flex;
   align-items: center;
   justify-content: center;
-  min-height: calc(100vh - 160px);
+  flex: 1;
 }
 #screen-matchmaking .panel {
   max-width: 420px;
@@ -418,21 +428,43 @@ input.needs-attention {
   75% { transform: translate(16px, -8px) rotate(9deg); }
 }
 
+/* Tabular-nums so the digits don't shift width as they tick over --
+   noticeable jitter otherwise, since most fonts give "1" a narrower
+   advance than "0". Chess.com/Rocket League-style elapsed counter,
+   matching how a matchmaking wait is normally communicated elsewhere. */
+.matchmaking-elapsed {
+  font-size: 1.7rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+  color: var(--accent-strong);
+  margin: 0 0 0.2rem;
+}
 .matchmaking-status-text { color: var(--muted); margin: 0 0 0.6rem; }
 #matchmaking-timeout-options { margin-top: 0.6rem; }
 #btn-matchmaking-add-bots { width: 100%; }
 
 /* Deliberately understated ("should not be obvious") -- a small muted
-   text link below everything else, not a full button competing with the
-   primary actions above it. */
+   text action below everything else, not a full button competing with
+   the primary actions above it. Resets every default <button> property
+   (background/border/margin/underline) a plain button or .link-button
+   would otherwise apply, same fix as the profile popover menu items. */
 .matchmaking-cancel-link {
   display: block;
-  margin: 1.1rem auto 0;
+  width: auto;
+  margin: 1.2rem auto 0;
+  padding: 0.4rem 0.8rem;
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  font: inherit;
   font-size: 0.78rem;
-  opacity: 0.6;
-  padding: 0.3rem;
+  font-weight: 500;
+  color: var(--muted);
+  text-decoration: none;
+  cursor: pointer;
 }
-.matchmaking-cancel-link:hover { opacity: 1; }
+.matchmaking-cancel-link:hover { background: var(--panel-bg-soft); color: var(--text); }
 
 /* ---------------- login screen ---------------- */
 
@@ -444,7 +476,7 @@ input.needs-attention {
   display: flex;
   align-items: center;
   justify-content: center;
-  min-height: calc(100vh - 160px);
+  flex: 1;
 }
 
 #screen-login .panel {
@@ -1315,6 +1347,9 @@ button.secondary.standalone { margin-top: 0.9rem; display: inline-block; }
 .opponent-header { display: flex; justify-content: space-between; align-items: center; font-size: 0.9rem; margin-bottom: 0.35rem; }
 .opponent-header .name { font-weight: 600; }
 .opp-timer {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
   font-size: 0.75rem;
   font-weight: 600;
   color: var(--accent-strong);
@@ -1324,6 +1359,7 @@ button.secondary.standalone { margin-top: 0.9rem; display: inline-block; }
 }
 .opp-timer.urgent { color: #fff; background: var(--danger); }
 .opp-timer:empty { display: none; }
+.opp-timer svg, .move-timer svg { width: 12px; height: 12px; flex-shrink: 0; }
 
 .chip-row { display: flex; flex-wrap: wrap; gap: 0.45rem; margin-top: 0.6rem; }
 .chip-row.small .status-card, .chip-row.small .card-back { width: 40px; height: 56px; font-size: 0.7rem; }
@@ -1408,7 +1444,9 @@ button.secondary.standalone { margin-top: 0.9rem; display: inline-block; }
 .move-panel.pending .move-panel-overlay { display: flex; }
 
 .move-timer {
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
   font-weight: 700;
   font-size: 0.85rem;
   letter-spacing: 0.02em;
@@ -1432,7 +1470,7 @@ button.secondary.standalone { margin-top: 0.9rem; display: inline-block; }
    compact as before -- it never shows this badge at all. Matches
    .move-timer.hidden's higher specificity against .hidden's own
    !important. */
-.move-panel.has-timer .move-timer.hidden { display: inline-block !important; visibility: hidden !important; }
+.move-panel.has-timer .move-timer.hidden { display: inline-flex !important; visibility: hidden !important; }
 .move-timer.urgent {
   color: #fff;
   background: var(--danger);

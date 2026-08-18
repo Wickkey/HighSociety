@@ -5,6 +5,14 @@
 
 const $ = (id) => document.getElementById(id);
 
+// Shared by the move-timer badge and each opponent's own timer badge --
+// a line-art clock instead of the "⏰" emoji, matching the rest of the
+// app's icon language (stroke-based SVG, not a font glyph -- see the
+// profile chip / sidebar for the same reasoning).
+const CLOCK_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" '
+  + 'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/>'
+  + '<path d="M12 7.5V12l3 2"/></svg>';
+
 // No identity yet to act on (screen-login) or the table needs the width
 // (screen-game, already tight -- see the move-panel sizing history in
 // style.css) -- everywhere else the nav rail is a fixed part of the layout.
@@ -661,6 +669,8 @@ async function onAccountSaveClick() {
 let matchmakingTicketId = null;
 let matchmakingPollTimer = null;
 let matchmakingSeats = null;
+let matchmakingStartedAt = null;
+let matchmakingElapsedTimer = null;
 
 function onPlayClick() {
   showScreen('screen-matchmaking');
@@ -685,6 +695,7 @@ async function onFindMatch() {
     });
     matchmakingTicketId = result.ticket_id;
     startMatchmakingPolling();
+    startMatchmakingElapsedTimer();
   } catch (e) {
     $('matchmaking-status-text').textContent = e.message;
   }
@@ -698,6 +709,28 @@ function startMatchmakingPolling() {
 
 function stopMatchmakingPolling() {
   if (matchmakingPollTimer) { clearInterval(matchmakingPollTimer); matchmakingPollTimer = null; }
+}
+
+// A visible "how long has this been going" counter (chess.com/Rocket
+// League-style) -- separate from the status poll interval since it ticks
+// every second purely client-side, no need to round-trip to the server
+// just to update a clock.
+function startMatchmakingElapsedTimer() {
+  matchmakingStartedAt = Date.now();
+  updateMatchmakingElapsed();
+  stopMatchmakingElapsedTimer();
+  matchmakingElapsedTimer = setInterval(updateMatchmakingElapsed, 1000);
+}
+
+function stopMatchmakingElapsedTimer() {
+  if (matchmakingElapsedTimer) { clearInterval(matchmakingElapsedTimer); matchmakingElapsedTimer = null; }
+}
+
+function updateMatchmakingElapsed() {
+  const totalSeconds = Math.floor((Date.now() - matchmakingStartedAt) / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  $('matchmaking-elapsed').textContent = `${minutes}:${String(seconds).padStart(2, '0')}`;
 }
 
 async function pollMatchmakingStatus() {
@@ -741,6 +774,7 @@ async function enterJustMatchedRoom(roomCode) {
 // polling in the background from a screen the user can no longer see.
 function cancelMatchmakingTicketQuietly() {
   stopMatchmakingPolling();
+  stopMatchmakingElapsedTimer();
   const ticketId = matchmakingTicketId;
   matchmakingTicketId = null;
   if (ticketId) {
@@ -2287,7 +2321,7 @@ function updateMoveTimerDisplay() {
   const remaining = Math.max(0, (moveTimerDeadline - Date.now()) / 1000);
   const el = $('move-timer');
   const secondsLeft = Math.ceil(remaining);
-  el.textContent = `⏰ ${secondsLeft}s left`;
+  el.innerHTML = `${CLOCK_ICON_SVG}${secondsLeft}s left`;
   el.classList.remove('hidden');
   const isUrgent = remaining > 0 && remaining <= urgentWindowSeconds();
   el.classList.toggle('urgent', isUrgent);
@@ -2529,7 +2563,7 @@ function renderOpponents(isSpectator) {
     const timerEl = row.querySelector('.opp-timer');
     if (isCurrentTurn && game.turnTimeLimit && game.turnStartedAt) {
       const remaining = Math.max(0, game.turnTimeLimit - (Date.now() - game.turnStartedAt) / 1000);
-      timerEl.textContent = `⏰ ${Math.ceil(remaining)}s`;
+      timerEl.innerHTML = `${CLOCK_ICON_SVG}${Math.ceil(remaining)}s`;
       timerEl.classList.toggle('urgent', remaining > 0 && remaining <= urgentWindowSeconds());
     } else {
       timerEl.textContent = '';
