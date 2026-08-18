@@ -384,7 +384,8 @@ input.needs-attention {
 #screen-join .panel,
 #screen-spectate-join .panel,
 #screen-finished .panel,
-#screen-account .panel {
+#screen-account .panel,
+#screen-matchmaking .panel {
   max-width: 460px;
   margin: 3rem auto;
   box-shadow: var(--shadow);
@@ -392,17 +393,7 @@ input.needs-attention {
 
 /* ---------------- matchmaking screen ---------------- */
 
-#screen-matchmaking {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex: 1;
-}
 #screen-matchmaking .panel {
-  max-width: 420px;
-  width: 100%;
-  margin: 0;
-  box-shadow: var(--shadow);
   border-top: 3px solid var(--accent);
   text-align: center;
   position: relative;
