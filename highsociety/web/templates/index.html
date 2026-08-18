@@ -13,11 +13,20 @@
   {% endif %}
   {% if google_client_id %}
   <!-- "Sign In With Google" -- opt-in via GOOGLE_CLIENT_ID env var, see
-       web_server.py. initGoogleSignIn (app.js) runs once this library has
-       actually loaded (onload, not a fixed-timing guess) and renders the
-       button into #google-signin-container on the login screen. -->
+       web_server.py. initGoogleSignIn (app.js) renders the button into
+       #google-signin-container on the login screen, called from two
+       places since either one can finish loading first: this script's
+       own onload, and app.js's own boot check. This script is async, so
+       it executes the instant it's downloaded regardless of document
+       order -- on Google's fast CDN that can easily beat app.js (loaded
+       from this same server, slower on a cold start), which would
+       otherwise throw "initGoogleSignIn is not defined" and silently
+       never render the button (confirmed live on the real deployed
+       site: worked locally, where everything loads near-instantly, but
+       not in production). `window.initGoogleSignIn &&` guards exactly
+       that ordering. -->
   <script>window.GOOGLE_CLIENT_ID = {{ google_client_id | tojson }};</script>
-  <script src="https://accounts.google.com/gsi/client" async defer onload="initGoogleSignIn()"></script>
+  <script src="https://accounts.google.com/gsi/client" async defer onload="window.initGoogleSignIn && initGoogleSignIn()"></script>
   {% endif %}
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">

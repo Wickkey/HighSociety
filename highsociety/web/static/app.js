@@ -989,6 +989,16 @@ function ensureOpponent(username) {
 document.addEventListener('DOMContentLoaded', () => {
   wireStaticHandlers();
   renderProfileChip();
+  // Covers the case where the GIS script (see index.html) finished
+  // loading and already ran *before* this script did -- its own onload
+  // already fired and no-op'd since initGoogleSignIn didn't exist yet at
+  // that moment. window.google.accounts already being present here means
+  // it's safe to render the button right now instead of waiting for an
+  // onload that already happened. (The reverse ordering -- this running
+  // first -- is already handled: initGoogleSignIn's own early-return
+  // guard no-ops when window.google isn't ready yet, and the GIS
+  // script's onload calls it again once it actually loads.)
+  initGoogleSignIn();
   currentRoomCode = new URLSearchParams(location.search).get('room');
   // A returning visitor who already has a saved profile (guest or Google)
   // skips straight past #screen-login -- only a genuinely new visitor, or
