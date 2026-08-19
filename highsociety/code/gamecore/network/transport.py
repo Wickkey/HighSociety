@@ -196,10 +196,11 @@ class WebSocketTransport(Transport):
     silently vanish (simple_websocket.Server.receive() has no way to hand a
     "wrong" caller's message back). Passing `on_chat` here instead makes
     *this* transport the sole reader (a background thread, same shape as
-    SocketTransport's), which relays CHAT messages the instant they arrive —
-    live, not just whenever the player's next turn happens to come up — and
-    queues everything else for receive() to pop, so NetworkPlayer never even
-    sees a CHAT message compete with a real move response.
+    SocketTransport's), which relays CHAT (and REACTION — a quick emoji,
+    same live-relay concern) messages the instant they arrive — live, not
+    just whenever the player's next turn happens to come up — and queues
+    everything else for receive() to pop, so NetworkPlayer never even sees
+    a CHAT/REACTION message compete with a real move response.
     """
 
     def __init__(self, ws, label: str = "ws-transport", on_chat=None, on_resign=None):
@@ -235,7 +236,11 @@ class WebSocketTransport(Transport):
             except (TypeError, ValueError):
                 LoggingManager.error(f"Malformed JSON from {self._label}: {raw!r}")
                 continue
-            if msg.get("message_type") == "CHAT":
+            if msg.get("message_type") in ("CHAT", "REACTION"):
+                # REACTION (a quick emoji) shares CHAT's live, off-thread
+                # relay path for the same reason: it must not compete with a
+                # real bid/discard response on the synchronous receive()
+                # queue below.
                 self._on_chat(msg)
                 continue
             if msg.get("message_type") == "RESIGN":

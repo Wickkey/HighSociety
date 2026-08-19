@@ -923,6 +923,9 @@ def api_add_bot():
     return jsonify(_status_payload(room))
 
 
+QUICK_REACTION_EMOJI = {"🗣️", "😂", "💀", "🔥", "🤔"}
+
+
 def _relay_player_chat(username: str, room: GameRoom, msg: dict) -> None:
     """
     WebSocketTransport's on_chat callback for a player connection (see its
@@ -930,10 +933,22 @@ def _relay_player_chat(username: str, room: GameRoom, msg: dict) -> None:
     spectators get) — reaches every other active human player plus every
     spectator. Players don't get a "target" selector the way spectators do
     (spectators-only chat doesn't make sense from a player's seat); this
-    always reaches everyone at the table.
+    always reaches everyone at the table. Also carries REACTION messages
+    (a quick emoji), which share the same live-relay path as CHAT.
     """
     incoming_game_id = msg.get("game_id")
     if incoming_game_id is not None and incoming_game_id != room.game_id:
+        return
+    if msg.get("message_type") == "REACTION":
+        emoji = msg.get("emoji", "")
+        if emoji not in QUICK_REACTION_EMOJI:
+            return  # ignore anything not from the fixed reaction set
+        for p in list(room.players):
+            if isinstance(p, NetworkPlayer) and p.username != username and p.active:
+                p.send_message("", message_type="REACTION", from_user=username, data={"emoji": emoji})
+        for s in list(room.spectators):
+            if s.active:
+                s.send_message("", message_type="REACTION", from_user=username, data={"emoji": emoji})
         return
     text = msg.get("prompt", "")
     if not text:

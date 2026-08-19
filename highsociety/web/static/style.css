@@ -543,7 +543,71 @@ input.needs-attention {
   border-top: 1px solid var(--panel-border);
 }
 .account-more p { margin: 0; font-size: 0.85rem; }
+.account-section-title { margin: 0 0 0.7rem; font-size: 1rem; }
 #btn-account-logout { width: 100%; margin-top: 1.2rem; }
+
+.account-stats-row {
+  display: flex;
+  gap: 0.8rem;
+  margin-top: 1.2rem;
+}
+.account-stat {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.15rem;
+  padding: 0.7rem 0.5rem;
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-light);
+  border-radius: var(--radius-sm);
+}
+.account-stat-value { font-size: 1.3rem; font-weight: 700; color: var(--accent-strong); }
+.account-stat-label { font-size: 0.75rem; color: var(--muted); }
+
+/* Locked tiles are fully desaturated (grayscale + faded) so an unlock reads
+   as a real color reveal, not just a border/shadow change. Icon badge
+   mirrors .home-tile-icon's "colored circle behind a line icon" language. */
+.achievements-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 0.8rem;
+}
+.achievement-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 0.4rem;
+  padding: 0.9rem 0.6rem;
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-sm);
+  transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+}
+.achievement-icon {
+  width: 48px;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-light);
+  color: var(--accent-strong);
+}
+.achievement-icon svg { width: 24px; height: 24px; }
+.achievement-name { font-weight: 700; font-size: 0.82rem; line-height: 1.2; }
+.achievement-tile.locked {
+  filter: grayscale(1);
+  opacity: 0.45;
+}
+.achievement-tile.locked .achievement-icon { background: rgba(0, 0, 0, 0.05); border-color: var(--panel-border); color: var(--muted); }
+.achievement-tile.unlocked {
+  border-color: var(--accent-light);
+  box-shadow: var(--shadow-sm);
+}
+.achievement-tile.unlocked:hover { transform: translateY(-2px); box-shadow: var(--shadow); }
 
 .home-tiles {
   display: grid;
@@ -1028,6 +1092,33 @@ button.secondary.standalone { margin-top: 0.9rem; display: inline-block; }
   min-height: 1em;
 }
 
+/* ---------------- generic app-wide toast (showToast in app.js) ----------------
+   Distinct from .event-toast below: that one is pinned to a fixed reserved
+   slot on the live auction card and driven by the event queue. This one
+   floats fixed at the bottom of the viewport and works from any screen --
+   e.g. prompting a guest to sign in to unlock achievements. */
+#app-toast {
+  position: fixed;
+  left: 50%;
+  bottom: 1.6rem;
+  transform: translate(-50%, 12px);
+  background: var(--text);
+  color: var(--panel-bg);
+  font-size: 0.9rem;
+  font-weight: 600;
+  padding: 0.75rem 1.3rem;
+  border-radius: 999px;
+  border: 2px solid var(--accent-light);
+  box-shadow: var(--shadow);
+  z-index: 1000;
+  max-width: min(90%, 420px);
+  text-align: center;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease, transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+#app-toast.show { opacity: 1; transform: translate(-50%, 0); }
+
 /* ---------------- transient event toast (RAISE/PASS/BUY/etc.) ----------------
    A reserved strip above the card, not an overlay on top of it — the
    "shared game state" underneath (card, bid, whose turn) never dims or
@@ -1291,6 +1382,49 @@ button.secondary.standalone { margin-top: 0.9rem; display: inline-block; }
 .log div { border-bottom: 1px dashed var(--panel-border); padding: 0.15rem 0; }
 .log div:last-child { border-bottom: none; }
 
+/* ---------------- quick reactions ---------------- */
+/* Fixed 5-emoji row, sent instantly on click (see onQuickReactionClick) --
+   no text entry or confirm step, since the whole point is a one-tap
+   reaction while a bidding war is still live. */
+.quick-reactions {
+  display: flex;
+  gap: 0.4rem;
+  margin: 0.6rem 0;
+}
+.quick-reaction-btn {
+  flex: 1;
+  background: var(--panel-bg-log);
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-sm);
+  font-size: 1.3rem;
+  line-height: 1;
+  padding: 0.4rem 0;
+  cursor: pointer;
+  transition: transform 0.1s ease, border-color 0.15s ease, background 0.15s ease;
+}
+.quick-reaction-btn:hover { border-color: var(--accent-light); background: var(--accent-soft); }
+.quick-reaction-btn:active { transform: scale(0.9); }
+
+/* Rendered inside whichever tile the reaction came from (#my-panel or a
+   .opponent-row -- both already position:relative) -- see
+   showReactionBubble. Floats up and fades rather than staying put, so
+   several in a row don't just stack and overlap. */
+.reaction-bubble {
+  position: absolute;
+  top: 4px;
+  right: 8px;
+  font-size: 1.7rem;
+  line-height: 1;
+  opacity: 0;
+  transform: scale(0.4);
+  transition: opacity 0.2s ease, transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+  pointer-events: none;
+  z-index: 5;
+  filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.25));
+}
+.reaction-bubble.show { opacity: 1; transform: scale(1); }
+#my-panel { position: relative; }
+
 /* ---------------- opponents ---------------- */
 
 .opponent-row {
@@ -1499,6 +1633,24 @@ button.secondary.standalone { margin-top: 0.9rem; display: inline-block; }
   to { opacity: 1; transform: translateY(0); }
 }
 .standing-row:first-child { border-top: none; }
+/* See app.js's openProfileModal -- clicking a name pulls up that player's
+   public games-played/win-rate/Elo (bots come back empty, which is fine). */
+.name-link {
+  background: none;
+  border: none;
+  margin: 0;
+  padding: 0;
+  font: inherit;
+  font-weight: inherit;
+  color: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: transparent;
+  transition: text-decoration-color 0.15s ease;
+}
+.name-link:hover, .name-link:focus-visible { text-decoration-color: currentColor; }
+.profile-view-box { max-width: 360px; text-align: left; }
+.profile-view-box .account-header { margin-bottom: 1rem; }
 .standing-row.winner {
   font-weight: 700;
   color: var(--accent-strong);

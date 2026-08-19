@@ -38,6 +38,25 @@ function hide(el) { el.classList.add('hidden'); }
 function show(el) { el.classList.remove('hidden'); }
 function showError(el, text) { el.textContent = text; el.classList.remove('hidden'); }
 
+let appToastTimer = null;
+// Generic one-off notification reachable from any screen (e.g. the guest
+// sign-in prompt on the Account screen's Achievements section) -- distinct
+// from the mid-auction .event-toast, which is pinned to the game card and
+// driven by the event queue. .hidden uses display:none (can't transition),
+// so this removes it first and lets a fresh frame land before adding .show,
+// same two-step dance as the event toast's fade-in.
+function showToast(message, durationMs = 3500) {
+  const toast = $('app-toast');
+  if (appToastTimer) { clearTimeout(appToastTimer); appToastTimer = null; }
+  toast.textContent = message;
+  show(toast);
+  requestAnimationFrame(() => toast.classList.add('show'));
+  appToastTimer = setTimeout(() => {
+    toast.classList.remove('show');
+    setTimeout(() => hide(toast), 250);
+  }, durationMs);
+}
+
 // In-page confirm dialog (resign, leaving mid-game — see onResign/
 // onHomeLinkClick) styled like every other panel in the app, replacing the
 // browser's own native confirm() popup. Promise-based so a call site just
@@ -622,6 +641,116 @@ function onProfileChipClick() {
   }
 }
 
+// Static catalog mirroring highsociety/code/common/achievements.py's
+// ACHIEVEMENTS -- small enough to duplicate client-side (12 entries) rather
+// than round-trip it over the network; ids must stay in sync with the
+// backend's, since those ids are what /api/achievements returns as unlocked.
+// Icons are 24x24 stroke line-art, same design language as the sidebar/
+// home-tile icons (fill:none, stroke:currentColor, ~1.6 width, round caps).
+const ACHIEVEMENTS = [
+  { id: 'first_win', name: 'First Victory', description: 'Win a game.',
+    icon: '<path d="M12 3.4l2.1 4.4 4.8.6-3.5 3.4.9 4.8L12 14.3l-4.3 2.3.9-4.8-3.5-3.4 4.8-.6L12 3.4z"/>' },
+  { id: 'hat_trick', name: 'Hat Trick', description: 'Win 3 games.',
+    icon: '<path d="M6 14.8l.85 1.9 2 .3-1.45 1.4.35 2-1.75-.95-1.75.95.35-2-1.45-1.4 2-.3z"/>'
+        + '<path d="M12 4l1.3 2.9 3.1.4-2.3 2.2.6 3.1L12 11l-2.7 1.6.6-3.1-2.3-2.2 3.1-.4z"/>'
+        + '<path d="M18 14.8l.85 1.9 2 .3-1.45 1.4.35 2-1.75-.95-1.75.95.35-2-1.45-1.4 2-.3z"/>' },
+  { id: 'high_society_regular', name: 'High Society Regular', description: 'Win 5 games.',
+    icon: '<circle cx="12" cy="8" r="4.3"/><path d="M9 11.6L6 21l3.4-1.8 2.6 1.8"/><path d="M15 11.6L18 21l-3.4-1.8-2.6 1.8"/>' },
+  { id: 'old_money', name: 'Old Money', description: 'Win 10 games.',
+    icon: '<path d="M4 19h16"/><path d="M5 19l-1-8 4 3 4-6 4 6 4-3-1 8"/>'
+        + '<circle cx="12" cy="6.3" r="1" fill="currentColor" stroke="none"/>'
+        + '<circle cx="6" cy="9.8" r="0.85" fill="currentColor" stroke="none"/>'
+        + '<circle cx="18" cy="9.8" r="0.85" fill="currentColor" stroke="none"/>' },
+  { id: 'giant_slayer', name: 'Giant Slayer', description: 'Win a game with a Hard bot at the table.',
+    icon: '<path d="M12 2v12.3"/><path d="M9 14.3h6"/><path d="M12 15v2.3"/><circle cx="12" cy="18.6" r="1.1" fill="currentColor" stroke="none"/>' },
+  { id: 'sniper', name: 'Sniper', description: 'Win an auction that only ever had one bid -- yours.',
+    icon: '<circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="1.2" fill="currentColor" stroke="none"/>'
+        + '<path d="M12 3v3.5M12 17.5V21M3 12h3.5M17.5 12H21"/>' },
+  { id: 'free_lunch', name: 'Free Lunch', description: 'Win an auction paying nothing.',
+    icon: '<circle cx="12" cy="12" r="8"/><path d="M5 19L19 5"/>' },
+  { id: 'minimalist', name: 'Minimalist', description: 'Win an auction for the lowest-value Painting.',
+    icon: '<circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none"/>' },
+  { id: 'full_set', name: 'Full Set', description: 'Collect all 3 Prestige cards in one game.',
+    icon: '<path d="M5 9l3 3-3 3-3-3z"/><path d="M12 9l3 3-3 3-3-3z"/><path d="M19 9l3 3-3 3-3-3z"/>' },
+  { id: 'collector', name: 'Collector', description: 'Win at least one of every card type offered in a game.',
+    icon: '<rect x="4" y="7" width="9" height="13" rx="1.3" transform="rotate(-18 8.5 13.5)"/>'
+        + '<rect x="7.5" y="6" width="9" height="13" rx="1.3"/>'
+        + '<rect x="11" y="7" width="9" height="13" rx="1.3" transform="rotate(18 15.5 13.5)"/>' },
+  { id: 'fearless', name: 'Fearless', description: 'Win a game without ever passing or folding.',
+    icon: '<path d="M12 3l7 3v6c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6z"/>' },
+  { id: 'master_of_disgrace', name: 'Master of Disgrace', description: 'Win a disgrace (Faux-Pas-triggered) auction.',
+    icon: '<path d="M12 4c-4.4 0-7.5 2.8-7.5 6.5 0 5 3.3 8.8 7.5 9.5 4.2-.7 7.5-4.5 7.5-9.5C19.5 6.8 16.4 4 12 4z"/>'
+        + '<circle cx="9" cy="10.5" r="1" fill="currentColor" stroke="none"/>'
+        + '<circle cx="15" cy="10.5" r="1" fill="currentColor" stroke="none"/>'
+        + '<path d="M9 16c1.5-1.3 4.5-1.3 6 0"/>' },
+];
+
+function renderAchievementTile(a, unlocked) {
+  return `<div class="achievement-tile ${unlocked ? 'unlocked' : 'locked'}" title="${escapeHtml(a.description)}">`
+    + `<span class="achievement-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" `
+    + `stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${a.icon}</svg></span>`
+    + `<span class="achievement-name">${escapeHtml(a.name)}</span></div>`;
+}
+
+// Guests have no stable identity to hang persistent progress off (a
+// guest's username is regenerated every time their browser profile
+// resets -- see saveProfile), so achievements/Elo/stats only ever start
+// counting once someone is actually signed in with Google (see
+// game_history.record_finished_game's google_id gating). Every tile still
+// renders, just permanently locked, plus a one-time sign-in nudge.
+async function loadAccountAchievementsAndStats() {
+  const profile = loadProfile();
+  const grid = $('achievements-grid');
+  const guestNote = $('account-achievements-guest-note');
+  grid.innerHTML = ACHIEVEMENTS.map((a) => renderAchievementTile(a, false)).join('');
+  hide($('account-stats-row'));
+  if (!profile) return;
+  if (!profile.google_id) {
+    show(guestNote);
+    showToast('Sign in with Google to start unlocking achievements.');
+    return;
+  }
+  hide(guestNote);
+  try {
+    const result = await fetchJSON(`/api/achievements?username=${encodeURIComponent(profile.username)}`);
+    const unlocked = new Set(result.achievements || []);
+    grid.innerHTML = ACHIEVEMENTS.map((a) => renderAchievementTile(a, unlocked.has(a.id))).join('');
+  } catch (e) { /* transient network error -- leave the grid locked rather than block the screen */ }
+  try {
+    const stats = await fetchJSON(`/api/profile/${encodeURIComponent(profile.username)}`);
+    $('account-elo').textContent = stats.elo;
+    $('account-stat-games').textContent = stats.games_played;
+    $('account-stat-winrate').textContent = `${Math.round(stats.win_rate * 100)}%`;
+    show($('account-stats-row'));
+  } catch (e) { /* 404: no games recorded yet -- leave the stats row hidden */ }
+}
+
+// Public profile viewer -- games played / win rate / Elo are visible for
+// any player (unlike achievements, which stay on your own Account screen
+// only), reachable today by clicking a name on the finished-game standings
+// table (see the standing-row markup above). Clicking a bot's name works
+// too, it'll just come back 404 (bots have no players row) and show the
+// "no games recorded" state, which is a fine, honest outcome.
+async function openProfileModal(username) {
+  $('profile-view-username').textContent = username;
+  $('profile-view-avatar').textContent = username.charAt(0).toUpperCase();
+  hide($('profile-view-elo-line'));
+  hide($('profile-view-stats-row'));
+  hide($('profile-view-empty'));
+  show($('profile-view-modal'));
+  try {
+    const stats = await fetchJSON(`/api/profile/${encodeURIComponent(username)}`);
+    $('profile-view-elo').textContent = stats.elo;
+    show($('profile-view-elo-line'));
+    $('profile-view-games').textContent = stats.games_played;
+    $('profile-view-winrate').textContent = `${Math.round(stats.win_rate * 100)}%`;
+    show($('profile-view-stats-row'));
+  } catch (e) {
+    show($('profile-view-empty'));
+  }
+}
+function closeProfileModal() { hide($('profile-view-modal')); }
+
 // Reached via the popover's "Account" item or the sidebar's Account tab
 // (see navigateFromSidebar) -- a full screen rather than the old inline
 // popover fields, room to grow into "possibly do much more in future"
@@ -631,9 +760,11 @@ function showAccountScreen() {
   $('account-avatar').textContent = profile ? profile.username.charAt(0).toUpperCase() : '?';
   $('account-username-display').textContent = profile ? profile.username : '';
   $('account-username-input').value = profile ? profile.username : '';
+  $('account-elo').textContent = '1000';
   hide($('account-error'));
   hide($('account-saved'));
   showScreen('screen-account');
+  loadAccountAchievementsAndStats();
 }
 
 // Only round-trips to the server when the username actually changed --
@@ -1370,7 +1501,7 @@ function renderFinished(status) {
       : (s.active === false ? ' (left the game)' : '');
     return `
     <div class="standing-row ${state}" style="animation-delay: ${i * 90}ms">
-      <span class="name">${escapeHtml(s.username)}${tag}</span>
+      <span class="name"><button type="button" class="name-link" data-open-profile>${escapeHtml(s.username)}</button>${tag}</span>
       <span>Points: ${s.points}</span>
       <span>Money left: ${s.money_left}</span>
     </div>`;
@@ -1511,6 +1642,9 @@ function wireStaticHandlers() {
   $('sidebar-join').addEventListener('click', () => navigateFromSidebar(() => {
     showScreen('screen-host-setup'); showHomeTile('join'); startRoomsPolling();
   }));
+  $('sidebar-host').addEventListener('click', () => navigateFromSidebar(() => {
+    showScreen('screen-host-setup'); showHomeTile('host');
+  }));
   $('sidebar-rules').addEventListener('click', () => navigateFromSidebar(() => {
     showScreen('screen-host-setup'); showHomeTile('rules');
   }));
@@ -1578,6 +1712,17 @@ function wireStaticHandlers() {
   });
   $('btn-player-chat-send').addEventListener('click', onPlayerChatSend);
   $('player-chat-input').addEventListener('keydown', (e) => { if (e.key === 'Enter') onPlayerChatSend(); });
+  document.querySelectorAll('.quick-reaction-btn').forEach((btn) => {
+    btn.addEventListener('click', () => onQuickReactionClick(btn.dataset.emoji));
+  });
+  $('standings-table').addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-open-profile]');
+    if (btn) openProfileModal(btn.textContent.trim());
+  });
+  $('profile-view-close').addEventListener('click', closeProfileModal);
+  $('profile-view-modal').addEventListener('click', (e) => {
+    if (e.target.id === 'profile-view-modal') closeProfileModal();
+  });
   $('btn-request-rematch').addEventListener('click', onRequestRematchClick);
   $('btn-cancel-rematch-form').addEventListener('click', onCancelRematchForm);
   $('btn-send-rematch-request').addEventListener('click', onSendRematchRequest);
@@ -1882,6 +2027,35 @@ function onPlayerChatSend() {
   input.value = '';
 }
 
+// Quick reactions: a fixed set of 5 emoji, sent instantly on click (no text
+// entry, no send button) and rendered as a transient bubble over the
+// sender's own tile -- see web_server.py's _relay_player_chat, which relays
+// REACTION the same live off-thread way as CHAT. The server only relays to
+// *other* players/spectators (mirroring CHAT's "every other" reach), so the
+// sender shows their own bubble locally instead of waiting on a round trip.
+function onQuickReactionClick(emoji) {
+  if (!ws || !game) return;
+  ws.send(JSON.stringify({ message_type: 'REACTION', emoji }));
+  showReactionBubble(game.myUsername, emoji, false);
+}
+
+function showReactionBubble(username, emoji, isSpectator) {
+  let anchor;
+  if (!isSpectator && game && username === game.myUsername) {
+    anchor = $('my-panel');
+  } else {
+    const listId = isSpectator ? 'spec-players-list' : 'opponents-list';
+    anchor = document.querySelector(`#${listId} .opponent-row[data-username="${CSS.escape(username)}"]`);
+  }
+  if (!anchor) return;
+  const bubble = document.createElement('div');
+  bubble.className = 'reaction-bubble';
+  bubble.textContent = emoji;
+  anchor.appendChild(bubble);
+  requestAnimationFrame(() => bubble.classList.add('show'));
+  setTimeout(() => bubble.remove(), 1600);
+}
+
 // --------------------------------------------------------- game reducer --
 
 function ensureGameScreenVisible(isSpectator) {
@@ -2061,6 +2235,11 @@ function applyGameMessage(msg, isSpectator) {
       break;
     case 'CHAT':
       appendChatLine(isSpectator ? 'spec-chat-log' : 'player-chat-log', msg.prompt);
+      break;
+    case 'REACTION':
+      if (msg.from_user && msg.data && msg.data.emoji) {
+        showReactionBubble(msg.from_user, msg.data.emoji, isSpectator);
+      }
       break;
     default:
       break; // GLOBAL_MOVE_INFO, PLAYER_INFO: superseded by the structured messages above

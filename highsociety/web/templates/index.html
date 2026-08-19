@@ -72,6 +72,13 @@
         </svg>
         <span class="sidebar-label">Join</span>
       </button>
+      <button type="button" class="sidebar-item" id="sidebar-host" title="Host a New Game">
+        <svg class="sidebar-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M4 18h16l-1.3-7.5-4.2 3.5L12 8l-2.5 6-4.2-3.5L4 18z"/>
+          <path d="M6 21h12"/>
+        </svg>
+        <span class="sidebar-label">Host</span>
+      </button>
       <button type="button" class="sidebar-item sidebar-item-disabled" title="Leaderboard — coming soon" disabled>
         <svg class="sidebar-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <rect x="3.5" y="14.5" width="4.5" height="6" rx="1.1"/>
@@ -135,6 +142,33 @@
     </div>
   </div>
 
+  <!-- ===================== PUBLIC PROFILE MODAL ===================== -->
+  <div id="profile-view-modal" class="modal-overlay hidden">
+    <div class="modal-box card panel profile-view-box">
+      <div class="account-header">
+        <span id="profile-view-avatar" class="profile-chip-avatar account-avatar"></span>
+        <div>
+          <h2 id="profile-view-username"></h2>
+          <p id="profile-view-elo-line" class="muted hidden">Elo <span id="profile-view-elo"></span></p>
+        </div>
+      </div>
+      <div id="profile-view-stats-row" class="account-stats-row hidden">
+        <div class="account-stat">
+          <span id="profile-view-games" class="account-stat-value">0</span>
+          <span class="account-stat-label">Games played</span>
+        </div>
+        <div class="account-stat">
+          <span id="profile-view-winrate" class="account-stat-value">0%</span>
+          <span class="account-stat-label">Win rate</span>
+        </div>
+      </div>
+      <p id="profile-view-empty" class="muted hidden">No games recorded for this player yet.</p>
+      <div class="button-row modal-actions">
+        <button type="button" id="profile-view-close" class="secondary">Close</button>
+      </div>
+    </div>
+  </div>
+
   <main id="app">
 
     <!-- ===================== LOGIN ===================== -->
@@ -176,7 +210,7 @@
           <span id="account-avatar" class="profile-chip-avatar account-avatar"></span>
           <div>
             <h2 id="account-username-display"></h2>
-            <p class="muted">Elo <span id="account-elo">1000</span> <span class="account-elo-note">(placeholder — updates after real matches, coming soon)</span></p>
+            <p class="muted">Elo <span id="account-elo">1000</span></p>
           </div>
         </div>
 
@@ -189,8 +223,21 @@
         <p id="account-error" class="error hidden"></p>
         <p id="account-saved" class="account-saved hidden">Saved.</p>
 
+        <div id="account-stats-row" class="account-stats-row hidden">
+          <div class="account-stat">
+            <span id="account-stat-games" class="account-stat-value">0</span>
+            <span class="account-stat-label">Games played</span>
+          </div>
+          <div class="account-stat">
+            <span id="account-stat-winrate" class="account-stat-value">0%</span>
+            <span class="account-stat-label">Win rate</span>
+          </div>
+        </div>
+
         <div class="account-more">
-          <p class="muted">More account features — match history, stats, avatars — coming soon.</p>
+          <h3 class="account-section-title">Achievements</h3>
+          <p id="account-achievements-guest-note" class="muted hidden">Sign in with Google to start unlocking achievements.</p>
+          <div id="achievements-grid" class="achievements-grid"></div>
         </div>
 
         <button type="button" id="btn-account-logout" class="secondary standalone">Log out</button>
@@ -509,6 +556,13 @@
           <div class="card panel">
             <h3>Chat</h3>
             <div id="player-chat-log" class="log"></div>
+            <div id="quick-reactions" class="quick-reactions">
+              <button type="button" class="quick-reaction-btn" data-emoji="🗣️" title="Send a reaction">🗣️</button>
+              <button type="button" class="quick-reaction-btn" data-emoji="😂" title="Send a reaction">😂</button>
+              <button type="button" class="quick-reaction-btn" data-emoji="💀" title="Send a reaction">💀</button>
+              <button type="button" class="quick-reaction-btn" data-emoji="🔥" title="Send a reaction">🔥</button>
+              <button type="button" class="quick-reaction-btn" data-emoji="🤔" title="Send a reaction">🤔</button>
+            </div>
             <div class="button-row">
               <input type="text" id="player-chat-input" placeholder="Say something…" maxlength="300">
               <button id="btn-player-chat-send" class="secondary">Send</button>
@@ -517,7 +571,7 @@
         </div>
 
         <div class="side-col">
-          <div class="card panel">
+          <div class="card panel" id="my-panel">
             <h3>You - <span id="my-username-label"></span></h3>
             <div>Points: <strong id="my-points">0</strong></div>
             <div id="my-status-cards" class="chip-row small"></div>
@@ -673,6 +727,13 @@
   </main>
     </div>
   </div>
+
+  <!-- Generic app-wide notification, distinct from the mid-auction
+       .event-toast (which is pinned to a fixed slot on the game card and
+       tied to the event queue) -- for one-off prompts from any screen, e.g.
+       "sign in with Google to unlock achievements". See app.js's
+       showToast(). -->
+  <div id="app-toast" class="app-toast hidden" role="status"></div>
 
   <!-- Moved out of a fixed-position overlay on narrow screens (see
        .github-link's @media rule in style.css) -- floating fixed over the
