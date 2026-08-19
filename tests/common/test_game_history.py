@@ -59,11 +59,15 @@ def _fake_connection():
     """A MagicMock standing in for a psycopg2 connection whose cursor's
     fetchone() always returns a fresh, incrementing id -- enough to exercise
     ensure_schema/record_finished_game's real SQL-issuing logic without a
-    real Postgres server."""
+    real Postgres server. The second/third columns (None, 1000) stand in
+    for google_id/elo -- harmless for callers that only read
+    fetchone()[0] (the games-table insert), and match "guest, no linked
+    account, default rating" as the default for _upsert_player's
+    RETURNING id, google_id, elo."""
     conn = MagicMock()
     cursor = MagicMock()
     ids = iter(range(1, 1000))
-    cursor.fetchone.side_effect = lambda: (next(ids),)
+    cursor.fetchone.side_effect = lambda: (next(ids), None, 1000)
     conn.cursor.return_value.__enter__.return_value = cursor
     conn.__enter__.return_value = conn
     return conn, cursor
@@ -335,3 +339,120 @@ def test_rename_player_returns_false_instead_of_raising_on_a_uniqueness_race(dat
             patch.object(game_history, "_connect", side_effect=RuntimeError("duplicate key value")):
         result = game_history.rename_player("alice", "bob")
     assert result is False
+
+
+# ------------------------------------------------- achievements + elo --
+
+def test_record_finished_game_writes_achievements_and_elo_for_linked_participants(database_url):
+    game_history._schema_ready = True
+    conn, cursor = _fake_connection()
+    cursor.fetchone.side_effect = iter([
+        (1,),                    # INSERT INTO games ... RETURNING id
+        (10, "g-alice", 1000),   # _upsert_player(alice) RETURNING id, google_id, elo
+        (1,),                    # win-count SELECT for alice (this is her 1st win)
+        (11, "g-bob", 1000),     # _upsert_player(bob) RETURNING id, google_id, elo
+    ])
+    participants = [
+        {"is_bot": False, "username": "alice", "name": "Alice",
+         "points": 15, "money_left": 5, "is_winner": True, "eliminated": False},
+        {"is_bot": False, "username": "bob", "name": "Bob",
+         "points": 5, "money_left": 0, "is_winner": False, "eliminated": False},
+    ]
+    with patch.object(game_history, "_connect", return_value=conn):
+        game_history.record_finished_game(
+            room_code="ABCDE", seats=2, bot_mix=[],
+            started_at=datetime.datetime.now(datetime.timezone.utc),
+            finished_at=datetime.datetime.now(datetime.timezone.utc),
+            participants=participants,
+            achievement_unlocks={"alice": {"sniper"}},
+        )
+
+    queries_and_params = [(call.args[0], call.args[1]) for call in cursor.execute.call_args_list]
+    achievement_inserts = [p for q, p in queries_and_params if "INSERT INTO player_achievements" in q]
+    # first_win (win count 1) + the per-game "sniper" unlock passed in.
+    assert (10, "first_win") in achievement_inserts
+    assert (10, "sniper") in achievement_inserts
+    assert not any(pid == 11 for pid, _ in achievement_inserts)  # bob didn't win, earned nothing
+
+    elo_updates = {params[1]: params[0] for q, params in queries_and_params if q.startswith("UPDATE players SET elo")}
+    assert elo_updates[10] > 0   # alice (winner) gains
+    assert elo_updates[11] < 0   # bob (loser) loses
+
+
+def test_record_finished_game_skips_achievements_and_elo_for_a_guest(database_url):
+    """The default _fake_connection() fixture returns google_id=None --
+    matches a guest, who should get no player_achievements/elo writes at
+    all even though they won."""
+    game_history._schema_ready = True
+    conn, cursor = _fake_connection()
+    participants = [
+        {"is_bot": False, "username": "guest123", "name": "guest123",
+         "points": 10, "money_left": 5, "is_winner": True, "eliminated": False},
+    ]
+    with patch.object(game_history, "_connect", return_value=conn):
+        game_history.record_finished_game(
+            room_code="ABCDE", seats=1, bot_mix=[],
+            started_at=datetime.datetime.now(datetime.timezone.utc),
+            finished_at=datetime.datetime.now(datetime.timezone.utc),
+            participants=participants,
+            achievement_unlocks={"guest123": {"sniper"}},
+        )
+    queries = [call.args[0] for call in cursor.execute.call_args_list]
+    assert not any("INSERT INTO player_achievements" in q for q in queries)
+    assert not any(q.startswith("UPDATE players SET elo") for q in queries)
+
+
+def test_get_player_achievements_is_empty_without_a_database(no_database_url):
+    assert game_history.get_player_achievements("alice") == []
+
+
+def test_get_player_achievements_returns_the_unlocked_ids(database_url):
+    game_history._schema_ready = True
+    conn, cursor = _fake_connection()
+    cursor.fetchall = MagicMock(return_value=[("first_win",), ("sniper",)])
+    with patch.object(game_history, "_connect", return_value=conn):
+        result = game_history.get_player_achievements("alice")
+    assert result == ["first_win", "sniper"]
+
+
+def test_get_player_achievements_failure_is_caught_not_raised(database_url):
+    game_history._schema_ready = True
+    with patch.object(game_history, "_connect", side_effect=RuntimeError("unreachable")):
+        assert game_history.get_player_achievements("alice") == []
+
+
+def test_get_player_profile_stats_is_none_without_a_database(no_database_url):
+    assert game_history.get_player_profile_stats("alice") is None
+
+
+def test_get_player_profile_stats_returns_none_for_an_unknown_username(database_url):
+    game_history._schema_ready = True
+    conn, cursor = _fake_connection()
+    cursor.fetchone.side_effect = None
+    cursor.fetchone.return_value = None
+    with patch.object(game_history, "_connect", return_value=conn):
+        assert game_history.get_player_profile_stats("nobody") is None
+
+
+def test_get_player_profile_stats_computes_win_rate(database_url):
+    game_history._schema_ready = True
+    conn, cursor = _fake_connection()
+    cursor.fetchone.side_effect = iter([(1,), (4, 3)])  # player id, then (games_played, wins)
+    with patch.object(game_history, "_connect", return_value=conn):
+        result = game_history.get_player_profile_stats("alice")
+    assert result == {"games_played": 4, "wins": 3, "win_rate": 0.75}
+
+
+def test_get_player_profile_stats_zero_games_has_zero_win_rate_not_a_division_error(database_url):
+    game_history._schema_ready = True
+    conn, cursor = _fake_connection()
+    cursor.fetchone.side_effect = iter([(1,), (0, 0)])
+    with patch.object(game_history, "_connect", return_value=conn):
+        result = game_history.get_player_profile_stats("alice")
+    assert result == {"games_played": 0, "wins": 0, "win_rate": 0.0}
+
+
+def test_get_player_profile_stats_failure_is_caught_not_raised(database_url):
+    game_history._schema_ready = True
+    with patch.object(game_history, "_connect", side_effect=RuntimeError("unreachable")):
+        assert game_history.get_player_profile_stats("alice") is None

@@ -393,7 +393,11 @@ def test_finished_game_is_recorded_when_a_database_is_configured(running_web_ser
     conn = MagicMock()
     cursor = MagicMock()
     ids = iter(range(1, 1000))
-    cursor.fetchone.side_effect = lambda: (next(ids),)
+    # Second/third columns stand in for google_id/elo -- see game_history's
+    # own _upsert_player (RETURNING id, google_id, elo); None means "guest,
+    # no achievements/elo change", matching this test's own alice, who
+    # isn't Google-linked.
+    cursor.fetchone.side_effect = lambda: (next(ids), None, 1000)
     conn.cursor.return_value.__enter__.return_value = cursor
     conn.__enter__.return_value = conn
     monkeypatch.setattr(game_history, "_connect", lambda: conn)
@@ -1648,3 +1652,35 @@ def test_matchmaking_cancel_is_idempotent_and_removes_the_ticket(clean_matchmaki
     assert resp.status_code == 200
     resp = client.post("/api/matchmaking/cancel", json={"ticket_id": "never-existed"})
     assert resp.status_code == 200
+
+
+# ------------------------------------------------- achievements/profile --
+
+def test_achievements_endpoint_returns_the_unlocked_list(monkeypatch):
+    monkeypatch.setattr(game_history, "get_player_achievements", lambda username: ["first_win", "sniper"])
+    resp = web_server.app.test_client().get("/api/achievements?username=alice")
+    assert resp.status_code == 200
+    assert resp.get_json() == {"achievements": ["first_win", "sniper"]}
+
+
+def test_achievements_endpoint_defaults_to_empty_for_a_missing_username():
+    resp = web_server.app.test_client().get("/api/achievements")
+    assert resp.status_code == 200
+    assert resp.get_json() == {"achievements": []}
+
+
+def test_profile_endpoint_404s_for_an_unknown_username(monkeypatch):
+    monkeypatch.setattr(game_history, "get_player_profile_stats", lambda username: None)
+    resp = web_server.app.test_client().get("/api/profile/nobody")
+    assert resp.status_code == 404
+
+
+def test_profile_endpoint_returns_stats_and_elo(monkeypatch):
+    monkeypatch.setattr(game_history, "get_player_profile_stats",
+                         lambda username: {"games_played": 4, "wins": 3, "win_rate": 0.75})
+    monkeypatch.setattr(game_history, "get_player_elo", lambda username: 1032)
+    resp = web_server.app.test_client().get("/api/profile/alice")
+    assert resp.status_code == 200
+    assert resp.get_json() == {
+        "username": "alice", "games_played": 4, "wins": 3, "win_rate": 0.75, "elo": 1032,
+    }

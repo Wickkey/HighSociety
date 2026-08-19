@@ -28,6 +28,8 @@ import os
 import threading
 from typing import Optional
 
+from highsociety.code.common import elo
+from highsociety.code.common.achievements import WIN_COUNT_MILESTONES
 from highsociety.code.common.logger_module.logger.logging_manager import LoggingManager
 
 _DATABASE_URL_ENV = "DATABASE_URL"
@@ -76,6 +78,15 @@ _SCHEMA_STATEMENTS = [
     # matchmaking.py's docstring) -- every player starts equal until
     # there's real post-match rating logic to diverge them.
     "ALTER TABLE players ADD COLUMN IF NOT EXISTS elo INTEGER NOT NULL DEFAULT 1000",
+    """
+    CREATE TABLE IF NOT EXISTS player_achievements (
+        id SERIAL PRIMARY KEY,
+        player_id INTEGER NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+        achievement_id TEXT NOT NULL,
+        unlocked_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        UNIQUE (player_id, achievement_id)
+    )
+    """,
 ]
 
 _schema_ready = False
@@ -140,17 +151,23 @@ def ensure_schema() -> None:
                 conn.close()
 
 
-def _upsert_player(cur, username: str, display_name: str) -> int:
+def _upsert_player(cur, username: str, display_name: str) -> tuple:
+    """Returns (player_id, google_id, elo) -- the caller (record_finished_game)
+    uses google_id to decide whether this player is a real linked account
+    achievements/rating changes should actually apply to, vs. a guest
+    whose identity resets on every browser clear (see achievements.py's
+    own module docstring), and elo as that player's rating *before* this
+    game, for elo.compute_elo_deltas."""
     cur.execute(
         """
         INSERT INTO players (username, display_name)
         VALUES (%s, %s)
         ON CONFLICT (username) DO UPDATE SET display_name = EXCLUDED.display_name, last_seen_at = now()
-        RETURNING id
+        RETURNING id, google_id, elo
         """,
         (username, display_name),
     )
-    return cur.fetchone()[0]
+    return cur.fetchone()
 
 
 def find_player_by_google_id(google_id: str) -> Optional[dict]:
@@ -247,6 +264,79 @@ def get_player_elo(username: str) -> int:
     except Exception as e:  # noqa: BLE001
         LoggingManager.warning(f"game_history.get_player_elo failed: {e}")
         return _DEFAULT_ELO
+    finally:
+        if conn is not None:
+            conn.close()
+
+
+def get_player_achievements(username: str) -> list:
+    """
+    Unlocked achievement ids for `username` -- always [] for a guest
+    (their players row, if any, has no google_id, so record_finished_game
+    never wrote any player_achievements rows for it), no database, or any
+    lookup error.
+    """
+    if not is_configured():
+        return []
+    ensure_schema()
+    if not _schema_ready:
+        return []
+    conn = None
+    try:
+        conn = _connect()
+        with conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT pa.achievement_id FROM player_achievements pa
+                JOIN players p ON p.id = pa.player_id
+                WHERE p.username = %s
+                """,
+                (username,),
+            )
+            return [row[0] for row in cur.fetchall()]
+    except Exception as e:  # noqa: BLE001
+        LoggingManager.warning(f"game_history.get_player_achievements failed: {e}")
+        return []
+    finally:
+        if conn is not None:
+            conn.close()
+
+
+def get_player_profile_stats(username: str) -> Optional[dict]:
+    """
+    {"games_played", "wins", "win_rate"} for any known username, guest or
+    Google-linked -- unlike achievements, profile stats aren't gated to
+    linked accounts, since this is just a factual record of games already
+    played under that exact username, nothing tied to a persistent
+    identity guarantee. None if the username has no players row at all
+    (never played, or no database) -- distinguishes "never played" from
+    "played zero games" for the caller, though today's UI renders both as
+    an empty profile either way.
+    """
+    if not is_configured():
+        return None
+    ensure_schema()
+    if not _schema_ready:
+        return None
+    conn = None
+    try:
+        conn = _connect()
+        with conn, conn.cursor() as cur:
+            cur.execute("SELECT id FROM players WHERE username = %s", (username,))
+            row = cur.fetchone()
+            if row is None:
+                return None
+            player_id = row[0]
+            cur.execute(
+                "SELECT count(*), count(*) FILTER (WHERE is_winner) FROM player_games WHERE player_id = %s",
+                (player_id,),
+            )
+            games_played, wins = cur.fetchone()
+            win_rate = (wins / games_played) if games_played else 0.0
+            return {"games_played": games_played, "wins": wins, "win_rate": win_rate}
+    except Exception as e:  # noqa: BLE001
+        LoggingManager.warning(f"game_history.get_player_profile_stats failed: {e}")
+        return None
     finally:
         if conn is not None:
             conn.close()
@@ -361,7 +451,7 @@ def rename_player(old_username: str, new_username: str) -> bool:
 
 def record_finished_game(*, room_code: str, seats: int, bot_mix: list,
                           started_at: datetime.datetime, finished_at: datetime.datetime,
-                          participants: list) -> None:
+                          participants: list, achievement_unlocks: Optional[dict] = None) -> None:
     """
     `participants`: one dict per seat, already reduced to exactly what this
     module needs — see web_server.py's call site for how it's built from
@@ -375,12 +465,29 @@ def record_finished_game(*, room_code: str, seats: int, bot_mix: list,
                         "eliminated": bool}
     Exactly one of (is_bot False + username set) or (is_bot True + username
     None) holds per participant — see the player_xor_bot constraint.
+
+    `achievement_unlocks`: {username: {achievement_id, ...}} from
+    achievements.detect_per_game_achievements — everything earned in this
+    one game, for every human participant regardless of account type.
+    Only actually written for a participant whose players row has a
+    google_id (see achievements.py's own module docstring for why guests
+    are excluded), and only after also checking WIN_COUNT_MILESTONES
+    against that player's total win count, which by this point already
+    includes the row this same call just inserted.
+
+    Elo ratings update the same way, for the same reason: only players
+    with a google_id get a rating change (see elo.py's own docstring) --
+    everyone else's `elo` column simply sits at whatever it already was
+    (1000 by default), which matchmaking.py still reads and pairs by as
+    normal, just never diverging for an identity with nothing persistent
+    behind it.
     """
     if not is_configured():
         return
     ensure_schema()
     if not _schema_ready:
         return  # schema setup already failed and logged a warning above
+    achievement_unlocks = achievement_unlocks or {}
     conn = None
     try:
         conn = _connect()
@@ -394,13 +501,17 @@ def record_finished_game(*, room_code: str, seats: int, bot_mix: list,
                 (room_code, seats, json.dumps(bot_mix), started_at, finished_at),
             )
             game_id = cur.fetchone()[0]
+            rated_standings = []  # {"username", "points", "rating"} -- see elo.compute_elo_deltas
+            rated_player_ids = {}  # username -> player_id, for writing the delta back below
             for p in participants:
                 player_id = None
+                google_id = None
+                elo_before = None
                 bot_name = None
                 if p["is_bot"]:
                     bot_name = p["name"]
                 else:
-                    player_id = _upsert_player(cur, p["username"], p["name"])
+                    player_id, google_id, elo_before = _upsert_player(cur, p["username"], p["name"])
                 cur.execute(
                     """
                     INSERT INTO player_games
@@ -410,6 +521,31 @@ def record_finished_game(*, room_code: str, seats: int, bot_mix: list,
                     (game_id, player_id, bot_name, p["points"], p["money_left"],
                      p["is_winner"], p["eliminated"]),
                 )
+                if player_id is not None and google_id is not None:
+                    rated_standings.append({"username": p["username"], "points": p["points"], "rating": elo_before})
+                    rated_player_ids[p["username"]] = player_id
+
+                    ids_to_unlock = set(achievement_unlocks.get(p["username"]) or ())
+                    if p["is_winner"]:
+                        cur.execute("SELECT count(*) FROM player_games WHERE player_id = %s AND is_winner",
+                                    (player_id,))
+                        win_count = cur.fetchone()[0]
+                        for threshold, achievement_id in WIN_COUNT_MILESTONES.items():
+                            if win_count >= threshold:
+                                ids_to_unlock.add(achievement_id)
+                    for achievement_id in ids_to_unlock:
+                        cur.execute(
+                            """
+                            INSERT INTO player_achievements (player_id, achievement_id)
+                            VALUES (%s, %s)
+                            ON CONFLICT (player_id, achievement_id) DO NOTHING
+                            """,
+                            (player_id, achievement_id),
+                        )
+            for username, delta in elo.compute_elo_deltas(rated_standings).items():
+                if delta:
+                    cur.execute("UPDATE players SET elo = elo + %s WHERE id = %s",
+                                (delta, rated_player_ids[username]))
     except Exception as e:  # noqa: BLE001 — see record_finished_game_async's docstring
         LoggingManager.warning(f"game_history.record_finished_game failed: {e}")
     finally:

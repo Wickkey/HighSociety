@@ -35,7 +35,7 @@ from flask_sock import Sock
 from highsociety.code.ai import BOT_TYPES, create_bot_players
 from highsociety.code.ai.mcts import decision_service
 from highsociety.code.ai.mcts.worker_pool_decision_service import WorkerPoolBotDecisionService
-from highsociety.code.common import matchmaking
+from highsociety.code.common import achievements, matchmaking
 from highsociety.code.common.db import game_history
 from highsociety.code.common.guest_username import generate_guest_username
 from highsociety.code.common.logger_module.logger.logging_manager import LoggingManager, LogType
@@ -301,11 +301,18 @@ def _record_game_history(room: "GameRoom", game: PlayGame, started_at: datetime.
             "is_winner": standing["username"] in winner_usernames,
             "eliminated": standing["eliminated"],
         })
+    achievement_unlocks = achievements.detect_per_game_achievements(
+        final_standings=game.final_standings,
+        winner_usernames=winner_usernames,
+        auction_rounds=game.get_auction_history(),
+        bot_mix=room.bot_mix,
+    )
     game_history.record_finished_game_async(
         room_code=room.room_code,
         seats=room.seats,
         bot_mix=room.bot_mix,
         started_at=started_at,
+        achievement_unlocks=achievement_unlocks,
         finished_at=datetime.datetime.now(datetime.timezone.utc),
         participants=participants,
     )
@@ -694,6 +701,39 @@ def api_matchmaking_cancel():
     body = request.get_json(silent=True) or {}
     matchmaking.cancel(body.get("ticket_id"))
     return jsonify({})
+
+
+# ------------------------------------------------------- achievements/profile --
+
+@app.route("/api/achievements")
+def api_achievements():
+    """Unlocked achievement ids for the given username -- always [] for a
+    guest account, see game_history.get_player_achievements's own
+    docstring for why. No auth/session to prove "this is really you"
+    requesting your own achievements, same trust model as every other
+    read in this app (e.g. /api/auth/username/change) -- the frontend
+    only ever calls this with the browser's own saved username."""
+    username = request.args.get("username") or ""
+    return jsonify({"achievements": game_history.get_player_achievements(username)})
+
+
+@app.route("/api/profile/<username>")
+def api_profile(username):
+    """Public profile stats -- games played, win rate, current Elo.
+    Unlike achievements this isn't gated to Google-linked accounts (see
+    get_player_profile_stats's own docstring): it's just a factual record
+    of games already played under this exact username, visible to anyone,
+    matching the user's own "should be publicly visible" ask."""
+    stats = game_history.get_player_profile_stats(username)
+    if stats is None:
+        return jsonify({"error": "No games recorded for that username yet."}), 404
+    return jsonify({
+        "username": username,
+        "games_played": stats["games_played"],
+        "wins": stats["wins"],
+        "win_rate": stats["win_rate"],
+        "elo": game_history.get_player_elo(username),
+    })
 
 
 @app.route("/")
