@@ -1035,6 +1035,21 @@ function resetGameState(myUsername, status) {
     myPoints: 0,
     myStatusCards: [],
     selectedBid: new Set(),
+    // The one source of truth for "do I currently have an open decision,
+    // and have I already answered it" -- see openMyPrompt/answerMyPrompt/
+    // renderMovePanel. Living *on* game (not as sibling module variables)
+    // is deliberate: this whole object gets replaced on every new
+    // game/rematch/reconnect right here, so there is no separate line to
+    // remember to reset when a new per-game concern gets added later --
+    // it happens for free, structurally, by virtue of living in this
+    // object. { moveSeq, type: 'bid'|'discard', answered } | null.
+    myPrompt: null,
+    // Dedupe/staleness memory for openMyPrompt, independent of myPrompt
+    // itself (which gets replaced by every new prompt) -- see gameplay.py's
+    // _move_sequence: each PlayGame (including a rematch's brand-new one)
+    // starts its own counter near zero, so this must live here too rather
+    // than survive across a resetGameState call.
+    highestAnsweredMoveSeq: null,
     opponents: {}, // username -> {name, statusCards: [], active: true, outOfAuction: false}
     // The real post-shuffle seat/turn order (see gameplay.py's player_order
     // broadcast) -- empty until that arrives, which renderOpponents falls
@@ -1051,19 +1066,23 @@ function resetGameState(myUsername, status) {
     // if nobody thought to set one deliberately when hosting.
     seed: status ? status.seed : null,
   };
-  // A rematch starts a brand-new PlayGame with its own move_seq counter
-  // restarting near zero (see gameplay.py's _move_sequence) -- without
-  // resetting these too, the previous (finished) game's lastAnsweredMoveSeq
-  // would already be higher than every move_seq the new game could possibly
-  // send, so applyPlayerMove's staleness guard would treat every prompt in
-  // the whole rematch as an already-answered stale re-send and silently
-  // ignore it: the panel would look normal but never actually open for a
-  // real turn again, no error anywhere. hasSubmittedCurrentMove must reset
-  // alongside them -- it's only ever cleared by that same "genuinely new
-  // prompt" branch in applyPlayerMove.
-  hasSubmittedCurrentMove = false;
-  currentMoveSeq = null;
-  lastAnsweredMoveSeq = null;
+  // Every other piece of state whose lifetime is "this one active game" --
+  // not already inside the `game` object above -- must be reset here too.
+  // This is the one place a new game's slate gets wiped clean; the next
+  // person adding per-game state should either put it on `game` itself
+  // (preferred -- see myPrompt's own comment above) or reset it in this
+  // function, not leave it to a sibling module variable nobody remembers
+  // to touch. clearMoveTimer() closes a real gap: an untimed rematch
+  // played right after a timed game would otherwise keep ticking down the
+  // old game's stale deadline, with no fresh PLAYER_MOVE_TIMER ever
+  // arriving to override it. hasResigned closes another: resigning in
+  // game 1, then playing a rematch, then refreshing the tab mid-rematch
+  // used to wrongly claim "you resigned from this game" (see
+  // refreshStatus's !hasResigned reconnect gate) even though this player
+  // never resigned from the game actually in progress.
+  clearMoveTimer();
+  selectedDiscardValue = null;
+  hasResigned = false;
   // logLine()/appendChatLine() only ever append — without this, a rematch
   // (or any other resetGameState call, e.g. reconnecting into a genuinely
   // new game) left the previous game's whole narration log, and chat,
@@ -2249,24 +2268,20 @@ function applyGameMessage(msg, isSpectator) {
     case 'INPUT_ERROR':
       if (!isSpectator) {
         showError($('move-error'), msg.prompt);
-        // onPlaceBid() optimistically pends the panel the instant a bid is
-        // sent, before the server has actually validated it (e.g. an
-        // insufficient raise) — undo that here so a rejected bid looks
-        // exactly like the "select at least one money card" case, which
-        // never pends in the first place: an error message, panel still
-        // fully interactive, not the disabled "waiting for the table" look.
-        $('move-panel').classList.remove('pending');
-        // Same self-healing guarantee as applyPlayerMove's own turnPlayer
-        // reset (see its comment): NetworkPlayer only ever sends INPUT_ERROR
+        // onPlaceBid() already marked game.myPrompt answered the instant a
+        // bid was sent, before the server had actually validated it (e.g.
+        // an insufficient raise). NetworkPlayer only ever sends INPUT_ERROR
         // from the same blocking get_bid()/choose_painting_to_discard() call
-        // that's actively re-prompting *this* player, so receiving one is
-        // just as unambiguous proof of whose turn it still is. Without this,
-        // an INPUT_ERROR that lands while the header is (for whatever reason)
-        // showing someone else un-dims a fully interactive-looking panel
-        // with no "Your turn" label to match it -- the panel accepts clicks,
-        // but they answer a prompt the header never admitted was live.
-        game.turnPlayer = game.myUsername;
-        renderAuctionPanel(false);
+        // that's still re-prompting *this* player (a fresh PLAYER_MOVE with
+        // a new move_seq follows right behind it -- see gameplay.py's
+        // retry loop), so this genuinely is the same still-open decision,
+        // not a new one: reopen it for another attempt rather than waiting
+        // out that second round trip. game.turnPlayer needs no separate
+        // correction here -- the turn label now derives directly from
+        // game.myPrompt (see renderAuctionPanel), so there is nothing left
+        // for it to disagree with.
+        if (game.myPrompt) game.myPrompt.answered = false;
+        renderMovePanel();
       }
       break;
     case 'CHAT':
@@ -2393,56 +2408,54 @@ function applyPlayerState(msg) {
   // click on the buttons this rebuilds.
   if (Array.isArray(d.money_cards)) {
     renderMoneyChips(d.money_cards);
-    // First call ever (game just started, before this player's first
-    // turn) — show the panel now, in its usual "not your turn" greyed
-    // state, instead of leaving it hidden until their first real prompt.
-    const movePanel = $('move-panel');
-    if (movePanel.classList.contains('hidden')) {
-      movePanel.classList.remove('hidden');
-      movePanel.classList.add('pending');
-    }
+    // Shows the panel the first time this ever fires (game just started,
+    // before this player's first turn), in its usual "not your turn"
+    // greyed state -- and stays correct on every later call too, since
+    // renderMovePanel derives pending/interactive purely from
+    // game.myPrompt rather than only fixing this up once.
+    renderMovePanel();
   }
 }
 
-function applyPlayerMove(msg) {
-  const moveSeq = msg.data && msg.data.move_seq;
-  if (moveSeq != null && lastAnsweredMoveSeq != null && moveSeq <= lastAnsweredMoveSeq) {
+// The one place a fresh, answerable prompt for THIS player gets opened --
+// called only from applyPlayerMove. Owns the staleness check, the
+// self-healing turnPlayer correction, and the panel render; nothing else
+// may set game.myPrompt directly. Returns false (having done nothing) for
+// a stale re-send of an already-answered prompt.
+function openMyPrompt(moveSeq) {
+  if (moveSeq != null && game.highestAnsweredMoveSeq != null && moveSeq <= game.highestAnsweredMoveSeq) {
     // A stale re-send, over the network, of the exact prompt already
-    // answered (see currentMoveSeq's own comment) -- our own answer
-    // simply hasn't reached/been processed by the server yet, or crossed
-    // this message in flight. Applying it anyway would re-open an
-    // already-answered, already-greyed move panel right after the player
-    // acted on it -- a real, live-reproduced bug ("I placed my bid, panel
-    // didn't grey out"). Ignore entirely; the panel is already correct.
-    return;
+    // answered -- our own answer simply hasn't reached/been processed by
+    // the server yet, or crossed this message in flight. Applying it
+    // anyway would re-open an already-answered, already-greyed move panel
+    // right after the player acted on it -- a real, live-reproduced bug
+    // ("I placed my bid, panel didn't grey out"). Ignore entirely; the
+    // panel is already correct.
+    return false;
   }
-  currentMoveSeq = moveSeq;
-
-  // A genuinely new prompt (either the next real turn, or a re-prompt after
-  // an invalid bid) is exactly the one place it's safe to allow another
-  // submission -- see hasSubmittedCurrentMove's own definition below for
-  // why this guard exists at all.
-  hasSubmittedCurrentMove = false;
-
+  game.myPrompt = { moveSeq, answered: false };
   // Self-healing guarantee, independent of any other message: receiving a
-  // PLAYER_MOVE is unambiguous proof it's this player's own turn right now,
-  // so the header can be corrected from this message alone rather than
-  // depending on a *separate* AUCTION_UPDATE (broadcast or sync) having
-  // also landed and rendered successfully. Closes a real, live-reproduced
-  // bug where the bid panel opened correctly (this message got through)
-  // while the header above it stayed on an earlier round/player -- even
-  // after gameplay.py started sending an accompanying "sync" AUCTION_UPDATE
-  // alongside every PLAYER_MOVE (see _handle_player_turn), since that's
-  // still a second, independent send() that isn't guaranteed to survive
-  // whatever dropped the original broadcast on a flaky connection. This
-  // doesn't by itself fix a stale round number/card image if that
-  // broadcast never arrives, but it eliminates the most confusing and
-  // dangerous half of the symptom -- the panel and the "whose turn" label
-  // disagreeing -- unconditionally.
+  // PLAYER_MOVE is unambiguous proof it's this player's own turn right now.
+  // Closes a real, live-reproduced bug where the bid panel opened correctly
+  // (this message got through) while the header above it stayed on an
+  // earlier round/player -- even after gameplay.py started sending an
+  // accompanying "sync" AUCTION_UPDATE alongside every PLAYER_MOVE (see
+  // _handle_player_turn), since that's still a second, independent send()
+  // that isn't guaranteed to survive whatever dropped the original
+  // broadcast on a flaky connection. game.myPrompt (just set above) is now
+  // the label's primary "Your turn" signal (see renderAuctionPanel), so
+  // this write is redundant with it in the normal case -- kept for
+  // renderOpponents' opponent-highlighting either way, and as a harmless
+  // fallback for the brief pre-reconnect window renderAuctionPanel's own
+  // comment describes.
   game.turnPlayer = game.myUsername;
-  renderAuctionPanel(false);
+  renderMovePanel();
+  return true;
+}
 
-  $('move-panel').classList.remove('hidden', 'pending');
+function applyPlayerMove(msg) {
+  if (!openMyPrompt(msg.data && msg.data.move_seq)) return;
+
   const bidControls = $('bid-controls');
   const discardControls = $('discard-controls');
   if (msg.move_type === 'discard_painting') {
@@ -2484,35 +2497,15 @@ function applyPlayerMove(msg) {
 // never appears — the feature is a no-op unless a host opts in.
 let moveTimerInterval = null;
 let moveTimerDeadline = null;
-// Hard guard against sending more than one RESPONSE per prompt, independent
-// of the move-panel's own CSS greying-out (.pending's pointer-events:none)
-// — a real, live-reproduced bug: a player unsure whether their first click
-// registered (e.g. during the brief window before the panel visibly greys)
-// clicking Pass/Place Bid again didn't just get ignored -- both clicks were
-// genuine RESPONSE messages sent over the wire. The server only reads one
-// at a time (see NetworkPlayer.get_bid()'s blocking receive()), so the
-// *second* one just sat queued and got silently consumed as the answer to
-// whatever this player's next real prompt turned out to be -- a totally
-// different round/card/decision than the one they thought they were
-// answering. Set the instant any move is submitted (or the local clock
-// hits 0); cleared only when a genuinely new PLAYER_MOVE arrives
-// (applyPlayerMove) for the *next* prompt, so at most one RESPONSE can ever
-// be in flight per prompt.
-let hasSubmittedCurrentMove = false;
-// The move_seq (see gameplay.py's _current_move_seq) of whichever prompt
-// is currently open, and of the last one actually answered. Distinct from
-// hasSubmittedCurrentMove above: that guards *this browser's own* double
-// click; these two let applyPlayerMove tell "a stale re-send, over the
-// network, of the exact prompt I already answered" apart from "a
-// genuinely new prompt" -- something timing alone can't do reliably (an
-// answer sent just as the server's own second prompt was already in
-// flight arrives at the client *after* it, looking identical to a fresh
-// turn unless the two carry different ids). Both start null; a msg with
-// no move_seq at all (e.g. a test double, or an older deployed version
-// briefly mismatched with this client during a rollout) is always treated
-// as fresh, matching this feature's total absence today.
-let currentMoveSeq = null;
-let lastAnsweredMoveSeq = null;
+// The double-submit guard and stale-re-send detection this comment used to
+// describe now live on game.myPrompt/game.highestAnsweredMoveSeq instead
+// of as sibling module variables here -- see resetGameState's own comment
+// for why: a rematch's brand-new PlayGame restarts gameplay.py's
+// _move_sequence counter near zero, and state living outside the `game`
+// object that gets fully reconstructed on every new game had no guarantee
+// of being reset alongside it. See openMyPrompt/answerMyPrompt/
+// renderMovePanel below for the single mutator/render functions that now
+// own this state exclusively.
 // Whether the double-beep has already fired for the *current* move's urgent
 // window — set once on the transition into "urgent", not per second, so it
 // never repeats every tick (see updateMoveTimerDisplay).
@@ -2562,7 +2555,7 @@ function updateMoveTimerDisplay() {
     // immediately, the same treatment a real submitted move already gets,
     // avoids a stretch where the clock reads 0 but the bid controls still
     // look live and clickable for a beat before the table visibly moves on.
-    setMovePending();
+    answerMyPrompt();
   }
 }
 
@@ -2596,32 +2589,23 @@ function playUrgentDoubleBeep() {
   }
 }
 
-// Marks the move panel as "acted on, waiting for the table" — greyed out and
-// non-interactive but still visible (so you can see what you just did),
-// rather than disappearing entirely between your turns.
-function setMovePending() {
+// The one place an answer to game.myPrompt gets marked as sent -- called
+// by onPlaceBid/onPass/onDiscardPainting right before ws.send(), and by
+// updateMoveTimerDisplay's auto-pass-on-timeout path. Returns false (having
+// done nothing) if there's no open prompt to answer -- replaces every
+// `if (hasSubmittedCurrentMove) return;` guard this used to require at each
+// call site with `if (!answerMyPrompt()) return;` (or, where a call site
+// needs to validate something client-side *before* consuming the prompt --
+// see onPlaceBid -- a plain `!game.myPrompt || game.myPrompt.answered`
+// read-only check first, then answerMyPrompt() right before the actual send).
+function answerMyPrompt() {
+  if (!game.myPrompt || game.myPrompt.answered) return false;
+  game.myPrompt.answered = true;
+  // Recorded here (not a separate variable) so openMyPrompt's staleness
+  // check survives this exact prompt being replaced by the next one.
+  game.highestAnsweredMoveSeq = game.myPrompt.moveSeq;
   clearMoveTimer(); // acted — no need to keep counting down what's already submitted
-  // Covers the local clock reaching 0 (an anticipated auto-pass — the
-  // player never acted, so onPass()/onPlaceBid() never got a chance to
-  // clear this themselves): without this, a rejected bid's "Insufficient
-  // bid" error stayed on screen through the auto-pass and into this
-  // player's *next* real turn, a stale message next to a completely fresh
-  // prompt. Redundant (but harmless) on the submit-handler paths, which
-  // already hide() this themselves before calling here. Still correctly
-  // left up through an immediate same-turn retry after a rejected bid —
-  // that path (INPUT_ERROR) never calls setMovePending() at all.
   hide($('move-error'));
-  // Also reachable when the local clock hits 0 (see updateMoveTimerDisplay)
-  // *before* any of this player's own clicks -- belt-and-suspenders
-  // alongside the .pending CSS lock below (pointer-events:none) so a click
-  // landing in whatever gap exists before that takes effect still can't
-  // send a second RESPONSE (see hasSubmittedCurrentMove's own comment).
-  hasSubmittedCurrentMove = true;
-  // Records this as the last-answered prompt (see currentMoveSeq's own
-  // comment) so a stale re-send of it arriving afterward gets ignored by
-  // applyPlayerMove instead of re-opening this now-pending panel.
-  lastAnsweredMoveSeq = currentMoveSeq;
-  $('move-panel').classList.add('pending');
   // The panel is now correctly blocked, but the server's broadcast of what
   // actually happens next (whose turn it really is) hasn't arrived yet --
   // without this, game.turnPlayer keeps pointing at whoever just acted
@@ -2634,8 +2618,22 @@ function setMovePending() {
   // real bug ("timer still going, money cards look active") even though
   // the panel itself was already correctly blocked underneath.
   game.turnPlayer = null;
-  renderAuctionPanel(false);
-  renderOpponents(false);
+  renderMovePanel();
+  return true;
+}
+
+// Single place that derives #move-panel's visibility/interactivity from
+// game.myPrompt -- the one source of truth for "do I currently have
+// something to answer, and have I already." Called from every place that
+// changes myPrompt (openMyPrompt, answerMyPrompt) plus INPUT_ERROR (which
+// reopens myPrompt for another attempt without a fresh PLAYER_MOVE having
+// arrived yet). Safe to call repeatedly/idempotently -- it always derives
+// the full correct state from scratch rather than toggling incrementally.
+function renderMovePanel() {
+  const panel = $('move-panel');
+  panel.classList.remove('hidden');
+  panel.classList.toggle('pending', !game.myPrompt || game.myPrompt.answered);
+  renderAuctionPanel(false); // the turn label depends on game.myPrompt too
 }
 
 // ------------------------------------------------------------- rendering --
@@ -2647,8 +2645,19 @@ function renderAuctionPanel(isSpectator) {
   // has its own pulsing dot, and the auction panel otherwise represents
   // shared state (card, bid) that stays fully legible regardless of whose
   // turn it is, not something that dims/greys based on turn.
-  const turnText = game.turnPlayer === game.myUsername ? 'Your turn' : `${escapeHtml(game.turnPlayer)}'s turn`;
-  $(`${prefix}turn-label`).innerHTML = game.turnPlayer
+  // An open, unanswered game.myPrompt is the authoritative "it's my turn"
+  // signal (set only by openMyPrompt, right alongside game.turnPlayer --
+  // see its own comment), with game.turnPlayer === game.myUsername kept as
+  // a harmless read-time fallback for the brief window right after a
+  // reconnect's "sync" AUCTION_UPDATE reports the turn before the real
+  // PLAYER_MOVE re-prompt has arrived to open myPrompt yet. This is safe
+  // precisely because it's a read-time OR of two already-correct values,
+  // not a third mutable flag some handler could forget to write -- that
+  // was the actual bug (multiple call sites each independently responsible
+  // for keeping turnPlayer in sync), not the comparison itself.
+  const iAmUp = (game.myPrompt && !game.myPrompt.answered) || game.turnPlayer === game.myUsername;
+  const turnText = iAmUp ? 'Your turn' : `${escapeHtml(game.turnPlayer)}'s turn`;
+  $(`${prefix}turn-label`).innerHTML = (iAmUp || game.turnPlayer)
     ? `<span class="turn-dot"></span>${turnText}`
     : '';
 
@@ -2891,21 +2900,24 @@ function renderPaintingChoices(values) {
 }
 
 function onDiscardPainting() {
-  if (hasSubmittedCurrentMove) return;
+  if (!game.myPrompt || game.myPrompt.answered) return;
   if (selectedDiscardValue === null) return;
-  hasSubmittedCurrentMove = true;
   ws.send(JSON.stringify({ message_type: 'RESPONSE', prompt: String(selectedDiscardValue) }));
-  setMovePending();
+  answerMyPrompt();
 }
 
 // ------------------------------------------------------------- controls --
 
 function onPlaceBid() {
-  if (hasSubmittedCurrentMove) return;
+  // A read-only check here (not answerMyPrompt() itself) -- the "select at
+  // least one money card" validation below must be able to fail without
+  // consuming the prompt, so the player can fix their selection and try
+  // again. answerMyPrompt() only actually gets called once a bid is
+  // genuinely about to be sent.
+  if (!game.myPrompt || game.myPrompt.answered) return;
   hide($('move-error'));
   const values = [...game.selectedBid];
   if (values.length === 0) { showError($('move-error'), 'Select at least one money card.'); return; }
-  hasSubmittedCurrentMove = true;
   ws.send(JSON.stringify({ message_type: 'RESPONSE', prompt: JSON.stringify(values) }));
   // Once sent, these chips are no longer "being added on top" — they're
   // already part of the committed bid. Without clearing this, the server's
@@ -2915,15 +2927,14 @@ function onPlaceBid() {
   // total, e.g. selecting 10 shows "10 → 20" instead of "0 → 10".
   game.selectedBid.clear();
   updateSelectedBidTotal();
-  setMovePending();
+  answerMyPrompt();
 }
 
 function onPass() {
-  if (hasSubmittedCurrentMove) return;
+  if (!game.myPrompt || game.myPrompt.answered) return;
   hide($('move-error'));
-  hasSubmittedCurrentMove = true;
   ws.send(JSON.stringify({ message_type: 'RESPONSE', prompt: 'pass' }));
-  setMovePending();
+  answerMyPrompt();
 }
 
 async function onResign() {
@@ -2937,6 +2948,13 @@ async function onResign() {
   // it is (see WebSocketTransport's RESIGN handling and web_server.py's
   // on_resign), unlike a bid/pass/discard answer.
   ws.send(JSON.stringify({ message_type: 'RESIGN' }));
-  setMovePending();
+  // Deliberately not answerMyPrompt(): resigning ends this player's
+  // participation regardless of whether a prompt is currently open (unlike
+  // a bid/pass/discard answer, which only ever closes one that is) -- force
+  // the panel pending either way, since there's nothing left to ever answer.
+  clearMoveTimer();
+  game.myPrompt = null;
+  game.turnPlayer = null;
+  renderMovePanel();
   $('btn-resign').disabled = true; // already resigned -- nothing left to submit twice
 }
