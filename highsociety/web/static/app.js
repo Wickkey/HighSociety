@@ -1051,6 +1051,19 @@ function resetGameState(myUsername, status) {
     // if nobody thought to set one deliberately when hosting.
     seed: status ? status.seed : null,
   };
+  // A rematch starts a brand-new PlayGame with its own move_seq counter
+  // restarting near zero (see gameplay.py's _move_sequence) -- without
+  // resetting these too, the previous (finished) game's lastAnsweredMoveSeq
+  // would already be higher than every move_seq the new game could possibly
+  // send, so applyPlayerMove's staleness guard would treat every prompt in
+  // the whole rematch as an already-answered stale re-send and silently
+  // ignore it: the panel would look normal but never actually open for a
+  // real turn again, no error anywhere. hasSubmittedCurrentMove must reset
+  // alongside them -- it's only ever cleared by that same "genuinely new
+  // prompt" branch in applyPlayerMove.
+  hasSubmittedCurrentMove = false;
+  currentMoveSeq = null;
+  lastAnsweredMoveSeq = null;
   // logLine()/appendChatLine() only ever append — without this, a rematch
   // (or any other resetGameState call, e.g. reconnecting into a genuinely
   // new game) left the previous game's whole narration log, and chat,
@@ -2243,6 +2256,17 @@ function applyGameMessage(msg, isSpectator) {
         // never pends in the first place: an error message, panel still
         // fully interactive, not the disabled "waiting for the table" look.
         $('move-panel').classList.remove('pending');
+        // Same self-healing guarantee as applyPlayerMove's own turnPlayer
+        // reset (see its comment): NetworkPlayer only ever sends INPUT_ERROR
+        // from the same blocking get_bid()/choose_painting_to_discard() call
+        // that's actively re-prompting *this* player, so receiving one is
+        // just as unambiguous proof of whose turn it still is. Without this,
+        // an INPUT_ERROR that lands while the header is (for whatever reason)
+        // showing someone else un-dims a fully interactive-looking panel
+        // with no "Your turn" label to match it -- the panel accepts clicks,
+        // but they answer a prompt the header never admitted was live.
+        game.turnPlayer = game.myUsername;
+        renderAuctionPanel(false);
       }
       break;
     case 'CHAT':
