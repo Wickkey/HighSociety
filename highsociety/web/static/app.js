@@ -2046,6 +2046,18 @@ function showReactionBubble(username, emoji, isSpectator) {
   } else {
     const listId = isSpectator ? 'spec-players-list' : 'opponents-list';
     anchor = document.querySelector(`#${listId} .opponent-row[data-username="${CSS.escape(username)}"]`);
+    // The .opponent-row DOM element only exists once renderOpponents() has
+    // actually run since this player was last (re)known about -- ensureOpponent
+    // only updates the in-memory game.opponents entry, not the DOM. A reaction
+    // can easily arrive in the gap before that row has ever been rendered
+    // (e.g. early in a round, before this opponent has bid/passed yet), which
+    // used to make the bubble silently no-op with no visible symptom at all.
+    // Force a render here and retry once before giving up.
+    if (!anchor && game) {
+      ensureOpponent(username);
+      renderOpponents(isSpectator);
+      anchor = document.querySelector(`#${listId} .opponent-row[data-username="${CSS.escape(username)}"]`);
+    }
   }
   if (!anchor) return;
   const bubble = document.createElement('div');
