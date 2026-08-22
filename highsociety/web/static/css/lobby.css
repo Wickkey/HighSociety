@@ -1,0 +1,514 @@
+/* lobby.css -- login, account screen (+ achievements grid, home
+   tiles), matchmaking, join/host forms, rooms list, 404 page.
+   Split out of the former single style.css. */
+/* ---------------- matchmaking screen ---------------- */
+
+#screen-matchmaking .panel {
+  border-top: 3px solid var(--accent);
+  text-align: center;
+  position: relative;
+}
+.matchmaking-panel #matchmaking-seats { max-width: 120px; margin-left: auto; margin-right: auto; }
+.matchmaking-panel label { text-align: left; }
+#btn-find-match { width: 100%; }
+
+.shuffle-anim {
+  position: relative;
+  height: 96px;
+  width: 58px;
+  margin: 0.6rem auto 1.2rem;
+}
+.shuffle-card { position: absolute; top: 8px; left: 0; animation: card-shuffle 1.6s ease-in-out infinite; }
+.shuffle-card-1 { animation-delay: 0s; }
+.shuffle-card-2 { animation-delay: 0.18s; }
+.shuffle-card-3 { animation-delay: 0.36s; }
+@keyframes card-shuffle {
+  0%, 100% { transform: translate(0, 0) rotate(0deg); }
+  25% { transform: translate(-16px, -8px) rotate(-9deg); }
+  50% { transform: translate(0, -16px) rotate(0deg); }
+  75% { transform: translate(16px, -8px) rotate(9deg); }
+}
+
+/* Tabular-nums so the digits don't shift width as they tick over --
+   noticeable jitter otherwise, since most fonts give "1" a narrower
+   advance than "0". Chess.com/Rocket League-style elapsed counter,
+   matching how a matchmaking wait is normally communicated elsewhere. */
+.matchmaking-elapsed {
+  font-size: 1.7rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+  color: var(--accent-strong);
+  margin: 0 0 0.2rem;
+}
+.matchmaking-status-text { color: var(--muted); margin: 0 0 0.6rem; }
+#matchmaking-timeout-options { margin-top: 0.6rem; }
+#btn-matchmaking-add-bots { width: 100%; }
+
+/* Deliberately understated ("should not be obvious") -- a small muted
+   text action below everything else, not a full button competing with
+   the primary actions above it. Resets every default <button> property
+   (background/border/margin/underline) a plain button or .link-button
+   would otherwise apply, same fix as the profile popover menu items. */
+.matchmaking-cancel-link {
+  display: block;
+  width: auto;
+  margin: 1.2rem auto 0;
+  padding: 0.4rem 0.8rem;
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: var(--muted);
+  text-decoration: none;
+  cursor: pointer;
+}
+.matchmaking-cancel-link:hover { background: var(--panel-bg-soft); color: var(--text); }
+
+/* ---------------- login screen ---------------- */
+
+#screen-login .panel {
+  border-top: 3px solid var(--accent);
+}
+
+.login-panel { text-align: center; }
+.login-panel h2 { margin-bottom: 1.4rem; }
+
+.google-signin-container {
+  display: flex;
+  justify-content: center;
+  min-height: 44px; /* reserves the real button's own footprint so nothing
+                        shifts once it actually renders in (see GIS's own
+                        onload -- initGoogleSignIn in app.js) */
+}
+.google-signin-container:empty { min-height: 0; }
+
+.login-divider {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  margin: 1.2rem 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.login-divider::before, .login-divider::after {
+  content: '';
+  flex: 1 1 auto;
+  height: 1px;
+  background: var(--panel-border);
+}
+/* No divider (nothing to divide against) when the Google button never
+   rendered at all -- an empty container means GOOGLE_CLIENT_ID wasn't
+   configured, matching today's guest-only default. */
+.google-signin-container:empty + .login-divider { display: none; }
+
+/* Gold-accented rather than the generic grey .secondary treatment (used
+   elsewhere for Cancel/Back) -- on this screen it's a real, equally-weighted
+   choice next to Google, not a de-emphasized fallback action. */
+#btn-continue-guest {
+  width: 100%;
+  border-color: var(--accent-light);
+  color: var(--accent-strong);
+  font-weight: 600;
+}
+#btn-continue-guest:hover { background: var(--accent-soft); }
+
+#login-username-form { margin-top: 1.1rem; text-align: left; }
+
+.username-input-row { display: flex; gap: 0.5rem; margin-top: 0.3rem; }
+.username-input-row input { flex: 1 1 auto; margin-top: 0; }
+.shuffle-btn {
+  flex: 0 0 auto;
+  width: auto;
+  margin-top: 0;
+  padding: 0.5rem 0.7rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.shuffle-btn svg { width: 17px; height: 17px; }
+
+/* ---------------- account screen ---------------- */
+
+.account-panel { text-align: left; }
+.account-header {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+  margin: 0.6rem 0 1.4rem;
+}
+.account-header h2 { margin: 0 0 0.2rem; }
+.account-header .muted { margin: 0; font-size: 0.85rem; }
+.account-avatar { width: 52px; height: 52px; border-radius: 12px; font-size: 1.4rem; }
+.account-elo-note { font-size: 0.78rem; }
+.account-saved { color: var(--chip-money); font-weight: 600; margin: 0.4rem 0 0; }
+.account-more {
+  margin-top: 1.4rem;
+  padding-top: 1.1rem;
+  border-top: 1px solid var(--panel-border);
+}
+.account-more p { margin: 0; font-size: 0.85rem; }
+.account-section-title { margin: 0 0 0.7rem; font-size: 1rem; }
+#btn-account-logout { width: 100%; margin-top: 1.2rem; }
+
+.account-stats-row {
+  display: flex;
+  gap: 0.8rem;
+  margin-top: 1.2rem;
+}
+.account-stat {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.15rem;
+  padding: 0.7rem 0.5rem;
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-light);
+  border-radius: var(--radius-sm);
+}
+.account-stat-value { font-size: 1.3rem; font-weight: 700; color: var(--accent-strong); }
+.account-stat-label { font-size: 0.75rem; color: var(--muted); }
+
+/* Locked tiles are fully desaturated (grayscale + faded) so an unlock reads
+   as a real color reveal, not just a border/shadow change. Icon badge
+   mirrors .home-tile-icon's "colored circle behind a line icon" language. */
+.achievements-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 0.8rem;
+}
+.achievement-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 0.4rem;
+  padding: 0.9rem 0.6rem;
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-sm);
+  transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+}
+.achievement-icon {
+  width: 48px;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-light);
+  color: var(--accent-strong);
+}
+.achievement-icon svg { width: 24px; height: 24px; }
+.achievement-name { font-weight: 700; font-size: 0.82rem; line-height: 1.2; }
+.achievement-tile.locked {
+  filter: grayscale(1);
+  opacity: 0.45;
+}
+.achievement-tile.locked .achievement-icon { background: rgba(0, 0, 0, 0.05); border-color: var(--panel-border); color: var(--muted); }
+.achievement-tile.unlocked {
+  border-color: var(--accent-light);
+  box-shadow: var(--shadow-sm);
+}
+.achievement-tile.unlocked:hover { transform: translateY(-2px); box-shadow: var(--shadow); }
+
+.home-tiles {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1.1rem;
+  max-width: 780px;
+  margin: 4rem auto;
+}
+@media (max-width: 700px) {
+  .home-tiles { grid-template-columns: 1fr; max-width: 420px; }
+}
+.home-tile {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  text-align: center;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.35), rgba(255, 255, 255, 0) 40%), var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius);
+  padding: 2rem 1.2rem;
+  box-shadow: var(--shadow-sm);
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+}
+.home-tile:hover, .home-tile:focus-visible {
+  transform: translateY(-2px);
+  border-color: var(--accent-light);
+  box-shadow: var(--shadow);
+  outline: none;
+}
+/* A colored badge behind the line icon rather than a bare glyph -- gives
+   the tile a focal point and ties the icon to the app's own gold accent
+   instead of it just floating there at whatever color an emoji happened
+   to render in. */
+.home-tile-icon {
+  width: 56px;
+  height: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-light);
+  color: var(--accent-strong);
+  margin-bottom: 0.2rem;
+}
+.home-tile-icon svg { width: 27px; height: 27px; }
+.home-tile-title { font-weight: 700; font-size: 1.05rem; }
+.home-tile-sub { color: var(--muted); font-size: 0.82rem; }
+.home-tile-sub.has-live { color: var(--accent-strong); font-weight: 600; }
+
+.home-tile-live-badge {
+  position: absolute;
+  top: -10px;
+  right: -10px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 0.28rem 0.6rem;
+  border-radius: 999px;
+  box-shadow: var(--shadow-sm);
+  border: 2px solid var(--panel-bg);
+}
+
+.home-back, .screen-back {
+  background: none;
+  border: none;
+  color: var(--muted);
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0 0 0.9rem;
+  margin: 0;
+}
+.home-back:hover, .screen-back:hover { color: var(--accent-strong); }
+
+/* -------------------------------------------------------- 404 page -------------------------------------------------------- */
+.error-page { display: flex; justify-content: center; }
+.error-panel {
+  max-width: 440px;
+  margin: 4rem auto;
+  box-shadow: var(--shadow);
+  text-align: center;
+}
+.error-page-glyph { font-size: 2.6rem; margin: 0; color: var(--accent); line-height: 1; }
+.error-page-code {
+  font-size: 4rem;
+  font-weight: 700;
+  margin: 0.2rem 0 0.6rem;
+  letter-spacing: 0.05em;
+  color: var(--accent-strong);
+}
+
+
+
+button.secondary.standalone { margin-top: 0.9rem; display: inline-block; }
+
+/* Same visual language as button.primary, for the rare case a "button" is
+   actually a plain navigation link (the 404 page's "Back to the lobby" —
+   see 404.html) rather than a JS-driven action, so it works with no script
+   at all. */
+.btn-link {
+  display: inline-block;
+  font-size: 0.95rem;
+  padding: 0.65rem 1.3rem;
+  border-radius: var(--radius-sm);
+  font-weight: 600;
+  text-decoration: none;
+  transition: transform 0.08s ease, filter 0.15s ease;
+  margin-top: 0.5rem;
+  background: var(--accent);
+  color: #fff;
+}
+.btn-link:hover { filter: brightness(1.08); }
+.btn-link:active { transform: translateY(1px); }
+
+.button-row {
+  display: flex;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  align-items: stretch;
+  margin-top: 0.9rem;
+}
+.button-row button { flex: 0 0 auto; margin-top: 0; }
+.button-row select {
+  flex: 0 0 auto;
+  padding: 0.55rem 0.7rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--panel-border);
+  background: var(--panel-bg-soft);
+  color: var(--text);
+  font-size: 0.9rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: border-color 0.15s ease;
+}
+.button-row select:focus { outline: none; border-color: var(--accent); }
+
+/* Reads as one sentence ("Fill an empty seat with a [Medium ▾] bot") with
+   the difficulty select inline, rather than a same-height dropdown sitting
+   next to an unrelated-looking button -- the pairing between "what
+   difficulty" and "add a bot" wasn't visually obvious before. */
+.bot-add-row {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  flex-wrap: wrap;
+  margin-top: 0.9rem;
+}
+.bot-add-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  font-size: 0.9rem;
+}
+/* "a [dropdown] bot" wraps to a new line as one atomic unit if the row runs
+   out of room, rather than splitting mid-phrase and leaving "bot" orphaned
+   alone on its own line (confirmed live at the join panel's ~460px width). */
+.bot-add-select-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  white-space: nowrap;
+}
+.bot-add-label select {
+  padding: 0.4rem 0.6rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--panel-border);
+  background: var(--panel-bg-soft);
+  color: var(--text);
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.bot-add-label select:focus { outline: none; border-color: var(--accent); }
+
+.lobby-status {
+  background: var(--panel-bg-soft);
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-sm);
+  padding: 0.7rem 0.9rem;
+  margin-bottom: 1.1rem;
+  font-size: 0.9rem;
+}
+
+.room-code-display {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-light);
+  border-radius: var(--radius-sm);
+  padding: 0.6rem 0.9rem;
+  margin-bottom: 0.6rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+/* A dedicated row (its own line, below the room-code badge above) for the
+   invite link -- an icon-only button next to a bare room-code badge was
+   easy to miss entirely (real user feedback: "hidden and not obvious").
+   Pairing it with a visible, selectable link field plus a labeled button
+   makes both the existence of a shareable link and the action to copy it
+   immediately obvious at a glance, closer to how colonist.io surfaces the
+   same thing. */
+.room-link-row {
+  display: flex;
+  align-items: stretch;
+  gap: 0.5rem;
+  margin-bottom: 0.9rem;
+}
+.room-link-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 0.5rem 0.65rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--panel-border);
+  background: var(--panel-bg-soft);
+  color: var(--text);
+  font-size: 0.9rem;
+  /* Not disabled -- readonly still lets a click/tap select-all (see
+     app.js) for a manual copy on a device where the Clipboard API is
+     blocked, without letting anyone actually edit the link. */
+}
+.room-link-input:focus { outline: none; border-color: var(--accent); }
+
+.copy-link-btn {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.5rem 0.8rem;
+  border: 1px solid var(--accent-light);
+  border-radius: var(--radius-sm);
+  background: var(--panel-bg);
+  color: var(--accent-strong);
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease, transform 0.1s ease;
+}
+.copy-link-btn svg { width: 1rem; height: 1rem; flex-shrink: 0; }
+.copy-link-btn:hover { background: var(--accent-highlight); color: #fff; }
+.copy-link-btn:active { transform: scale(0.97); }
+.copy-link-btn.copied { background: var(--accent-strong); color: #fff; border-color: var(--accent-strong); }
+
+.radio-label {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.55rem;
+  flex: 1 1 220px;
+  padding: 0.45rem 0.55rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+.radio-label:hover { background: var(--panel-bg-soft); }
+.radio-label:has(input:checked) { background: var(--accent-soft); border-color: var(--accent-light); }
+.radio-label input[type="radio"],
+.radio-label input[type="checkbox"] {
+  display: inline-block;
+  width: auto;
+  margin: 0.2rem 0 0;
+}
+/* Title + one-line description stacked, rather than crowding onto a single
+   line — two options of very different description length (e.g. "Anyone
+   can join" vs "Requires room code") used to wrap irregularly otherwise. */
+.radio-label-text { display: flex; flex-direction: column; line-height: 1.35; }
+.radio-label-text strong { font-weight: 600; font-size: 0.92rem; }
+.radio-label-text .hint { font-size: 0.78rem; }
+
+.rooms-list { margin-bottom: 1.1rem; }
+.room-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  background: var(--panel-bg-soft);
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-sm);
+  padding: 0.6rem 0.9rem;
+  margin-bottom: 0.5rem;
+  font-size: 0.9rem;
+}
+.room-row button { margin-top: 0; }

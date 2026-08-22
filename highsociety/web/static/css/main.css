@@ -1,0 +1,489 @@
+/* main.css -- root variables, base reset, app shell/sidebar, topbar,
+   profile chip/popover, confirm modal, #app/.screen/.panel base,
+   and truly universal elements (h2/h3/.muted/.error/label/button)
+   used by every screen. Split out of the former single style.css. */
+:root {
+  /* Luxury-casino palette: dark felt green behind cream/parchment panels,
+     muted gold accents, muted (not primary-color-wheel) card hues. Kept as
+     one deliberate look rather than a light/dark adaptive theme — a casino
+     table doesn't re-skin itself for your OS setting. */
+  --felt-1: #114430;
+  --felt-2: #0b3427;
+  --panel-bg: #f2ece2;
+  --panel-bg-soft: #ece4d8;
+  --panel-bg-alt: #f5f0e8;
+  --panel-bg-auction: #f3eee6;
+  --panel-bg-log: #ede5d8;
+  --panel-border: #d7cebf;
+  --text: #342c23;
+  --muted: #766a5b;
+  --accent: #b98a2f;
+  --accent-light: #c8a04d;
+  --accent-highlight: #d9b15f;
+  --accent-strong: #8f6a22;
+  --accent-soft: rgba(185, 138, 47, 0.16);
+  --danger: #a3302a;
+  --danger-soft: rgba(163, 48, 42, 0.12);
+  --chip-money: #1f7a4d;
+  --chip-money-selected: var(--accent);
+  /* Status cards: only the two actual "green cards" (Prestige, Scandale —
+     see is_green in HSConfig.json) get real green; every other card
+     (Painting, Faux Pas, Passe) shares one neutral stone/taupe tone rather
+     than each having its own color, so green stays a meaningful signal
+     instead of one hue among several. */
+  --card-green: var(--green-dot);
+  --card-green-2: #1c7a3c;
+  --card-neutral: #8c8171;
+  --card-neutral-2: #5b5346;
+  --green-dot: #2fa84f;
+  --toast-start: #8570bf;
+  --radius: 18px;
+  --radius-card: 14px;
+  --radius-sm: 12px;
+  --shadow: 0 14px 34px rgba(0, 0, 0, 0.24);
+  --shadow-sm: 0 8px 24px rgba(0, 0, 0, 0.1);
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  background:
+    /* very faint felt weave, purely textural */
+    repeating-linear-gradient(45deg, rgba(255, 255, 255, 0.015) 0 2px, transparent 2px 4px),
+    linear-gradient(180deg, var(--felt-1) 0%, var(--felt-2) 100%);
+  background-attachment: fixed;
+  color: var(--text);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ---------------- app shell / sidebar ---------------- */
+
+.app-shell { display: flex; min-height: 100vh; }
+.app-main-col { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; min-height: 100vh; }
+
+/* A slim, always-icon rail (chess.com-style) rather than a wide expanding
+   drawer — one width works at every viewport size, so there's no separate
+   mobile-collapse behavior to build/maintain. Hidden entirely on the login
+   screen (no identity yet to act on) and the live game table (see
+   app.js's updateSidebarVisibility) — everywhere else, it's a fixed part
+   of the layout. */
+.app-sidebar {
+  flex: 0 0 auto;
+  width: 96px;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.5rem;
+  padding: 1.4rem 0.6rem;
+  background: rgba(0, 0, 0, 0.14);
+  border-right: 1px solid rgba(255, 255, 255, 0.08);
+}
+.app-shell.sidebar-hidden .app-sidebar { display: none; }
+.sidebar-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.45rem;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-card);
+  padding: 0.75rem 0.4rem;
+  color: rgba(245, 241, 230, 0.72);
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.015em;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, transform 0.1s ease, border-color 0.15s ease;
+  margin-top: 0;
+}
+.sidebar-item:hover { background: rgba(255, 255, 255, 0.08); color: #f5f1e6; }
+.sidebar-item:active { transform: translateY(1px); }
+.sidebar-item.active { background: var(--accent-soft); border-color: var(--accent-light); color: #f5f1e6; }
+.sidebar-icon { width: 27px; height: 27px; flex-shrink: 0; }
+.sidebar-item-disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+.sidebar-item-disabled:hover { background: transparent; color: rgba(245, 241, 230, 0.72); }
+@media (max-width: 520px) {
+  .app-sidebar { width: 68px; padding: 1.1rem 0.4rem; gap: 0.4rem; }
+  .sidebar-item { padding: 0.65rem 0.3rem; }
+  .sidebar-label { display: none; }
+  .sidebar-icon { width: 25px; height: 25px; }
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 1.1rem 1.75rem;
+  color: #f5f1e6;
+}
+.topbar h1 {
+  font-size: 1.3rem;
+  margin: 0;
+  letter-spacing: 0.04em;
+  font-weight: 700;
+  /* Flex items don't shrink below their content's natural width unless
+     min-width is reset -- without this the profile chip on the other end
+     gets pushed past the viewport edge instead of the title ever giving
+     up room, confirmed clipped off-screen on a 375px-wide phone. */
+  flex-shrink: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.topbar h1::before {
+  content: "♠";
+  color: var(--accent);
+  margin-right: 0.4rem;
+}
+.home-link { cursor: pointer; }
+.home-link:hover { opacity: 0.85; }
+.home-link:focus-visible { outline: 2px solid var(--accent-light); outline-offset: 3px; }
+/* Floating badge, bottom-right of the viewport — stays out of the way of
+   the header/game layout entirely, like a permanent "view source" corner
+   tab rather than competing for space with in-flow UI. */
+.github-link {
+  position: fixed;
+  right: 1.5rem;
+  bottom: 1.5rem;
+  z-index: 150;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  background: var(--felt-2);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  color: #f5f1e6;
+  box-shadow: var(--shadow-sm);
+  transition: color 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+}
+.github-link:hover {
+  color: var(--accent-light);
+  border-color: var(--accent-light);
+  box-shadow: var(--shadow);
+  transform: translateY(-2px);
+}
+.github-link:focus-visible {
+  outline: 2px solid var(--accent-light);
+  outline-offset: 3px;
+}
+@media (max-width: 600px) {
+  /* Fixed-to-viewport meant this sat on top of whatever happened to be
+     scrolled into the bottom-right corner -- confirmed live covering the
+     move-panel's Place Bid button during an active turn, and the bot-count
+     inputs on the host form. Un-fixing it here relies on the element now
+     living at the very end of the document (see index.html) so it renders
+     as a plain footer link below all real content instead. */
+  .github-link {
+    position: static;
+    display: flex; /* block-level, so margin:auto below actually centers it -- inline-flex (the default) wouldn't */
+    margin: 2rem auto 1.5rem;
+  }
+  .topbar { padding: 1rem 1rem; }
+  .profile-chip { padding: 0.55rem 0.9rem; }
+  .profile-chip-name { max-width: 84px; }
+}
+.badge {
+  font-size: 0.75rem;
+  padding: 0.3rem 0.7rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  letter-spacing: 0.02em;
+}
+.hidden { display: none !important; }
+
+/* Top-right profile chip: doubles as the in-session status pill ("playing
+   as X" / "spectating" / "reconnecting…" — see app.js's setBadge, not
+   clickable while locked into a room) and, whenever idle, as the entry
+   point into editing the saved device identity (see app.js's
+   renderProfileChip/loadProfile) — sized and positioned so it visibly
+   reads as "the profile area" rather than a small aside. */
+.profile-chip-wrap { position: relative; min-width: 0; flex-shrink: 1; }
+.profile-chip {
+  font: inherit;
+  font-size: 0.95rem;
+  font-weight: 600;
+  padding: 0.6rem 1.3rem;
+  cursor: default;
+  color: #f5f1e6;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  max-width: 100%;
+}
+.profile-chip.editable {
+  cursor: pointer;
+  background: var(--accent-soft);
+  border-color: var(--accent-light);
+  /* A faint lift, like every other clickable panel/button in the app
+     (.panel's own --shadow-sm), so the chip reads as pressable rather than
+     a flat label. */
+  box-shadow: var(--shadow-sm);
+}
+.profile-chip.editable:hover {
+  background: rgba(185, 138, 47, 0.28);
+  box-shadow: var(--shadow);
+}
+/* Chess.com-style: a small colored square with the player's first letter
+   instead of an edit-pencil icon — the chip itself is just an identity
+   display now, editing lives on the Account screen (see .account-panel
+   below), reached via the popover menu or the sidebar's Account tab. */
+.profile-chip-avatar {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: #1c1a16;
+  background: var(--accent-light);
+  flex-shrink: 0;
+  transition: transform 0.15s ease;
+}
+.profile-chip.editable:hover .profile-chip-avatar { transform: scale(1.08); }
+.profile-chip-name {
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.profile-chip:focus-visible { outline: 2px solid var(--accent-light); outline-offset: 2px; }
+
+/* Passive "this still needs you" cue on the chip itself, active for as long
+   as no profile has ever been saved (see app.js's renderProfileChip) — a
+   slow, gentle pulse since it's just a standing reminder, not an urgent
+   prompt. Cleared the instant a profile exists, for good. */
+.profile-chip.needs-attention { animation: chip-glow-pulse 2.4s ease-in-out infinite; }
+@keyframes chip-glow-pulse {
+  0%, 100% { box-shadow: var(--shadow-sm), 0 0 0 1px var(--accent-light); }
+  50% { box-shadow: var(--shadow-sm), 0 0 10px 3px rgba(185, 138, 47, 0.55); }
+}
+
+.profile-popover {
+  position: absolute;
+  top: calc(100% + 0.6rem);
+  right: 0;
+  width: 230px;
+  z-index: 200;
+  text-align: left;
+  padding: 0.5rem;
+  margin-bottom: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  /* .topbar sets a light color for its own dark background — reset back to
+     the standard panel text color here, since this popover has the usual
+     light .panel background despite living inside the dark header. */
+  color: var(--text);
+}
+/* A real menu (Account / Log out) rather than inline edit fields --
+   editing itself moved to the Account screen (see .account-panel).
+   Deliberately its own look, not .link-button's underlined-inline-text
+   style (that read as a bare hyperlink, not a menu row) -- resets every
+   default <button> property (background/border/margin) that would
+   otherwise leak in. */
+.popover-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  width: 100%;
+  text-align: left;
+  padding: 0.75rem 0.8rem;
+  margin: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  border: none;
+  font: inherit;
+  font-weight: 500;
+  font-size: 0.92rem;
+  color: var(--text);
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+.popover-menu-item svg { width: 18px; height: 18px; flex-shrink: 0; opacity: 0.7; }
+.popover-menu-item:hover { background: var(--panel-bg-soft); }
+.popover-menu-item-danger { color: var(--danger); }
+.popover-menu-item-danger svg { opacity: 0.85; }
+.popover-menu-item-danger:hover { background: var(--danger-soft); }
+.popover-menu-divider { height: 1px; background: var(--panel-border); margin: 0.3rem 0.3rem; }
+
+/* Active nudge: applied to a username field when a host/join click was
+   intercepted for having no saved profile yet (see app.js's
+   ensureProfileSet) or the Account screen is opened directly for a
+   first-time visitor — a faster, brighter pulse than the passive chip
+   glow above, since this is "fix this right now" rather than a standing
+   reminder. Cleared on the field's first input. */
+input.needs-attention {
+  animation: field-glow-pulse 1s ease-in-out infinite;
+  border-color: var(--accent-light);
+}
+@keyframes field-glow-pulse {
+  0%, 100% { box-shadow: 0 0 0 2px var(--accent-light), 0 0 6px 1px rgba(185, 138, 47, 0.25); }
+  50% { box-shadow: 0 0 0 3px var(--accent-light), 0 0 16px 5px rgba(185, 138, 47, 0.5); }
+}
+
+/* ------------- confirm modal (resign, leaving mid-game) ------------- */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.5);
+}
+.modal-box {
+  max-width: 380px;
+  width: calc(100% - 2.5rem);
+  text-align: center;
+  margin-bottom: 0;
+}
+.modal-box p { margin: 0 0 1.1rem; font-size: 1.05rem; font-weight: 500; color: var(--text); }
+.modal-actions { justify-content: center; }
+
+#app {
+  max-width: 1120px;
+  width: 100%;
+  margin: 0 auto;
+  padding: 0 1.25rem 3rem;
+  /* Lets a "hero centered" screen (login, matchmaking) fill exactly
+     whatever vertical space is actually left below the header and center
+     within it -- precise regardless of the header's real rendered
+     height, instead of guessing that height as a fixed number to
+     subtract from 100vh (previously off by however wrong the guess was,
+     confirmed visibly not-centered on some viewport sizes). */
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.screen { width: 100%; }
+
+.panel {
+  /* --panel-tint is overridden per context (auction/side-col panels below)
+     so every panel gets a barely-there depth gradient plus a slightly
+     different parchment shade instead of one flat color repeated everywhere. */
+  --panel-tint: var(--panel-bg);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.35), rgba(255, 255, 255, 0) 40%), var(--panel-tint);
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius);
+  padding: 1.4rem 1.6rem;
+  margin-bottom: 1.1rem;
+  box-shadow: var(--shadow-sm);
+}
+
+#screen-host-setup .panel,
+#screen-join .panel,
+#screen-spectate-join .panel,
+#screen-finished .panel,
+#screen-account .panel,
+#screen-matchmaking .panel,
+#screen-login .panel {
+  max-width: 460px;
+  margin: 3rem auto;
+  box-shadow: var(--shadow);
+}
+
+
+h2 { margin-top: 0; font-size: 1.35rem; }
+h3 { margin: 0 0 0.7rem; font-size: 1rem; letter-spacing: 0.01em; }
+.muted { color: var(--muted); font-size: 0.9rem; }
+.hint { color: var(--muted); font-size: 0.8rem; }
+.error {
+  color: #fff;
+  background: var(--danger);
+  padding: 0.55rem 0.8rem;
+  border-radius: var(--radius-sm);
+  font-size: 0.9rem;
+  margin-top: 0.6rem;
+}
+
+label {
+  display: block;
+  margin-bottom: 0.85rem;
+  font-size: 0.9rem;
+  font-weight: 500;
+}
+label input, label select {
+  display: block;
+  width: 100%;
+  margin-top: 0.3rem;
+  padding: 0.5rem 0.65rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--panel-border);
+  background: var(--panel-bg-soft);
+  color: var(--text);
+  font-size: 1rem;
+  font-weight: 400;
+  transition: border-color 0.15s ease;
+}
+label input:focus, label select:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+fieldset.bot-mix {
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-sm);
+  margin: 0 0 1rem;
+  padding: 0.9rem 1rem 0.3rem;
+}
+fieldset.bot-mix legend { padding: 0 0.4rem; font-weight: 600; font-size: 0.9rem; }
+.bot-row {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  align-items: stretch;
+}
+/* "Capped-greedy bot" wraps to two lines while "Pass bot"/"Greedy bot" fit
+   on one — without this, the inputs end up at different heights even
+   though the labels are the same overall (stretched) box height. Making
+   each label a column with the input pinned to the bottom keeps every
+   input aligned on the same row regardless of how much the caption wraps. */
+.bot-row label {
+  flex: 1 1 100px;
+  display: flex;
+  flex-direction: column;
+}
+.bot-row label input { margin-top: auto; }
+
+details.advanced { margin-bottom: 1.1rem; }
+details.advanced summary {
+  cursor: pointer;
+  color: var(--muted);
+  margin-bottom: 0.5rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+button {
+  font-size: 0.95rem;
+  padding: 0.65rem 1.3rem;
+  border-radius: var(--radius-sm);
+  border: none;
+  cursor: pointer;
+  font-weight: 600;
+  transition: transform 0.08s ease, filter 0.15s ease, opacity 0.15s ease;
+  line-height: 1.2;
+  margin-top: 0.5rem;
+}
+button:active { transform: translateY(1px); }
+button.primary { background: var(--accent); color: #fff; }
+button.primary:hover { filter: brightness(1.08); }
+button.secondary { background: transparent; border: 1px solid var(--panel-border); color: var(--text); }
+button.secondary:hover { background: var(--panel-bg-soft); }
+button.danger { background: var(--danger-soft); color: var(--danger); border: 1px solid transparent; }
+button.danger:hover { background: var(--danger); color: #fff; }
+button:disabled { opacity: 0.5; cursor: default; transform: none; }
