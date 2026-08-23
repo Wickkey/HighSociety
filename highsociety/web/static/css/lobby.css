@@ -11,6 +11,16 @@
 .matchmaking-panel #matchmaking-seats { max-width: 120px; margin-left: auto; margin-right: auto; }
 .matchmaking-panel label { text-align: left; }
 #btn-find-match { width: 100%; }
+/* This panel is deliberately centered for its actual content (seats
+   input, Find Match button) -- but that also caught the "← Back" link,
+   leaving it floating oddly in the middle of the panel's top edge instead
+   of sitting top-left the way every other screen's back link does.
+   Escape the inherited centering for just this one element. */
+.matchmaking-panel .screen-back {
+  display: block;
+  width: max-content;
+  margin-right: auto;
+}
 
 .shuffle-anim {
   position: relative;
