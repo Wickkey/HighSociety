@@ -3,10 +3,23 @@
 // room. Owns currentRoomCode/lastStatus/hasResigned as getter/setter pairs
 // (not raw exported `let`s) since they're reassigned from several modules --
 // an explicit function makes every write site grep-able.
+//
+// This module sits at the center of the app's circular-import web: nearly
+// every feature module needs something from here (currentRoomCode,
+// fetchJSON, applyJoinIdentityDefaults, ...), and this file needs things
+// back from most of them. Every import below that closes a cycle is safe
+// for the same reason documented in gameState.js/messages.js: everything
+// is read inside a function body, never at this module's own top-level
+// evaluation, so load order never matters.
 import { $, hide, show, showError, showScreen } from '../utils/dom.js';
-import { ensureProfileSet, loadProfile } from '../auth/profile.js';
-import { resetGameState } from '../game/gameState.js';
+import { ensureProfileSet, loadProfile, renderProfileChip, saveProfile, setBadge } from '../auth/profile.js';
+import { game, resetGameState, seedOpponents, applyRoomDisplaySettings } from '../game/gameState.js';
 import { renderOpponents } from '../game/gameRenderer.js';
+import { ws, closeSocket, attemptReconnect, connectPlayerSocket, connectSpectatorSocket } from '../network/websocket.js';
+import { setPendingJoin, setPendingSpectate } from '../network/messages.js';
+import { confirmDialog } from '../ui/modals.js';
+import { renderFinished } from './rematch.js';
+import { renderLobby } from './playerList.js';
 
 export async function fetchJSON(url, opts) {
   const res = await fetch(url, opts);
@@ -128,7 +141,7 @@ export function leaveToHome(clearRejoin = true) {
   stopPolling();
   showScreen('screen-host-setup');
   showHomeTiles();
-  import('../auth/profile.js').then((m) => m.renderProfileChip());
+  renderProfileChip();
   startRoomsPolling();
 }
 
@@ -136,7 +149,7 @@ export function leaveToHome(clearRejoin = true) {
 // lobby, not already looking at results) — the one condition under which
 // leaving should warn first, shared by the tab-close warning and the
 // "High Society" home-link click.
-export function isActivelyPlayingLiveGame(ws, game) {
+export function isActivelyPlayingLiveGame() {
   const gameIsOver = !$('screen-finished').classList.contains('hidden');
   return !!(ws && ws.readyState === WebSocket.OPEN && game && game.round > 0 && !gameIsOver);
 }
@@ -154,11 +167,8 @@ export function isActivelyPlayingLiveGame(ws, game) {
 // afterward (see navigateFromSidebar) can check this instead of assuming
 // the leave always happened.
 export async function onHomeLinkClick() {
-  const { ws, closeSocket } = await import('../network/websocket.js');
-  const { game } = await import('../game/gameState.js');
-  const midGame = isActivelyPlayingLiveGame(ws, game);
+  const midGame = isActivelyPlayingLiveGame();
   if (midGame) {
-    const { confirmDialog } = await import('../ui/modals.js');
     const ok = await confirmDialog('Leave the game? You can rejoin later.', 'Leave');
     if (!ok) return false;
   }
@@ -253,7 +263,7 @@ export async function refreshStatus() {
   renderForStatus(status);
 }
 
-export async function renderForStatus(status) {
+export function renderForStatus(status) {
   // The user is filling in the "watch as spectator" form — they haven't
   // opened a WebSocket yet (that only happens once they click "Watch"), so
   // the `ws` guards below don't cover this screen. Without this, a status
@@ -269,16 +279,13 @@ export async function renderForStatus(status) {
     leaveToHome();
     return;
   }
-  const { ws } = await import('../network/websocket.js');
   if (status.state === 'finished') {
     stopPolling();
-    const { renderFinished } = await import('./rematch.js');
     renderFinished(status);
     return;
   }
   if (status.state === 'lobby') {
     if (ws) return; // mid-join; the join flow owns the screen until it resolves
-    const { renderLobby } = await import('./playerList.js');
     renderLobby(status);
     startPolling();
     return;
@@ -287,7 +294,6 @@ export async function renderForStatus(status) {
   if (!ws) {
     if (!hasResigned && !reconnectAttempted) {
       reconnectAttempted = true;
-      const { attemptReconnect } = await import('../network/websocket.js');
       if (attemptReconnect()) {
         stopPolling();
         return;
@@ -396,7 +402,6 @@ export async function onCreateGame() {
     currentRoomCodeValue = status.room_code;
     history.replaceState(null, '', `?room=${encodeURIComponent(status.room_code)}`);
     lastStatusValue = status;
-    const { renderLobby } = await import('./playerList.js');
     renderLobby(status);
     startPolling();
   } catch (e) {
@@ -437,33 +442,26 @@ export async function onCopyRoomLink() {
   }, 1500);
 }
 
-export async function onJoin() {
+export function onJoin() {
   hide($('join-error'));
   const username = $('join-username').value.trim();
   if (!username) { showError($('join-error'), 'Username is required.'); return; }
-  const { setPendingJoin } = await import('../network/messages.js');
   setPendingJoin({ username, name: username });
-  const { saveProfile } = await import('../auth/profile.js');
   saveProfile(username, username); // this device's identity going forward — see loadProfile
   stopPolling();
   resetGameState(username, lastStatusValue);
-  const { seedOpponents } = await import('../game/gameState.js');
   if (lastStatusValue) seedOpponents(lastStatusValue, username);
-  const { connectPlayerSocket } = await import('../network/websocket.js');
   connectPlayerSocket();
 }
 
-export async function onSpectateJoin() {
+export function onSpectateJoin() {
   hide($('spectate-error'));
   const username = $('spectate-username').value.trim();
   if (!username) { showError($('spectate-error'), 'Username is required.'); return; }
-  const { setPendingSpectate } = await import('../network/messages.js');
   setPendingSpectate({ username, name: username });
-  const { saveProfile } = await import('../auth/profile.js');
   saveProfile(username, username); // this device's identity going forward — see loadProfile
   stopPolling();
   resetGameState(null, lastStatusValue);
-  const { seedOpponents, applyRoomDisplaySettings, game } = await import('../game/gameState.js');
   fetchJSON(`/api/status?room=${encodeURIComponent(currentRoomCodeValue)}`)
     .then((status) => {
       seedOpponents(status, null);
@@ -471,9 +469,7 @@ export async function onSpectateJoin() {
       game.showLogs = status.show_logs !== false;
       applyRoomDisplaySettings();
     }).catch(() => {});
-  const { connectSpectatorSocket } = await import('../network/websocket.js');
   connectSpectatorSocket();
   showScreen('screen-spectate');
-  const { setBadge } = await import('../auth/profile.js');
   setBadge('spectating');
 }

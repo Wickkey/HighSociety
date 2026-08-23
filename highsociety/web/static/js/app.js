@@ -15,6 +15,7 @@ import {
   showHomeTile, showHomeTiles, onHomeLinkClick, navigateFromSidebar, onCreateGame, onJoinByCode,
   onCopyRoomLink, onJoin, onSpectateJoin, onChangeJoinIdentity, onChangeSpectateIdentity,
   startRoomsPolling, currentRoomCode, isActivelyPlayingLiveGame,
+  applySpectateIdentityDefaults, refreshStatus, leaveToHome, setCurrentRoomCode,
 } from './lobby/lobby.js';
 import { onAddBot } from './lobby/playerList.js';
 import { onPlayClick, onFindMatch, onMatchmakingCancel, onMatchmakingAddBots } from './lobby/matchmaking.js';
@@ -22,9 +23,7 @@ import {
   onRequestRematchClick, onCancelRematchForm, onSendRematchRequest, onAcceptRematch, onDeclineRematch,
   onStandingsTableClick,
 } from './lobby/rematch.js';
-import { game } from './game/gameState.js';
 import { onPlaceBid, onPass, onResign, onDiscardPainting, onQuickReactionClick } from './game/gameActions.js';
-import { ws } from './network/websocket.js';
 
 // Debug-only bridge, not part of the app's real API surface: lets a
 // browser console (or a Playwright page.evaluate, as used throughout this
@@ -74,21 +73,16 @@ function wireStaticHandlers() {
   $('room-link-input').addEventListener('click', (e) => e.target.select());
   $('btn-add-bot').addEventListener('click', onAddBot);
   $('btn-join').addEventListener('click', onJoin);
-  $('btn-spectate-link').addEventListener('click', async () => {
-    const { applySpectateIdentityDefaults } = await import('./lobby/lobby.js');
+  $('btn-spectate-link').addEventListener('click', () => {
     applySpectateIdentityDefaults();
     showScreen('screen-spectate-join');
   });
-  $('btn-back-to-join').addEventListener('click', async () => {
+  $('btn-back-to-join').addEventListener('click', () => {
     showScreen('screen-join');
-    const { refreshStatus } = await import('./lobby/lobby.js');
     refreshStatus();
   });
   $('btn-spectate-join').addEventListener('click', onSpectateJoin);
-  $('btn-new-game').addEventListener('click', async () => {
-    const { leaveToHome } = await import('./lobby/lobby.js');
-    leaveToHome();
-  });
+  $('btn-new-game').addEventListener('click', () => leaveToHome());
   $('connection-badge').addEventListener('click', onProfileChipClick);
   $('btn-open-account').addEventListener('click', () => { closeProfilePopover(); showAccountScreen(); });
   $('btn-account-back').addEventListener('click', () => navigateFromSidebar(() => {
@@ -139,7 +133,7 @@ function wireStaticHandlers() {
   $('btn-decline-rematch').addEventListener('click', onDeclineRematch);
 
   window.addEventListener('beforeunload', (e) => {
-    if (isActivelyPlayingLiveGame(ws, game)) {
+    if (isActivelyPlayingLiveGame()) {
       e.preventDefault();
       e.returnValue = 'Leaving now drops you from the game. There is no reconnect.';
     }
@@ -159,15 +153,13 @@ document.addEventListener('DOMContentLoaded', () => {
   // guard no-ops when window.google isn't ready yet, and the GIS
   // script's onload calls it again once it actually loads.)
   initGoogleSignIn();
-  import('./lobby/lobby.js').then((m) => {
-    m.setCurrentRoomCode(new URLSearchParams(location.search).get('room'));
-    // A returning visitor who already has a saved profile (guest or Google)
-    // skips straight past #screen-login -- only a genuinely new visitor, or
-    // someone who explicitly logged out, sees it.
-    if (loadProfile()) {
-      proceedPastLogin();
-    } else {
-      showScreen('screen-login');
-    }
-  });
+  setCurrentRoomCode(new URLSearchParams(location.search).get('room'));
+  // A returning visitor who already has a saved profile (guest or Google)
+  // skips straight past #screen-login -- only a genuinely new visitor, or
+  // someone who explicitly logged out, sees it.
+  if (loadProfile()) {
+    proceedPastLogin();
+  } else {
+    showScreen('screen-login');
+  }
 });

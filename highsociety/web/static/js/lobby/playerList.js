@@ -1,6 +1,11 @@
 // The waiting-room roster (before a game starts) and "add a bot" control.
+//
+// Circular with network/messages.js (which imports startWaitingRoomPolling
+// from here) -- safe, same reasoning as lobby.js's own note: everything
+// here is read inside a function body, never at module-evaluation time.
 import { $, hide, show, showError, showScreen } from '../utils/dom.js';
 import { fetchJSON, currentRoomCode, applyJoinIdentityDefaults } from './lobby.js';
+import { takePendingIdentifyError } from '../network/messages.js';
 
 export function renderLobby(status) {
   showScreen('screen-join');
@@ -14,10 +19,8 @@ export function renderLobby(status) {
   show($('room-link-row'));
   const names = status.joined.map((p) => `${p.name}${p.is_bot ? ' 🤖' : ''}`).join(', ') || 'nobody yet';
   $('lobby-status').textContent = `Seats filled: ${status.joined.length}/${status.seats} (${names})`;
-  import('../network/messages.js').then((m) => {
-    const err = m.takePendingIdentifyError();
-    if (err) showError($('join-error'), err);
-  });
+  const err = takePendingIdentifyError();
+  if (err) showError($('join-error'), err);
 }
 
 // Separate from the main status poll (which onJoin() stops the moment you

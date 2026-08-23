@@ -1,8 +1,22 @@
 // The finished screen (standings + trophy) and the rematch request/vote flow.
+//
+// Circular import note (see network/messages.js's own comment for the full
+// reasoning): network/messages.js imports handleRematchMessage from this
+// file, and network/websocket.js imports from messages.js -- so this file
+// importing `ws` back from websocket.js is a cycle, but the same safe shape
+// used throughout this module graph, since `ws` is only ever read inside a
+// function body here, never at this module's own top-level evaluation.
+// game/gameState.js, game/gameEvents.js, and game/gameRenderer.js import
+// nothing from this file, so those three imports below are plain, ordinary,
+// non-circular static imports.
 import { $, hide, show, showError, showScreen } from '../utils/dom.js';
 import { escapeHtml } from '../utils/formatting.js';
 import { clearRejoinInfo, currentRoomCode, fetchJSON } from './lobby.js';
 import { openProfileModal } from '../ui/modals.js';
+import { ws } from '../network/websocket.js';
+import { game, resetGameState, seedOpponents } from '../game/gameState.js';
+import { ensureGameScreenVisible } from '../game/gameEvents.js';
+import { renderOpponents } from '../game/gameRenderer.js';
 
 // Rematch panel state on the finished screen: null while no vote is
 // underway, else {requestedBy, botMix, votes} mirroring web_server.py's
@@ -73,9 +87,7 @@ export function renderFinished(status) {
 // to actually request/vote on a rematch over, so this hides the whole
 // panel for anyone else rather than showing controls that couldn't do
 // anything.
-export async function renderRematchPanel() {
-  const { ws } = await import('../network/websocket.js');
-  const { game } = await import('../game/gameState.js');
+export function renderRematchPanel() {
   const panel = $('rematch-panel');
   if (!ws || ws.readyState !== WebSocket.OPEN || !game.myUsername) {
     hide(panel);
@@ -156,19 +168,16 @@ export function onSendRematchRequest() {
   sendRematchRequest(botMix);
 }
 
-async function sendRematchRequest(botMix) {
+function sendRematchRequest(botMix) {
   hide($('rematch-bot-form'));
-  const { ws } = await import('../network/websocket.js');
   ws.send(JSON.stringify({ message_type: 'REMATCH_REQUEST', data: { bot_mix: botMix } }));
 }
 
-export async function onAcceptRematch() {
-  const { ws } = await import('../network/websocket.js');
+export function onAcceptRematch() {
   ws.send(JSON.stringify({ message_type: 'REMATCH_VOTE', data: { accept: true } }));
 }
 
-export async function onDeclineRematch() {
-  const { ws } = await import('../network/websocket.js');
+export function onDeclineRematch() {
   ws.send(JSON.stringify({ message_type: 'REMATCH_VOTE', data: { accept: false } }));
 }
 
@@ -186,7 +195,7 @@ function showRematchDeclinedNotice(declinedBy) {
 // REMATCH_STARTING -- kept as one entry point so messages.js doesn't need
 // to know these three cases' individual handling, just that they're
 // "rematch messages."
-export async function handleRematchMessage(msg) {
+export function handleRematchMessage(msg) {
   if (msg.message_type === 'REMATCH_UPDATE') {
     currentRematch = { requestedBy: msg.data.requested_by, botMix: msg.data.bot_mix, votes: msg.data.votes };
     renderRematchPanel();
@@ -199,18 +208,14 @@ export async function handleRematchMessage(msg) {
   }
   // REMATCH_STARTING
   currentRematch = null;
-  const { game, resetGameState } = await import('../game/gameState.js');
   const myUsername = game.myUsername;
   resetGameState(myUsername, null);
   // Resign works anytime once in a game (see gameActions.js's onResign) --
   // re-enable it for the fresh game immediately rather than waiting for
   // its first PLAYER_STATE/PLAYER_MOVE.
   $('btn-resign').disabled = false;
-  const { ensureGameScreenVisible } = await import('../game/gameEvents.js');
   ensureGameScreenVisible(false);
-  fetchJSON(`/api/status?room=${encodeURIComponent(currentRoomCode())}`).then(async (status) => {
-    const { seedOpponents } = await import('../game/gameState.js');
-    const { renderOpponents } = await import('../game/gameRenderer.js');
+  fetchJSON(`/api/status?room=${encodeURIComponent(currentRoomCode())}`).then((status) => {
     seedOpponents(status, myUsername);
     renderOpponents(false);
   }).catch(() => {});
