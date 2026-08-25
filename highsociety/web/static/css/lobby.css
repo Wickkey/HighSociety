@@ -177,6 +177,17 @@
   gap: 0.8rem;
   margin-top: 1.2rem;
 }
+/* 6 metrics (Part F) don't fit one flex row the way the original 3 did --
+   wraps into a 3-column grid (2 rows) instead of squeezing every card
+   ever-narrower. */
+.account-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  flex-wrap: unset;
+}
+@media (max-width: 480px) {
+  .account-stats-grid { grid-template-columns: repeat(2, 1fr); }
+}
 .account-stat {
   flex: 1;
   display: flex;

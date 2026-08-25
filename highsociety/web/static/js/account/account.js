@@ -75,6 +75,12 @@ async function loadAccountStats() {
     $('account-stat-games').textContent = stats.games_played;
     $('account-stat-wins').textContent = stats.wins;
     $('account-stat-winrate').textContent = `${Math.round(stats.win_rate * 100)}%`;
+    // null for a player whose only games predate the game_results table
+    // (see get_player_profile_stats' own docstring) -- an em dash reads
+    // as "no data" rather than a misleading 0.
+    $('account-stat-avg-placement').textContent = stats.avg_placement != null ? stats.avg_placement.toFixed(1) : '—';
+    $('account-stat-avg-points').textContent = stats.avg_points != null ? stats.avg_points.toFixed(1) : '—';
+    $('account-stat-avg-money').textContent = stats.avg_money_remaining != null ? stats.avg_money_remaining.toFixed(1) : '—';
     row.classList.remove('loading');
   } catch (e) { /* 404: no games recorded yet -- leave the skeleton showing */ }
 }

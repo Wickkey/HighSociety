@@ -1697,11 +1697,14 @@ def test_profile_endpoint_404s_for_an_unknown_username(monkeypatch):
 
 
 def test_profile_endpoint_returns_stats_and_elo(monkeypatch):
-    monkeypatch.setattr(game_history, "get_player_profile_stats",
-                         lambda username: {"games_played": 4, "wins": 3, "win_rate": 0.75})
+    monkeypatch.setattr(game_history, "get_player_profile_stats", lambda username: {
+        "games_played": 4, "wins": 3, "win_rate": 0.75,
+        "avg_placement": 1.5, "avg_points": 12.0, "avg_money_remaining": 6.0,
+    })
     monkeypatch.setattr(game_history, "get_player_elo", lambda username: 1032)
     resp = web_server.app.test_client().get("/api/profile/alice")
     assert resp.status_code == 200
     assert resp.get_json() == {
-        "username": "alice", "games_played": 4, "wins": 3, "win_rate": 0.75, "elo": 1032,
+        "username": "alice", "games_played": 4, "wins": 3, "win_rate": 0.75,
+        "avg_placement": 1.5, "avg_points": 12.0, "avg_money_remaining": 6.0, "elo": 1032,
     }

@@ -542,14 +542,22 @@ def get_player_achievements(username: str) -> list:
 
 def get_player_profile_stats(username: str) -> Optional[dict]:
     """
-    {"games_played", "wins", "win_rate"} for any known username, guest or
-    Google-linked -- unlike achievements, profile stats aren't gated to
-    linked accounts, since this is just a factual record of games already
-    played under that exact username, nothing tied to a persistent
-    identity guarantee. None if the username has no players row at all
-    (never played, or no database) -- distinguishes "never played" from
-    "played zero games" for the caller, though today's UI renders both as
-    an empty profile either way.
+    {"games_played", "wins", "win_rate", "avg_placement", "avg_points",
+    "avg_money_remaining"} for any known username, guest or Google-linked
+    -- unlike achievements, profile stats aren't gated to linked accounts,
+    since this is just a factual record of games already played under
+    that exact username, nothing tied to a persistent identity guarantee.
+    None if the username has no players row at all (never played, or no
+    database) -- distinguishes "never played" from "played zero games"
+    for the caller, though today's UI renders both as an empty profile
+    either way.
+
+    The three averages come from `game_results` (added after
+    `player_games`) rather than `player_games` itself -- a player whose
+    only games predate that table's introduction has real games_played/
+    wins here but None for all three averages, since there's genuinely no
+    placement/points/money data recorded for those older rows. The
+    caller/UI shows that as an empty stat, not a wrong zero.
     """
     if not is_configured():
         return None
@@ -571,7 +579,18 @@ def get_player_profile_stats(username: str) -> Optional[dict]:
             )
             games_played, wins = cur.fetchone()
             win_rate = (wins / games_played) if games_played else 0.0
-            return {"games_played": games_played, "wins": wins, "win_rate": win_rate}
+            cur.execute(
+                "SELECT avg(placement), avg(final_score), avg(final_money) "
+                "FROM game_results WHERE user_id = %s",
+                (player_id,),
+            )
+            avg_placement, avg_points, avg_money_remaining = cur.fetchone()
+            return {
+                "games_played": games_played, "wins": wins, "win_rate": win_rate,
+                "avg_placement": float(avg_placement) if avg_placement is not None else None,
+                "avg_points": float(avg_points) if avg_points is not None else None,
+                "avg_money_remaining": float(avg_money_remaining) if avg_money_remaining is not None else None,
+            }
     except Exception as e:  # noqa: BLE001
         LoggingManager.warning(f"game_history.get_player_profile_stats failed: {e}")
         return None

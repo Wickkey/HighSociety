@@ -812,19 +812,44 @@ def test_get_player_profile_stats_returns_none_for_an_unknown_username(database_
 def test_get_player_profile_stats_computes_win_rate(database_url):
     game_history._schema_ready = True
     conn, cursor = _fake_connection()
-    cursor.fetchone.side_effect = iter([(1,), (4, 3)])  # player id, then (games_played, wins)
+    cursor.fetchone.side_effect = iter([
+        (1,),              # player id
+        (4, 3),            # (games_played, wins)
+        (2.5, 10.0, 8.0),  # (avg_placement, avg_points, avg_money_remaining)
+    ])
     with patch.object(game_history, "_connect", return_value=conn):
         result = game_history.get_player_profile_stats("alice")
-    assert result == {"games_played": 4, "wins": 3, "win_rate": 0.75}
+    assert result == {
+        "games_played": 4, "wins": 3, "win_rate": 0.75,
+        "avg_placement": 2.5, "avg_points": 10.0, "avg_money_remaining": 8.0,
+    }
 
 
 def test_get_player_profile_stats_zero_games_has_zero_win_rate_not_a_division_error(database_url):
     game_history._schema_ready = True
     conn, cursor = _fake_connection()
-    cursor.fetchone.side_effect = iter([(1,), (0, 0)])
+    cursor.fetchone.side_effect = iter([(1,), (0, 0), (None, None, None)])
     with patch.object(game_history, "_connect", return_value=conn):
         result = game_history.get_player_profile_stats("alice")
-    assert result == {"games_played": 0, "wins": 0, "win_rate": 0.0}
+    assert result == {
+        "games_played": 0, "wins": 0, "win_rate": 0.0,
+        "avg_placement": None, "avg_points": None, "avg_money_remaining": None,
+    }
+
+
+def test_get_player_profile_stats_averages_are_none_when_no_game_results_rows_exist(database_url):
+    """A player whose only games predate the game_results table (added
+    after player_games) has real games_played/wins but no averages to
+    report -- None, not a wrong 0."""
+    game_history._schema_ready = True
+    conn, cursor = _fake_connection()
+    cursor.fetchone.side_effect = iter([(1,), (5, 2), (None, None, None)])
+    with patch.object(game_history, "_connect", return_value=conn):
+        result = game_history.get_player_profile_stats("alice")
+    assert result["games_played"] == 5
+    assert result["avg_placement"] is None
+    assert result["avg_points"] is None
+    assert result["avg_money_remaining"] is None
 
 
 def test_get_player_profile_stats_failure_is_caught_not_raised(database_url):

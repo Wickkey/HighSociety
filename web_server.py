@@ -772,6 +772,9 @@ def api_profile(username):
         "games_played": stats["games_played"],
         "wins": stats["wins"],
         "win_rate": stats["win_rate"],
+        "avg_placement": stats["avg_placement"],
+        "avg_points": stats["avg_points"],
+        "avg_money_remaining": stats["avg_money_remaining"],
         "elo": game_history.get_player_elo(username),
     })
 
