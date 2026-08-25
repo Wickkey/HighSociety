@@ -1,3 +1,4 @@
+import datetime
 import random
 import time
 from typing import Optional, Union
@@ -503,6 +504,7 @@ class PlayGame():
             round_number=len(self.auction_rounds) + 1,
             auction_type="normal",
             card=summarize_card(status_card),
+            starting_money={p.username: p.money_left() for p in self.players},
         )
 
         num_players_in_auction = self._count_active_auction_players()
@@ -608,6 +610,8 @@ class PlayGame():
         record.recipient = self.players[winner_id].username if winner_id != -1 else None
         record.money_spent = {p.username: p.current_bid_value for p in self.players}
         record.cards_spent = {p.username: [c.value for c in p.current_money_card_bids] for p in self.players}
+        record.ended_at = datetime.datetime.now(datetime.timezone.utc)
+        record.ending_money = {p.username: p.money_left() for p in self.players}
         self.auction_rounds.append(record)
         self._broadcast_auction_result(record)
         self._record_auction_history_snapshot()
@@ -632,11 +636,14 @@ class PlayGame():
             round_number=len(self.auction_rounds) + 1,
             auction_type="disgrace",
             card=summarize_card(status_card),
+            starting_money={p.username: p.money_left() for p in self.players},
         )
 
         num_players_in_auction = self._count_active_auction_players()
         if num_players_in_auction == 0:
             self.host.send_message("⚠️ No active players for disgrace auction.")
+            record.ended_at = datetime.datetime.now(datetime.timezone.utc)
+            record.ending_money = dict(record.starting_money)  # nothing happened -- unchanged
             self.auction_rounds.append(record)
             self._broadcast_auction_result(record)
             return -1
@@ -737,6 +744,8 @@ class PlayGame():
         if loser_id == -1:
             # should not happen, but safe guard
             self.host.send_message("⚠️ Disgrace auction ended unexpectedly with no loser.")
+            record.ended_at = datetime.datetime.now(datetime.timezone.utc)
+            record.ending_money = {p.username: p.money_left() for p in self.players}
             self.auction_rounds.append(record)
             self._broadcast_auction_result(record)
             # reset auction attributes and return -1
@@ -768,6 +777,8 @@ class PlayGame():
         record.recipient = loser.username
         record.money_spent = {p.username: p.current_bid_value for p in self.players}
         record.cards_spent = {p.username: [c.value for c in p.current_money_card_bids] for p in self.players}
+        record.ended_at = datetime.datetime.now(datetime.timezone.utc)
+        record.ending_money = {p.username: p.money_left() for p in self.players}
         self.auction_rounds.append(record)
         self._broadcast_auction_result(record)
         self._record_auction_history_snapshot()

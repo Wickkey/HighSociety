@@ -307,6 +307,128 @@ def test_record_finished_game_writes_a_ratings_row_per_rated_participant(databas
     assert by_player[11][4] < 0  # bob (loser) loses
 
 
+def test_record_finished_game_populates_game_rounds_round_players_and_game_actions(database_url):
+    game_history._schema_ready = True
+    conn, cursor = _fake_connection()
+    participants = [
+        {"is_bot": False, "username": "alice", "name": "Alice", "game_username": "alice",
+         "points": 10, "money_left": 5, "is_winner": True, "eliminated": False},
+        {"is_bot": False, "username": "bob", "name": "Bob", "game_username": "bob",
+         "points": 0, "money_left": 20, "is_winner": False, "eliminated": False},
+    ]
+    auction_rounds = [{
+        "round_number": 1, "auction_type": "normal",
+        "card": {"type": "Painting", "value": 5, "multiplier": 1, "is_green": False, "description": "x"},
+        "events": [
+            {"player": "alice", "action": "bid", "amount": 5, "cards": [5],
+             "timestamp": "2026-01-01T00:00:00+00:00"},
+            {"player": "bob", "action": "pass", "amount": None, "cards": None,
+             "timestamp": "2026-01-01T00:00:01+00:00"},
+        ],
+        "recipient": "alice",
+        "money_spent": {"alice": 5, "bob": 0},
+        "cards_spent": {"alice": [5], "bob": []},
+        "started_at": "2026-01-01T00:00:00+00:00",
+        "ended_at": "2026-01-01T00:00:01+00:00",
+        "starting_money": {"alice": 10, "bob": 20},
+        "ending_money": {"alice": 5, "bob": 20},
+    }]
+    with patch.object(game_history, "_connect", return_value=conn):
+        game_history.record_finished_game(
+            room_code="ABCDE", seats=2, bot_mix=[],
+            started_at=datetime.datetime.now(datetime.timezone.utc),
+            finished_at=datetime.datetime.now(datetime.timezone.utc),
+            participants=participants, auction_rounds=auction_rounds,
+        )
+
+    queries_and_params = [(call.args[0], call.args[1]) for call in cursor.execute.call_args_list]
+
+    card_lookup = [(q, p) for q, p in queries_and_params if "SELECT card_id FROM cards" in q]
+    assert card_lookup == [("SELECT card_id FROM cards WHERE type = %s AND value = %s LIMIT 1", ("Painting", 5))]
+
+    game_id, round_number, card_id, winner_id, winning_bid, started_at, ended_at = next(
+        p for q, p in queries_and_params if "INSERT INTO game_rounds" in q)
+    assert round_number == 1
+    assert winning_bid == 5
+    assert winner_id is not None  # alice's resolved player_id
+
+    round_players_inserts = [p for q, p in queries_and_params if "INSERT INTO round_players" in q]
+    assert len(round_players_inserts) == 2
+    results = sorted(p[6] for p in round_players_inserts)  # (..., result) -- index 6
+    assert results == ["lost", "won"]
+
+    game_actions_inserts = [p for q, p in queries_and_params if "INSERT INTO game_actions" in q]
+    assert len(game_actions_inserts) == 2
+    action_types = sorted(p[2] for p in game_actions_inserts)  # (..., action_type, ...) -- index 2
+    assert action_types == ["BID", "PASS"]
+
+
+def test_record_finished_game_leaves_winning_bid_null_for_a_disgrace_card(database_url):
+    """Per the original request: a disgrace card's "recipient" passed
+    first and got stuck with it -- their money_spent is always 0 by
+    AuctionRecord's own design, which isn't a real winning bid."""
+    game_history._schema_ready = True
+    conn, cursor = _fake_connection()
+    participants = [
+        {"is_bot": False, "username": "alice", "name": "Alice", "game_username": "alice",
+         "points": 0, "money_left": 20, "is_winner": True, "eliminated": False},
+    ]
+    auction_rounds = [{
+        "round_number": 1, "auction_type": "disgrace",
+        "card": {"type": "FauxPas", "value": 0, "multiplier": 1, "is_green": False, "description": "x"},
+        "events": [], "recipient": "alice",
+        "money_spent": {"alice": 0}, "cards_spent": {"alice": []},
+        "started_at": "2026-01-01T00:00:00+00:00", "ended_at": "2026-01-01T00:00:01+00:00",
+        "starting_money": {"alice": 20}, "ending_money": {"alice": 20},
+    }]
+    with patch.object(game_history, "_connect", return_value=conn):
+        game_history.record_finished_game(
+            room_code="ABCDE", seats=1, bot_mix=[],
+            started_at=datetime.datetime.now(datetime.timezone.utc),
+            finished_at=datetime.datetime.now(datetime.timezone.utc),
+            participants=participants, auction_rounds=auction_rounds,
+        )
+    game_rounds_insert = next(call.args[1] for call in cursor.execute.call_args_list
+                               if "INSERT INTO game_rounds" in call.args[0])
+    winning_bid = game_rounds_insert[4]
+    assert winning_bid is None
+
+
+def test_record_finished_game_skips_round_players_and_actions_for_an_unresolvable_bot(database_url):
+    """A bot with no known difficulty has no resolvable player_id (see the
+    existing legacy-bot test above) -- its round/action data is simply
+    skipped, not written with a dangling player_id."""
+    game_history._schema_ready = True
+    conn, cursor = _fake_connection()
+    participants = [
+        {"is_bot": True, "username": None, "name": "Marble", "game_username": "marble",
+         "points": 5, "money_left": 0, "is_winner": False, "eliminated": True},
+    ]
+    auction_rounds = [{
+        "round_number": 1, "auction_type": "normal",
+        "card": {"type": "Painting", "value": 3, "multiplier": 1, "is_green": False, "description": "x"},
+        "events": [{"player": "marble", "action": "pass", "amount": None, "cards": None,
+                    "timestamp": "2026-01-01T00:00:00+00:00"}],
+        "recipient": None,
+        "money_spent": {"marble": 0},
+        "cards_spent": {"marble": []},
+        "started_at": "2026-01-01T00:00:00+00:00", "ended_at": "2026-01-01T00:00:01+00:00",
+        "starting_money": {"marble": 10}, "ending_money": {"marble": 10},
+    }]
+    with patch.object(game_history, "_connect", return_value=conn):
+        game_history.record_finished_game(
+            room_code="ABCDE", seats=1, bot_mix=["greedy"],
+            started_at=datetime.datetime.now(datetime.timezone.utc),
+            finished_at=datetime.datetime.now(datetime.timezone.utc),
+            participants=participants, auction_rounds=auction_rounds,
+        )
+
+    queries = [call.args[0] for call in cursor.execute.call_args_list]
+    assert sum("INSERT INTO game_rounds" in q for q in queries) == 1  # the round itself is still recorded
+    assert not any("INSERT INTO round_players" in q for q in queries)
+    assert not any("INSERT INTO game_actions" in q for q in queries)
+
+
 def test_record_finished_game_failure_is_caught_not_raised(database_url):
     game_history._schema_ready = True
     with patch.object(game_history, "_connect", side_effect=RuntimeError("unreachable")):

@@ -43,6 +43,8 @@ def test_to_dict_is_json_serializable_end_to_end():
     record.recipient = "bob"
     record.money_spent = {"alice": 4, "bob": 0}
     record.cards_spent = {"alice": [4], "bob": []}
+    record.starting_money = {"alice": 20, "bob": 20}
+    record.ending_money = {"alice": 16, "bob": 20}
 
     payload = record.to_dict()
     reparsed = json.loads(json.dumps(payload))  # would raise if anything weren't JSON-safe
@@ -52,12 +54,22 @@ def test_to_dict_is_json_serializable_end_to_end():
     assert reparsed["recipient"] == "bob"
     assert reparsed["money_spent"] == {"alice": 4, "bob": 0}
     assert reparsed["cards_spent"] == {"alice": [4], "bob": []}
-    assert reparsed["events"] == [
+    assert reparsed["starting_money"] == {"alice": 20, "bob": 20}
+    assert reparsed["ending_money"] == {"alice": 16, "bob": 20}
+    assert reparsed["started_at"]  # a real ISO timestamp string, exact value not meaningful here
+    assert reparsed["ended_at"] is None  # never explicitly set in this test
+    events = [{k: v for k, v in e.items() if k != "timestamp"} for e in reparsed["events"]]
+    assert events == [
         {"player": "alice", "action": "bid", "amount": 4, "cards": [4]},
         {"player": "bob", "action": "pass", "amount": None, "cards": None},
     ]
+    assert all(e["timestamp"] for e in reparsed["events"])
 
 
 def test_bid_event_to_dict():
     event = BidEvent(player="alice", action="bid", amount=10, cards=[10])
-    assert event.to_dict() == {"player": "alice", "action": "bid", "amount": 10, "cards": [10]}
+    payload = event.to_dict()
+    assert {k: v for k, v in payload.items() if k != "timestamp"} == {
+        "player": "alice", "action": "bid", "amount": 10, "cards": [10],
+    }
+    assert payload["timestamp"]  # a real ISO timestamp string

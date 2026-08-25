@@ -9,6 +9,7 @@ See PlayGame.get_auction_history() for the local/embedded API, and
 BOT_API.md for how this same data arrives over the network as an
 AUCTION_RESULT message for a remote bot.
 """
+import datetime
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -23,9 +24,16 @@ class BidEvent:
     action: str                    # "bid" | "pass" | "fold" | "quit"
     amount: Optional[int] = None   # the player's total bid *after* this action; only set when action == "bid"
     cards: Optional[list] = None   # the money card values comprising `amount`; only set when action == "bid"
+    # Wall-clock time this action was recorded -- defaulted here (rather
+    # than passed in at every one of AuctionRecord.add_event's call sites)
+    # so this stays a pure, zero-effort addition for game_history.py's
+    # game_actions table without touching the live gameplay loop's own
+    # logic anywhere.
+    timestamp: datetime.datetime = field(default_factory=lambda: datetime.datetime.now(datetime.timezone.utc))
 
     def to_dict(self) -> dict:
-        return {"player": self.player, "action": self.action, "amount": self.amount, "cards": self.cards}
+        return {"player": self.player, "action": self.action, "amount": self.amount, "cards": self.cards,
+                "timestamp": self.timestamp.isoformat()}
 
 
 @dataclass
@@ -64,6 +72,19 @@ class AuctionRecord:
             card values behind their money_spent total, e.g.
             {"alice": [], "bob": [3, 5]}. Same rules as money_spent — a
             player's own list always sums to their own money_spent entry.
+        started_at/ended_at: wall-clock bounds of this auction -- set here
+            (started_at defaults at construction, ended_at explicitly by
+            gameplay.py right before this record is appended to
+            PlayGame.auction_rounds) rather than derived from `events`
+            since an auction can legitimately have zero events (see
+            normal_card_auction's "no active bidders" / disgrace_card_
+            auction's "no active players" early exits).
+        starting_money/ending_money: every player's username mapped to
+            their money_left() at those same two boundaries -- lets
+            game_history.py's round_players compute each participant's
+            actual balance change for the round without re-deriving it
+            from money_spent (which only ever reflects THIS round's
+            forfeit/payment, not their running total).
     """
 
     round_number: int
@@ -73,6 +94,10 @@ class AuctionRecord:
     recipient: Optional[str] = None
     money_spent: dict = field(default_factory=dict)
     cards_spent: dict = field(default_factory=dict)
+    started_at: datetime.datetime = field(default_factory=lambda: datetime.datetime.now(datetime.timezone.utc))
+    ended_at: Optional[datetime.datetime] = None
+    starting_money: dict = field(default_factory=dict)
+    ending_money: dict = field(default_factory=dict)
 
     def add_event(self, player: str, action: str, amount: Optional[int] = None, cards: Optional[list] = None) -> None:
         self.events.append(BidEvent(player=player, action=action, amount=amount, cards=cards))
@@ -86,6 +111,10 @@ class AuctionRecord:
             "recipient": self.recipient,
             "money_spent": self.money_spent,
             "cards_spent": self.cards_spent,
+            "started_at": self.started_at.isoformat(),
+            "ended_at": self.ended_at.isoformat() if self.ended_at else None,
+            "starting_money": self.starting_money,
+            "ending_money": self.ending_money,
         }
 
 

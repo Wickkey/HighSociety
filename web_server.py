@@ -329,11 +329,18 @@ def _record_game_history(room: "GameRoom", game: PlayGame, started_at: datetime.
             # per-difficulty player_id. None for a human or for any of the
             # other bot classes (greedy/pass/capped, not offered here).
             "difficulty": getattr(player, "difficulty", None),
+            # Always the real per-game username (bot or human) -- unlike
+            # "username" above, which is deliberately None for a bot. Only
+            # used inside record_finished_game to attribute auction_rounds
+            # events/recipients (which always name the real username) back
+            # to a resolved player_id; never itself persisted.
+            "game_username": player.username,
         })
+    auction_rounds = game.get_auction_history()
     achievement_unlocks = achievements.detect_per_game_achievements(
         final_standings=game.final_standings,
         winner_usernames=winner_usernames,
-        auction_rounds=game.get_auction_history(),
+        auction_rounds=auction_rounds,
         bot_mix=room.bot_mix,
     )
     game_history.record_finished_game_async(
@@ -342,6 +349,7 @@ def _record_game_history(room: "GameRoom", game: PlayGame, started_at: datetime.
         bot_mix=room.bot_mix,
         started_at=started_at,
         achievement_unlocks=achievement_unlocks,
+        auction_rounds=auction_rounds,
         finished_at=datetime.datetime.now(datetime.timezone.utc),
         participants=participants,
         host_username=room.host_username,

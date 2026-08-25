@@ -524,9 +524,14 @@ def test_auction_result_is_broadcast_to_players_and_spectators_with_structured_d
         assert set(record["card"].keys()) == {"type", "value", "multiplier", "is_green", "description"}
         assert isinstance(record["events"], list)
         for event in record["events"]:
-            assert set(event.keys()) == {"player", "action", "amount", "cards"}
+            assert set(event.keys()) == {"player", "action", "amount", "cards", "timestamp"}
             assert event["action"] in ("bid", "pass", "fold", "quit")
+            assert isinstance(event["timestamp"], str) and event["timestamp"]
         assert isinstance(record["money_spent"], dict)
         assert all(isinstance(v, int) for v in record["money_spent"].values())
         assert isinstance(record["cards_spent"], dict)
         assert all(isinstance(v, list) for v in record["cards_spent"].values())
+        assert isinstance(record["started_at"], str) and record["started_at"]
+        assert record["ended_at"] is None or isinstance(record["ended_at"], str)
+        assert isinstance(record["starting_money"], dict)
+        assert isinstance(record["ending_money"], dict)

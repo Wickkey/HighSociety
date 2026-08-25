@@ -231,6 +231,9 @@ _SCHEMA_STATEMENTS = [
         ('game_results', 'One row per (game, participant) shaped for "show me a player''s last N games".'),
         ('ratings', 'Append-only Elo rating history, one row per rated participant per game.'),
         ('cards', 'Metadata mirror of the fixed status-card set -- one row per physical card, not deduplicated by design/value.'),
+        ('game_rounds', 'One row per auction/round played, derived from PlayGame.get_auction_history() at game-end.'),
+        ('round_players', 'One row per (round, participant) -- the money/result detail behind each game_rounds row.'),
+        ('game_actions', 'One row per bid/pass/fold/quit action across every round, derived from the same auction history.'),
         ('meta', 'This table.')
     ON CONFLICT (table_name) DO NOTHING
     """,
@@ -251,6 +254,59 @@ _SCHEMA_STATEMENTS = [
         AS v(username, difficulty) ON p.username = v.username
     ON CONFLICT (player_id) DO NOTHING
     """,
+
+    # Derived entirely from PlayGame.get_auction_history() at game-end (see
+    # _record_auction_rounds) -- no live-path DB writes anywhere. card_id
+    # is picked by matching (type, value) against `cards`; for a repeated
+    # card (the 3 identical Prestige cards) this is genuinely arbitrary --
+    # the game's own data never tags *which* physical card a given auction
+    # drew, so there's no more specific truth available to recover.
+    """
+    CREATE TABLE IF NOT EXISTS game_rounds (
+        id SERIAL PRIMARY KEY,
+        game_id INTEGER NOT NULL REFERENCES games(id) ON DELETE CASCADE,
+        round_number INTEGER NOT NULL,
+        card_id INTEGER REFERENCES cards(card_id),
+        winner_id INTEGER REFERENCES players(id),
+        winning_bid INTEGER,
+        started_at TIMESTAMPTZ,
+        ended_at TIMESTAMPTZ
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_game_rounds_game_id ON game_rounds (game_id)",
+
+    """
+    CREATE TABLE IF NOT EXISTS round_players (
+        game_id INTEGER NOT NULL REFERENCES games(id) ON DELETE CASCADE,
+        round_id INTEGER NOT NULL REFERENCES game_rounds(id) ON DELETE CASCADE,
+        player_id INTEGER NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+        starting_money INTEGER,
+        ending_money INTEGER,
+        amount_paid INTEGER,
+        result TEXT NOT NULL,
+        PRIMARY KEY (round_id, player_id)
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_round_players_player_id ON round_players (player_id)",
+
+    # `round` (not `round_number`, matching the request text verbatim) --
+    # this table is the raw per-action log; game_rounds already owns the
+    # per-auction summary, so "round" here is just enough context to
+    # locate which auction a given action belongs to without a FK into
+    # game_rounds (rounds are 1-indexed per game, not given their own
+    # stable id until game_rounds is built from the same history).
+    """
+    CREATE TABLE IF NOT EXISTS game_actions (
+        id SERIAL PRIMARY KEY,
+        game_id INTEGER NOT NULL REFERENCES games(id) ON DELETE CASCADE,
+        player_id INTEGER NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+        action_type TEXT NOT NULL,
+        amount INTEGER,
+        round INTEGER NOT NULL,
+        timestamp TIMESTAMPTZ NOT NULL
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_game_actions_game_id ON game_actions (game_id)",
 ]
 
 _schema_ready = False
@@ -613,11 +669,90 @@ def rename_player(old_username: str, new_username: str) -> bool:
             conn.close()
 
 
+def _record_auction_rounds(cur, game_id: int, auction_rounds: list, player_id_by_username: dict) -> None:
+    """
+    Populates game_rounds/round_players/game_actions from `auction_rounds`
+    (the same AuctionRecord.to_dict()-shaped list PlayGame.get_auction_
+    history() returns) -- called once, at game-end, from data the engine
+    already built for BOT_API.md's AUCTION_RESULT feed. No live-path DB
+    writes anywhere; this only ever runs after the whole game is over.
+
+    `player_id_by_username`: real per-game username -> player_id (see
+    record_finished_game's own docstring on `game_username`) -- an entry
+    missing or mapping to None (a bot with no known difficulty) means that
+    round/action simply can't be attributed to anyone, so it's skipped
+    rather than written with a dangling/NULL player_id.
+    """
+    for record in auction_rounds:
+        card = record["card"]
+        # Matched by (type, value), not a stored card identity -- for a
+        # repeated card (the 3 identical Prestige cards) any matching row
+        # is equally correct, since the game's own data never tags which
+        # *specific* physical card a given auction drew.
+        cur.execute("SELECT card_id FROM cards WHERE type = %s AND value = %s LIMIT 1",
+                    (card["type"], card["value"]))
+        row = cur.fetchone()
+        card_id = row[0] if row is not None else None
+
+        recipient = record.get("recipient")
+        winner_id = player_id_by_username.get(recipient) if recipient else None
+        # Null for a disgrace card by design (per the original request) --
+        # a disgrace "recipient" is whoever passed first and got stuck
+        # with it, not a highest bidder; their own money_spent is always 0
+        # (AuctionRecord's own docstring), which isn't a real winning bid
+        # to record, just the accident of how a disgrace auction settles.
+        winning_bid = None
+        if recipient and record.get("auction_type") == "normal":
+            winning_bid = (record.get("money_spent") or {}).get(recipient)
+
+        cur.execute(
+            """
+            INSERT INTO game_rounds (game_id, round_number, card_id, winner_id, winning_bid, started_at, ended_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            RETURNING id
+            """,
+            (game_id, record["round_number"], card_id, winner_id, winning_bid,
+             record.get("started_at"), record.get("ended_at")),
+        )
+        round_id = cur.fetchone()[0]
+
+        starting_money = record.get("starting_money") or {}
+        ending_money = record.get("ending_money") or {}
+        money_spent = record.get("money_spent") or {}
+        for username in set(starting_money) | set(ending_money) | set(money_spent):
+            player_id = player_id_by_username.get(username)
+            if player_id is None:
+                continue
+            cur.execute(
+                """
+                INSERT INTO round_players
+                    (game_id, round_id, player_id, starting_money, ending_money, amount_paid, result)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                """,
+                (game_id, round_id, player_id, starting_money.get(username), ending_money.get(username),
+                 money_spent.get(username), "won" if username == recipient else "lost"),
+            )
+
+        for event in record.get("events") or []:
+            player_id = player_id_by_username.get(event["player"])
+            if player_id is None:
+                continue
+            cur.execute(
+                """
+                INSERT INTO game_actions (game_id, player_id, action_type, amount, round, timestamp)
+                VALUES (%s, %s, %s, %s, %s, %s)
+                """,
+                (game_id, player_id, event["action"].upper(), event.get("amount"),
+                 record["round_number"], event.get("timestamp")),
+            )
+
+
 def record_finished_game(*, room_code: str, seats: int, bot_mix: list,
                           started_at: datetime.datetime, finished_at: datetime.datetime,
                           participants: list, achievement_unlocks: Optional[dict] = None,
                           host_username: Optional[str] = None, time_control: Optional[int] = None,
-                          is_finished_successfully: bool = True) -> None:
+                          is_finished_successfully: bool = True,
+                          auction_rounds: Optional[list] = None) -> None:
     """
     `participants`: one dict per seat, already reduced to exactly what this
     module needs — see web_server.py's call site for how it's built from
@@ -631,7 +766,15 @@ def record_finished_game(*, room_code: str, seats: int, bot_mix: list,
 
     Each participant: {"is_bot": bool, "username": str | None, "name": str,
                         "points": int, "money_left": int, "is_winner": bool,
-                        "eliminated": bool, "difficulty": str | None}
+                        "eliminated": bool, "difficulty": str | None,
+                        "game_username": str}
+    `game_username` is always the real per-game username, bot or human
+    (unlike `username`, which stays None for a bot) -- used only inside
+    this function to attribute `auction_rounds` events/recipients (which
+    always name the real username) back to a resolved player_id; never
+    itself written anywhere. Optional for backward compatibility: a caller
+    that omits it (or omits `auction_rounds` entirely) just can't have its
+    bot seats' actions/rounds attributed -- everything else is unaffected.
     Exactly one of (is_bot False + username set) or (is_bot True + username
     None) holds per participant. `difficulty` ("easy"/"medium"/"hard") is
     only meaningful when is_bot is True — see the `bots` table: a bot
@@ -672,6 +815,12 @@ def record_finished_game(*, room_code: str, seats: int, bot_mix: list,
     `is_finished_successfully`: False only for the crash/abort path (see
     web_server.py's run_game) -- True is the default because every
     pre-existing call site is a clean finish.
+
+    `auction_rounds`: the same list PlayGame.get_auction_history() returns
+    (each entry AuctionRecord.to_dict()-shaped) -- populates game_rounds/
+    round_players/game_actions. None/empty (the default, for any caller
+    that predates this or a crashed game with no history) just skips that
+    entirely; nothing else here depends on it.
     """
     if not is_configured():
         return
@@ -737,6 +886,7 @@ def record_finished_game(*, room_code: str, seats: int, bot_mix: list,
             elo_before_by_username = {}  # username -> rating before this game, for the ratings audit row
             seat_player_ids = []  # in participant order -- becomes player_1..player_5 below
             winner_player_id = None  # first winner only -- see this function's own docstring on ties
+            player_id_by_game_username = {}  # real per-game username (bot or human) -> player_id
             for index, p in enumerate(participants):
                 player_id = None
                 google_id = None
@@ -757,6 +907,8 @@ def record_finished_game(*, room_code: str, seats: int, bot_mix: list,
                         (1 if p["is_winner"] else 0, player_id),
                     )
                 seat_player_ids.append(player_id)
+                if p.get("game_username"):
+                    player_id_by_game_username[p["game_username"]] = player_id
 
                 cur.execute(
                     """
@@ -826,6 +978,9 @@ def record_finished_game(*, room_code: str, seats: int, bot_mix: list,
                 """,
                 (winner_player_id, *seat_columns, game_id),
             )
+
+            if auction_rounds:
+                _record_auction_rounds(cur, game_id, auction_rounds, player_id_by_game_username)
     except Exception as e:  # noqa: BLE001 — see record_finished_game_async's docstring
         LoggingManager.warning(f"game_history.record_finished_game failed: {e}")
     finally:

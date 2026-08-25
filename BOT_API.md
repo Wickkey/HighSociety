@@ -113,13 +113,17 @@ player and spectator immediately after each auction concludes — you don't need
       "description": "Painting Card with value 7"
     },
     "events": [
-      {"player": "alice", "action": "bid", "amount": 5, "cards": [5]},
-      {"player": "bob", "action": "bid", "amount": 8, "cards": [3, 5]},
-      {"player": "alice", "action": "pass", "amount": null, "cards": null}
+      {"player": "alice", "action": "bid", "amount": 5, "cards": [5], "timestamp": "2026-01-01T00:00:01+00:00"},
+      {"player": "bob", "action": "bid", "amount": 8, "cards": [3, 5], "timestamp": "2026-01-01T00:00:03+00:00"},
+      {"player": "alice", "action": "pass", "amount": null, "cards": null, "timestamp": "2026-01-01T00:00:05+00:00"}
     ],
     "recipient": "bob",
     "money_spent": {"alice": 0, "bob": 8},
-    "cards_spent": {"alice": [], "bob": [3, 5]}
+    "cards_spent": {"alice": [], "bob": [3, 5]},
+    "started_at": "2026-01-01T00:00:00+00:00",
+    "ended_at": "2026-01-01T00:00:05+00:00",
+    "starting_money": {"alice": 20, "bob": 20},
+    "ending_money": {"alice": 20, "bob": 12}
   }
 }
 ```
@@ -149,6 +153,14 @@ Field reference (`data`):
 - **`cards_spent`** — every player's username mapped to the individual money card values behind
   their `money_spent` total (e.g. `[3, 5]` for a spend of `8` paid with those two cards). Each
   player's list always sums to their own `money_spent` entry.
+- **`started_at`** / **`ended_at`** — ISO-8601 wall-clock bounds of this auction. `ended_at` is
+  only ever `null` if you're somehow reading an in-progress record directly (never over the
+  network — `AUCTION_RESULT` only ever broadcasts a finished one).
+- **`starting_money`** / **`ending_money`** — every player's username mapped to their total money
+  remaining at those same two boundaries, letting you compute each player's actual balance change
+  for the round directly, without re-deriving it from `money_spent` (which only reflects this
+  round's own payment/forfeit, not a running total).
+- **`events[].timestamp`** — ISO-8601 wall-clock time that specific action was taken.
 
 ### Embedded/local equivalent
 
