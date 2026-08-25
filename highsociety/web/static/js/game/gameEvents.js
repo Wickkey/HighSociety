@@ -9,7 +9,7 @@ import {
   renderPaintingChoices, updateBidStatus, actorLabel, describeCard,
   clearMoveTimer, startMoveTimer, renderMovePanel,
 } from './gameRenderer.js';
-import { setSelectedDiscardValue } from './gameActions.js';
+import { setSelectedDiscardValue, disarmActionWatchdog } from './gameActions.js';
 import {
   enqueueEvent, showFinalGreenOverlay, showCountdownOverlay, hideCountdownOverlay, logLine,
 } from '../ui/notifications.js';
@@ -181,6 +181,10 @@ export function applyGameMessage(msg, isSpectator) {
       break;
     case 'INPUT_ERROR':
       if (!isSpectator) {
+        // Proves the server received *something* from us for this prompt
+        // (even though it rejected it) -- just as much a confirmed
+        // delivery as an accepted one, so the watchdog's job here is done.
+        disarmActionWatchdog();
         showError_moveError(msg.prompt);
         // onPlaceBid() already marked game.myPrompt answered the instant a
         // bid was sent, before the server had actually validated it (e.g.
@@ -219,6 +223,17 @@ function showError_moveError(text) {
 
 function applyAuctionUpdate(msg, isSpectator) {
   const d = msg.data;
+  // Turns are strictly sequential (the game engine blocks on exactly one
+  // player's decision at a time -- see gameplay.py's auction loop), so
+  // seeing *any* new auction activity while we're still waiting to hear
+  // back from our own last action necessarily means the server has moved
+  // past that decision point: either it genuinely received what we sent
+  // (the common case this disarms), or our move_seq is already stale, or
+  // -- if the whole per-move timer already elapsed -- the server's own
+  // auto-pass beat us to it, but that takes far longer than the watchdog
+  // window this is racing, so it's moot either way. See gameActions.js's
+  // own comment for the full picture of what this is guarding against.
+  disarmActionWatchdog();
   // Persistent state updates immediately and unconditionally — it must
   // never lag behind or wait on the transient toast queue below, since it's
   // the actual shared game state, not decoration.
@@ -338,6 +353,9 @@ function applyPlayerState(msg) {
 }
 
 function applyPlayerMove(msg) {
+  // A fresh prompt for us is just as much proof the server has moved
+  // forward as an AUCTION_UPDATE is -- see that function's own comment.
+  disarmActionWatchdog();
   if (!openMyPrompt(msg.data && msg.data.move_seq)) return;
 
   const bidControls = $('bid-controls');
