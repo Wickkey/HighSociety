@@ -120,11 +120,35 @@ export async function enterRoom(roomCode, event) {
 const HOME_TILE_TARGETS = ['join', 'host', 'rules'];
 export function showHomeTile(target) {
   hide($('home-tiles'));
+  // The global-stats/recent-games sections only make sense alongside the
+  // tile picker itself -- a sub-panel (e.g. the Host form) has no room or
+  // reason to show them too.
+  hide($('home-global-stats'));
+  hide($('home-recent-games'));
   HOME_TILE_TARGETS.forEach((t) => $(`home-panel-${t}`).classList.toggle('hidden', t !== target));
 }
 export function showHomeTiles() {
   show($('home-tiles'));
   HOME_TILE_TARGETS.forEach((t) => hide($(`home-panel-${t}`)));
+  loadHomeGlobalStats();
+}
+
+// "Less accurate is fine" per the request -- plain site-wide counts, not
+// scoped to "active" in any real sense. Fetched fresh every time the tile
+// picker is (re-)shown rather than cached, since it's cheap and this
+// screen is revisited often (e.g. every "Return to Home").
+async function loadHomeGlobalStats() {
+  const section = $('home-global-stats');
+  try {
+    const res = await fetch('/api/global_stats');
+    if (res.status === 204) { hide(section); return; } // no database configured
+    const stats = await res.json();
+    $('home-global-stat-games').textContent = stats.total_games;
+    $('home-global-stat-players').textContent = stats.total_players;
+    show(section);
+  } catch (e) {
+    hide(section); // transient network hiccup -- just skip the section
+  }
 }
 
 // clearRejoin is false only for the "clicked the High Society title mid-game"

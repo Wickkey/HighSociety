@@ -73,6 +73,7 @@ async function loadAccountStats() {
     const stats = await fetchJSON(`/api/profile/${encodeURIComponent(profile.username)}`);
     $('account-elo').textContent = stats.elo;
     $('account-stat-games').textContent = stats.games_played;
+    $('account-stat-wins').textContent = stats.wins;
     $('account-stat-winrate').textContent = `${Math.round(stats.win_rate * 100)}%`;
     row.classList.remove('loading');
   } catch (e) { /* 404: no games recorded yet -- leave the skeleton showing */ }
@@ -113,10 +114,29 @@ export function showAccountScreen() {
   $('account-username-display').textContent = profile ? profile.username : '';
   $('account-username-input').value = profile ? profile.username : '';
   $('account-elo').textContent = '1000';
+  hide($('account-username-edit')); // collapsed by default -- see onAccountEditUsernameClick
   hide($('account-error'));
   hide($('account-saved'));
   showScreen('screen-account');
   loadAccountStats();
+}
+
+// The pencil next to the username -- reveals the same input+Save that
+// used to just sit there permanently open. Re-syncs the input to the
+// current saved value every time (not just on showAccountScreen) so
+// re-opening after a Cancel never shows a stale in-progress edit.
+export function onAccountEditUsernameClick() {
+  const profile = loadProfile();
+  $('account-username-input').value = profile ? profile.username : '';
+  hide($('account-error'));
+  hide($('account-saved'));
+  show($('account-username-edit'));
+  $('account-username-input').focus();
+}
+
+export function onAccountCancelEditClick() {
+  hide($('account-username-edit'));
+  hide($('account-error'));
 }
 
 // Its own sidebar tab (previously folded into Account) -- same catalog,
@@ -136,6 +156,7 @@ export async function onAccountSaveClick() {
   if (!username) { showError($('account-error'), 'Username is required.'); return; }
   const existing = loadProfile();
   if (existing && existing.username === username) {
+    hide($('account-username-edit'));
     show($('account-saved'));
     return;
   }
@@ -148,6 +169,9 @@ export async function onAccountSaveClick() {
     saveProfile(result.username, result.username);
     renderProfileChip();
     $('account-username-display').textContent = result.username;
+    // Collapses back to plain text -- an error, by contrast, leaves this
+    // open (see the catch below) so there's something left to fix.
+    hide($('account-username-edit'));
     show($('account-saved'));
   } catch (e) {
     showError($('account-error'), e.message);

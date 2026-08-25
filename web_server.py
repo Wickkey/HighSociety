@@ -776,6 +776,17 @@ def api_profile(username):
     })
 
 
+@app.route("/api/global_stats")
+def api_global_stats():
+    """Home-page footer: total games played / total players site-wide.
+    204 (not a zeroed JSON body) when unavailable, so the frontend can
+    just skip rendering the section instead of showing a misleading 0."""
+    stats = game_history.get_global_stats()
+    if stats is None:
+        return "", 204
+    return jsonify(stats)
+
+
 @app.route("/")
 def index():
     return render_template(

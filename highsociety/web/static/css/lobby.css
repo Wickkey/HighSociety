@@ -144,10 +144,31 @@
   gap: 0.9rem;
   margin: 0.6rem 0 1.4rem;
 }
-.account-header h2 { margin: 0 0 0.2rem; }
+.account-header h2 { margin: 0; }
 .account-header .muted { margin: 0; font-size: 0.85rem; }
 .account-avatar { width: 52px; height: 52px; border-radius: 12px; font-size: 1.4rem; }
-.account-elo-note { font-size: 0.78rem; }
+.account-name-row { display: flex; align-items: center; gap: 0.4rem; }
+/* Deliberately quiet -- a plain icon-only button, not styled like a call
+   to action, since editing your username is a rare, secondary action on
+   a screen whose main job is showing who you are and your rating. */
+.account-edit-username-btn {
+  background: none;
+  border: none;
+  padding: 0.2rem;
+  color: var(--muted);
+  cursor: pointer;
+  display: inline-flex;
+  border-radius: var(--radius-sm);
+}
+.account-edit-username-btn svg { width: 15px; height: 15px; }
+.account-edit-username-btn:hover { color: var(--accent-strong); background: var(--accent-soft); }
+/* The one number this whole screen exists to show off -- see
+   account.js's loadAccountStats -- previously a single muted inline
+   word easy to miss entirely. */
+.account-elo-hero { display: flex; align-items: baseline; gap: 0.4rem; margin-top: 0.15rem; }
+.account-elo-value { font-size: 1.8rem; font-weight: 800; color: var(--accent-strong); line-height: 1; }
+.account-elo-label { font-size: 0.78rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+#account-username-edit { margin-top: 1rem; }
 .account-saved { color: var(--chip-money); font-weight: 600; margin: 0.4rem 0 0; }
 #btn-account-logout { width: 100%; margin-top: 1.2rem; }
 
@@ -233,6 +254,18 @@
 @media (max-width: 700px) {
   .home-tiles { grid-template-columns: 1fr; max-width: 420px; }
 }
+.home-global-stats {
+  display: flex;
+  justify-content: center;
+  gap: 2.5rem;
+  max-width: 780px;
+  margin: -1.5rem auto 2rem;
+}
+.home-global-stat { display: flex; flex-direction: column; align-items: center; gap: 0.15rem; }
+.home-global-stat-value { font-size: 1.5rem; font-weight: 800; color: var(--accent-strong); }
+.home-global-stat-label { font-size: 0.78rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+.home-recent-games { max-width: 780px; margin: 0 auto 2rem; text-align: left; }
+.home-recent-games h3 { margin: 0 0 0.8rem; }
 .home-tile {
   position: relative;
   display: flex;

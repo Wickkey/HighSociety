@@ -210,6 +210,24 @@ _SCHEMA_STATEMENTS = [
     ) AS v(name, type, value)
     WHERE NOT EXISTS (SELECT 1 FROM cards)
     """,
+    # Added after `cards` already existed in production -- a separate
+    # ALTER (not part of the CREATE TABLE above) plus a backfill, same
+    # idempotent shape as every other post-hoc column in this file. Values
+    # straight from each card class's own constructor (components_module/
+    # {painting,prestige_card,disgrace_card}.py) -- Painting/FauxPas/Passe
+    # multiply by 1 (i.e. don't scale points), PrestigeCard doubles,
+    # Scandale halves.
+    "ALTER TABLE cards ADD COLUMN IF NOT EXISTS multiplier NUMERIC",
+    """
+    UPDATE cards SET multiplier = CASE type
+        WHEN 'Painting' THEN 1
+        WHEN 'PrestigeCard' THEN 2
+        WHEN 'FauxPas' THEN 1
+        WHEN 'Passe' THEN 1
+        WHEN 'Scandale' THEN 0.5
+    END
+    WHERE multiplier IS NULL
+    """,
 
     # One-line description per table, for anyone poking around the
     # database directly without this file's own docstrings in front of
@@ -556,6 +574,41 @@ def get_player_profile_stats(username: str) -> Optional[dict]:
             return {"games_played": games_played, "wins": wins, "win_rate": win_rate}
     except Exception as e:  # noqa: BLE001
         LoggingManager.warning(f"game_history.get_player_profile_stats failed: {e}")
+        return None
+    finally:
+        if conn is not None:
+            conn.close()
+
+
+def get_global_stats() -> Optional[dict]:
+    """
+    {"total_games", "total_players"} across the whole site -- shown on the
+    home screen ("less accurate is fine" per the request that asked for
+    this), so this is deliberately just two plain counts, not anything
+    scoped to "active" in any time-windowed sense. total_players excludes
+    the 3 reserved bot identities (see the `bots` table) -- a home-page
+    visitor asking "how many people have played this" shouldn't have that
+    number inflated by internal bookkeeping rows nobody signed up as.
+    None (not zero) when unavailable, so the caller can tell "no database"
+    apart from "genuinely zero games so far" and choose not to render the
+    section at all rather than show a wrong zero.
+    """
+    if not is_configured():
+        return None
+    ensure_schema()
+    if not _schema_ready:
+        return None
+    conn = None
+    try:
+        conn = _connect()
+        with conn, conn.cursor() as cur:
+            cur.execute("SELECT count(*) FROM games")
+            total_games = cur.fetchone()[0]
+            cur.execute("SELECT count(*) FROM players WHERE id NOT IN (SELECT player_id FROM bots)")
+            total_players = cur.fetchone()[0]
+            return {"total_games": total_games, "total_players": total_players}
+    except Exception as e:  # noqa: BLE001
+        LoggingManager.warning(f"game_history.get_global_stats failed: {e}")
         return None
     finally:
         if conn is not None:

@@ -225,24 +225,50 @@
         <div class="account-header">
           <span id="account-avatar" class="profile-chip-avatar account-avatar"></span>
           <div>
-            <h2 id="account-username-display"></h2>
-            <p class="muted">Elo <span id="account-elo">1000</span></p>
+            <div class="account-name-row">
+              <h2 id="account-username-display"></h2>
+              <!-- Editing still works the same as before (onAccountSaveClick,
+                   unchanged) -- just tucked behind this pencil instead of a
+                   permanently-open input+Save sitting right under the name,
+                   which read as a much bigger "please change this" prompt
+                   than intended. -->
+              <button type="button" id="btn-account-edit-username" class="account-edit-username-btn" title="Edit username" aria-label="Edit username">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M12 20h9"/>
+                  <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/>
+                </svg>
+              </button>
+            </div>
+            <!-- The one number this whole screen exists to show off (see
+                 account.js's loadAccountStats) -- previously a single muted
+                 inline word next to the username, easy to miss entirely. -->
+            <div class="account-elo-hero">
+              <span id="account-elo" class="account-elo-value">1000</span>
+              <span class="account-elo-label">Elo Rating</span>
+            </div>
           </div>
         </div>
 
-        <label>Username
-          <input type="text" id="account-username-input" placeholder="e.g. alex" autocomplete="off" maxlength="24">
-        </label>
-        <div class="button-row">
-          <button type="button" id="btn-account-save" class="primary">Save</button>
+        <div id="account-username-edit" class="hidden">
+          <label>Username
+            <input type="text" id="account-username-input" placeholder="e.g. alex" autocomplete="off" maxlength="24">
+          </label>
+          <div class="button-row">
+            <button type="button" id="btn-account-save" class="primary">Save</button>
+            <button type="button" id="btn-account-cancel-edit" class="secondary">Cancel</button>
+          </div>
+          <p id="account-error" class="error hidden"></p>
         </div>
-        <p id="account-error" class="error hidden"></p>
         <p id="account-saved" class="account-saved hidden">Saved.</p>
 
         <div id="account-stats-row" class="account-stats-row loading">
           <div class="account-stat">
             <span id="account-stat-games" class="account-stat-value">—</span>
             <span class="account-stat-label">Games played</span>
+          </div>
+          <div class="account-stat">
+            <span id="account-stat-wins" class="account-stat-value">—</span>
+            <span class="account-stat-label">Wins</span>
           </div>
           <div class="account-stat">
             <span id="account-stat-winrate" class="account-stat-value">—</span>
@@ -332,6 +358,28 @@
           <span class="home-tile-title">Game Rules</span>
           <span class="home-tile-sub">New to High Society? Start here</span>
         </button>
+      </div>
+
+      <!-- Hidden by default -- shown only once /api/global_stats actually
+           returns something (see lobby.js's loadHomeGlobalStats); no
+           database configured (local dev) just leaves this out entirely
+           rather than showing a hardcoded 0. -->
+      <div id="home-global-stats" class="home-global-stats hidden">
+        <div class="home-global-stat">
+          <span id="home-global-stat-games" class="home-global-stat-value">—</span>
+          <span class="home-global-stat-label">Games played</span>
+        </div>
+        <div class="home-global-stat">
+          <span id="home-global-stat-players" class="home-global-stat-value">—</span>
+          <span class="home-global-stat-label">Players</span>
+        </div>
+      </div>
+
+      <!-- Hidden until loadHomeRecentGames actually has rows -- a guest/
+           new player with no games yet just never sees this section. -->
+      <div id="home-recent-games" class="card panel home-recent-games hidden">
+        <h3>Recent Games</h3>
+        <div id="home-recent-games-list" class="recent-games-list"></div>
       </div>
 
       <div id="home-panel-join" class="card panel home-panel hidden">

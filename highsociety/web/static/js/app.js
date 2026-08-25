@@ -10,7 +10,10 @@ import {
 import {
   loadProfile, renderProfileChip, onProfileChipClick, onLogout, closeProfilePopover,
 } from './auth/profile.js';
-import { showAccountScreen, onAccountSaveClick, showAchievementsScreen } from './account/account.js';
+import {
+  showAccountScreen, onAccountSaveClick, showAchievementsScreen,
+  onAccountEditUsernameClick, onAccountCancelEditClick,
+} from './account/account.js';
 import {
   showHomeTile, showHomeTiles, onHomeLinkClick, navigateFromSidebar, onCreateGame, onJoinByCode,
   onCopyRoomLink, onJoin, onSpectateJoin, onChangeJoinIdentity, onChangeSpectateIdentity,
@@ -93,6 +96,8 @@ function wireStaticHandlers() {
     showScreen('screen-host-setup'); showHomeTiles(); startRoomsPolling();
   }));
   $('btn-account-save').addEventListener('click', onAccountSaveClick);
+  $('btn-account-edit-username').addEventListener('click', onAccountEditUsernameClick);
+  $('btn-account-cancel-edit').addEventListener('click', onAccountCancelEditClick);
   $('btn-account-logout').addEventListener('click', onLogout);
   $('btn-find-match').addEventListener('click', onFindMatch);
   $('btn-matchmaking-cancel').addEventListener('click', onMatchmakingCancel);
