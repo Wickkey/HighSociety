@@ -57,7 +57,7 @@ export function resetGameState(myUsername, status) {
     // starts its own counter near zero, so this must live here too rather
     // than survive across a resetGameState call.
     highestAnsweredMoveSeq: null,
-    opponents: {}, // username -> {name, statusCards: [], active: true, outOfAuction: false}
+    opponents: {}, // username -> {name, statusCards: [], active: true, outOfAuction: false, lastBid: null}
     // The real post-shuffle seat/turn order (see gameplay.py's player_order
     // broadcast) -- empty until that arrives, which renderOpponents falls
     // back to plain insertion order for.
@@ -141,13 +141,13 @@ export function applyRoomDisplaySettings() {
 export function seedOpponents(status, myUsername) {
   (status.joined || []).forEach((p) => {
     if (p.username === myUsername) return;
-    game.opponents[p.username] = { name: p.name, statusCards: [], active: true, outOfAuction: false };
+    game.opponents[p.username] = { name: p.name, statusCards: [], active: true, outOfAuction: false, lastBid: null };
   });
 }
 
 export function ensureOpponent(username) {
   if (!game.opponents[username]) {
-    game.opponents[username] = { name: username, statusCards: [], active: true, outOfAuction: false };
+    game.opponents[username] = { name: username, statusCards: [], active: true, outOfAuction: false, lastBid: null };
   }
   return game.opponents[username];
 }

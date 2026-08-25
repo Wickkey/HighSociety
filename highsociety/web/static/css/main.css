@@ -103,6 +103,10 @@ body {
 .sidebar-item:active { transform: translateY(1px); }
 .sidebar-item.active { background: var(--accent-soft); border-color: var(--accent-light); color: #f5f1e6; }
 .sidebar-icon { width: 27px; height: 27px; flex-shrink: 0; }
+/* The Host crown reads small next to how often it's reached for (starting
+   a new game) -- sized up on just this one icon rather than the shared
+   .sidebar-icon class, which every other sidebar item still uses as-is. */
+#sidebar-host .sidebar-icon { width: 33px; height: 33px; }
 .sidebar-item-disabled {
   cursor: default;
   opacity: 0.45;
@@ -113,6 +117,7 @@ body {
   .sidebar-item { padding: 0.65rem 0.3rem; }
   .sidebar-label { display: none; }
   .sidebar-icon { width: 25px; height: 25px; }
+  #sidebar-host .sidebar-icon { width: 30px; height: 30px; }
 }
 
 .topbar {
@@ -190,7 +195,9 @@ body {
   }
   .topbar { padding: 1rem 1rem; }
   .profile-chip { padding: 0.55rem 0.9rem; }
-  .profile-chip-name { max-width: 84px; }
+  .profile-chip:hover .profile-chip-name,
+  .profile-chip:focus-visible .profile-chip-name,
+  .profile-chip:focus-within .profile-chip-name { max-width: 84px; }
 }
 .badge {
   font-size: 0.75rem;
@@ -253,11 +260,25 @@ body {
   transition: transform 0.15s ease;
 }
 .profile-chip.editable:hover .profile-chip-avatar { transform: scale(1.08); }
+/* Collapsed to just the avatar by default -- "Playing as {name}" read as
+   redundant clutter once the avatar already identifies the same player;
+   the name is still there, just tucked behind a hover/focus reveal (like a
+   tooltip that happens to be real text) instead of always taking up
+   header width. max-width+opacity (not display:none) so the reveal is a
+   smooth expand, not a layout snap. */
 .profile-chip-name {
-  max-width: 140px;
+  max-width: 0;
+  opacity: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  transition: max-width 0.2s ease, opacity 0.15s ease, margin-left 0.2s ease;
+}
+.profile-chip:hover .profile-chip-name,
+.profile-chip:focus-visible .profile-chip-name,
+.profile-chip:focus-within .profile-chip-name {
+  max-width: 140px;
+  opacity: 1;
 }
 .profile-chip:focus-visible { outline: 2px solid var(--accent-light); outline-offset: 2px; }
 

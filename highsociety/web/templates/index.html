@@ -104,6 +104,12 @@
         </svg>
         <span class="sidebar-label">Account</span>
       </button>
+      <button type="button" class="sidebar-item" id="sidebar-achievements" title="Achievements">
+        <svg class="sidebar-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M12 3.4l2.1 4.4 4.8.6-3.5 3.4.9 4.8L12 14.3l-4.3 2.3.9-4.8-3.5-3.4 4.8-.6L12 3.4z"/>
+        </svg>
+        <span class="sidebar-label">Achievements</span>
+      </button>
     </nav>
     <div class="app-main-col">
   <header class="topbar">
@@ -226,24 +232,28 @@
         <p id="account-error" class="error hidden"></p>
         <p id="account-saved" class="account-saved hidden">Saved.</p>
 
-        <div id="account-stats-row" class="account-stats-row hidden">
+        <div id="account-stats-row" class="account-stats-row loading">
           <div class="account-stat">
-            <span id="account-stat-games" class="account-stat-value">0</span>
+            <span id="account-stat-games" class="account-stat-value">—</span>
             <span class="account-stat-label">Games played</span>
           </div>
           <div class="account-stat">
-            <span id="account-stat-winrate" class="account-stat-value">0%</span>
+            <span id="account-stat-winrate" class="account-stat-value">—</span>
             <span class="account-stat-label">Win rate</span>
           </div>
         </div>
 
-        <div class="account-more">
-          <h3 class="account-section-title">Achievements</h3>
-          <p id="account-achievements-guest-note" class="muted hidden">Sign in with Google to start unlocking achievements.</p>
-          <div id="achievements-grid" class="achievements-grid"></div>
-        </div>
-
         <button type="button" id="btn-account-logout" class="secondary standalone">Log out</button>
+      </div>
+    </section>
+
+    <!-- ===================== ACHIEVEMENTS ===================== -->
+    <section id="screen-achievements" class="screen hidden">
+      <div class="card panel account-panel">
+        <button type="button" class="screen-back" id="btn-achievements-back">← Back</button>
+        <h2>Achievements</h2>
+        <p id="account-achievements-guest-note" class="muted hidden">Sign in with Google to start unlocking achievements.</p>
+        <div id="achievements-grid" class="achievements-grid"></div>
       </div>
     </section>
 
@@ -386,7 +396,7 @@
           <legend>Table settings</legend>
           <div class="bot-row">
             <label class="radio-label"><input type="checkbox" id="host-reveal-cards" checked> Show opponents' paintings</label>
-            <label class="radio-label"><input type="checkbox" id="host-show-logs"> Show game log</label>
+            <label class="radio-label"><input type="checkbox" id="host-show-logs" checked> Show game log</label>
           </div>
           <p class="hint">Fixed for the whole table once the game starts. Not adjustable mid-game.</p>
         </fieldset>

@@ -56,18 +56,39 @@ function renderAchievementTile(a, unlocked) {
     + `<span class="achievement-name">${escapeHtml(a.name)}</span></div>`;
 }
 
+// Games played/win rate: shown as a dimmed "—" skeleton (see the
+// account-stats-row.loading CSS) the instant the screen opens, then
+// swapped for real numbers once /api/profile resolves -- previously the
+// whole row was just `hidden` until the fetch finished, so the cards
+// appeared out of nowhere rather than looking like they were loading.
+// Stats aren't gated to Google-linked accounts (get_player_profile_stats
+// isn't either) -- a guest with no games yet just keeps the skeleton
+// (the 404 case below), same as before.
+async function loadAccountStats() {
+  const profile = loadProfile();
+  const row = $('account-stats-row');
+  row.classList.add('loading');
+  if (!profile) return;
+  try {
+    const stats = await fetchJSON(`/api/profile/${encodeURIComponent(profile.username)}`);
+    $('account-elo').textContent = stats.elo;
+    $('account-stat-games').textContent = stats.games_played;
+    $('account-stat-winrate').textContent = `${Math.round(stats.win_rate * 100)}%`;
+    row.classList.remove('loading');
+  } catch (e) { /* 404: no games recorded yet -- leave the skeleton showing */ }
+}
+
 // Guests have no stable identity to hang persistent progress off (a
 // guest's username is regenerated every time their browser profile
-// resets -- see saveProfile), so achievements/Elo/stats only ever start
-// counting once someone is actually signed in with Google (see
+// resets -- see saveProfile), so achievements only ever start counting
+// once someone is actually signed in with Google (see
 // game_history.record_finished_game's google_id gating). Every tile still
 // renders, just permanently locked, plus a one-time sign-in nudge.
-async function loadAccountAchievementsAndStats() {
+async function loadAchievements() {
   const profile = loadProfile();
   const grid = $('achievements-grid');
   const guestNote = $('account-achievements-guest-note');
   grid.innerHTML = ACHIEVEMENTS.map((a) => renderAchievementTile(a, false)).join('');
-  hide($('account-stats-row'));
   if (!profile) return;
   if (!profile.google_id) {
     show(guestNote);
@@ -80,13 +101,6 @@ async function loadAccountAchievementsAndStats() {
     const unlocked = new Set(result.achievements || []);
     grid.innerHTML = ACHIEVEMENTS.map((a) => renderAchievementTile(a, unlocked.has(a.id))).join('');
   } catch (e) { /* transient network error -- leave the grid locked rather than block the screen */ }
-  try {
-    const stats = await fetchJSON(`/api/profile/${encodeURIComponent(profile.username)}`);
-    $('account-elo').textContent = stats.elo;
-    $('account-stat-games').textContent = stats.games_played;
-    $('account-stat-winrate').textContent = `${Math.round(stats.win_rate * 100)}%`;
-    show($('account-stats-row'));
-  } catch (e) { /* 404: no games recorded yet -- leave the stats row hidden */ }
 }
 
 // Reached via the popover's "Account" item or the sidebar's Account tab --
@@ -102,7 +116,14 @@ export function showAccountScreen() {
   hide($('account-error'));
   hide($('account-saved'));
   showScreen('screen-account');
-  loadAccountAchievementsAndStats();
+  loadAccountStats();
+}
+
+// Its own sidebar tab (previously folded into Account) -- same catalog,
+// same unlock logic, just reachable independently of profile editing.
+export function showAchievementsScreen() {
+  showScreen('screen-achievements');
+  loadAchievements();
 }
 
 // Only round-trips to the server when the username actually changed --

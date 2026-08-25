@@ -10,7 +10,7 @@ import {
 import {
   loadProfile, renderProfileChip, onProfileChipClick, onLogout, closeProfilePopover,
 } from './auth/profile.js';
-import { showAccountScreen, onAccountSaveClick } from './account/account.js';
+import { showAccountScreen, onAccountSaveClick, showAchievementsScreen } from './account/account.js';
 import {
   showHomeTile, showHomeTiles, onHomeLinkClick, navigateFromSidebar, onCreateGame, onJoinByCode,
   onCopyRoomLink, onJoin, onSpectateJoin, onChangeJoinIdentity, onChangeSpectateIdentity,
@@ -62,6 +62,7 @@ function wireStaticHandlers() {
     showScreen('screen-host-setup'); showHomeTile('rules');
   }));
   $('sidebar-account').addEventListener('click', () => navigateFromSidebar(showAccountScreen));
+  $('sidebar-achievements').addEventListener('click', () => navigateFromSidebar(showAchievementsScreen));
   document.querySelectorAll('.home-back').forEach((btn) => {
     btn.addEventListener('click', showHomeTiles);
   });
@@ -86,6 +87,9 @@ function wireStaticHandlers() {
   $('connection-badge').addEventListener('click', onProfileChipClick);
   $('btn-open-account').addEventListener('click', () => { closeProfilePopover(); showAccountScreen(); });
   $('btn-account-back').addEventListener('click', () => navigateFromSidebar(() => {
+    showScreen('screen-host-setup'); showHomeTiles(); startRoomsPolling();
+  }));
+  $('btn-achievements-back').addEventListener('click', () => navigateFromSidebar(() => {
     showScreen('screen-host-setup'); showHomeTiles(); startRoomsPolling();
   }));
   $('btn-account-save').addEventListener('click', onAccountSaveClick);

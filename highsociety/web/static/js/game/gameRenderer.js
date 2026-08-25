@@ -279,7 +279,7 @@ export function renderOpponents(isSpectator) {
     if (!row) {
       row = document.createElement('div');
       row.dataset.username = username;
-      row.innerHTML = '<div class="opponent-header"><span class="name"></span><span class="opp-timer"></span><span class="pts"></span></div>'
+      row.innerHTML = '<div class="opponent-header"><span class="name"></span><span class="opp-timer"></span><span class="bid-badge"></span><span class="pts"></span></div>'
         + '<div class="chip-row small"></div>';
     }
     // appendChild on an already-attached node moves it -- calling this
@@ -322,6 +322,13 @@ export function renderOpponents(isSpectator) {
       timerEl.textContent = '';
       timerEl.classList.remove('urgent');
     }
+
+    // Shows this opponent's own current committed bid for the live
+    // auction, cleared the moment they pass/fold/quit or a new auction
+    // starts (see gameEvents.js's applyAuctionUpdate) -- blank rather than
+    // a badge showing "0" whenever they haven't bid at all this round.
+    const bidBadge = row.querySelector('.bid-badge');
+    bidBadge.textContent = o.lastBid ? `Bid: ${o.lastBid}` : '';
 
     const chips = row.querySelector('.chip-row');
     chips.innerHTML = '';

@@ -5,28 +5,15 @@
 
 #screen-matchmaking .panel {
   border-top: 3px solid var(--accent);
-  text-align: center;
   position: relative;
 }
-/* The base `label` rule (main.css) is block/full-width for the Host
-   form's longer, left-aligned settings list -- fine there, but this panel
-   is a compact, deliberately centered "quick play" card, and a left-
-   pinned label text sitting above a separately auto-margin-centered input
-   looked disconnected, like two unrelated pieces rather than one field.
-   Center the label itself too so "Players" and its input share one axis. */
-.matchmaking-panel label { text-align: center; }
-.matchmaking-panel #matchmaking-seats { max-width: 120px; margin-left: auto; margin-right: auto; }
+/* Previously centered as a "quick play" card, but that made this the only
+   screen in the app not left-aligned like Host/Join -- inconsistent with
+   every sibling screen using the same .panel/label/input pattern. Left-
+   aligned to match; #matchmaking-seats keeps a capped width so the number
+   input doesn't stretch full-width the way a text field would. */
+.matchmaking-panel #matchmaking-seats { max-width: 120px; }
 #btn-find-match { width: 100%; }
-/* This panel is deliberately centered for its actual content (seats
-   input, Find Match button) -- but that also caught the "← Back" link,
-   leaving it floating oddly in the middle of the panel's top edge instead
-   of sitting top-left the way every other screen's back link does.
-   Escape the inherited centering for just this one element. */
-.matchmaking-panel .screen-back {
-  display: block;
-  width: max-content;
-  margin-right: auto;
-}
 
 .shuffle-anim {
   position: relative;
@@ -162,13 +149,6 @@
 .account-avatar { width: 52px; height: 52px; border-radius: 12px; font-size: 1.4rem; }
 .account-elo-note { font-size: 0.78rem; }
 .account-saved { color: var(--chip-money); font-weight: 600; margin: 0.4rem 0 0; }
-.account-more {
-  margin-top: 1.4rem;
-  padding-top: 1.1rem;
-  border-top: 1px solid var(--panel-border);
-}
-.account-more p { margin: 0; font-size: 0.85rem; }
-.account-section-title { margin: 0 0 0.7rem; font-size: 1rem; }
 #btn-account-logout { width: 100%; margin-top: 1.2rem; }
 
 .account-stats-row {
@@ -189,6 +169,15 @@
 }
 .account-stat-value { font-size: 1.3rem; font-weight: 700; color: var(--accent-strong); }
 .account-stat-label { font-size: 0.75rem; color: var(--muted); }
+/* Shown immediately on opening the screen, before /api/profile resolves
+   (see account.js's loadAccountStats) -- a slow gentle pulse on the
+   placeholder "—" values so the cards read as "loading" rather than
+   appearing to have simply popped into existence once real numbers land. */
+.account-stats-row.loading .account-stat-value { animation: stat-skeleton-pulse 1.4s ease-in-out infinite; }
+@keyframes stat-skeleton-pulse {
+  0%, 100% { opacity: 0.35; }
+  50% { opacity: 0.8; }
+}
 
 /* Locked tiles are fully desaturated (grayscale + faded) so an unlock reads
    as a real color reveal, not just a border/shadow change. Icon badge

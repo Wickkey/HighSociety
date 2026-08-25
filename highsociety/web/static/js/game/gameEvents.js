@@ -258,8 +258,9 @@ function applyAuctionUpdate(msg, isSpectator) {
     game.turnPlayer = d.starting_player;
     game.turnStartedAt = Date.now();
     if (d.starting_player !== game.myUsername) ensureOpponent(d.starting_player);
-    // Everyone's back in for the new auction — clear last round's greyed-out state.
-    Object.values(game.opponents).forEach((o) => { o.outOfAuction = false; });
+    // Everyone's back in for the new auction — clear last round's greyed-out
+    // state and their last-shown bid badge (see the 'bid' branch below).
+    Object.values(game.opponents).forEach((o) => { o.outOfAuction = false; o.lastBid = null; });
     enqueueEvent(isSpectator, `New auction: ${describeCard(d.card)}`, 'start');
     logLine(`🃏 Auction #${d.round_number}: ${describeCard(d.card)}`, isSpectator);
   } else if (d.kind === 'turn_start') {
@@ -271,12 +272,22 @@ function applyAuctionUpdate(msg, isSpectator) {
       game.myAuctionBid = d.max_bid; // this event's max_bid is the bidder's own new cumulative total
       updateBidStatus();
     } else {
-      ensureOpponent(d.player);
+      // Same reasoning as myAuctionBid above: a 'bid' event's max_bid is
+      // always the *acting* player's own new total (bidding, by
+      // definition, raises the price past whatever it was), so this is
+      // safe to store as that specific opponent's own running bid rather
+      // than the auction-wide max — see gameRenderer.js's opponent-tile
+      // badge, which shows it back per-player.
+      ensureOpponent(d.player).lastBid = d.max_bid;
     }
     enqueueEvent(isSpectator, `${actorLabel(d.player)} raised to ${d.max_bid}`, 'bid');
     logLine(`💰 ${d.player} raised to ${d.max_bid}`, isSpectator);
   } else if (d.kind === 'pass' || d.kind === 'fold') {
-    if (d.player !== game.myUsername) ensureOpponent(d.player).outOfAuction = true;
+    if (d.player !== game.myUsername) {
+      const o = ensureOpponent(d.player);
+      o.outOfAuction = true;
+      o.lastBid = null; // no longer contesting -- nothing left to show a badge for
+    }
     enqueueEvent(isSpectator, `${actorLabel(d.player)} passed`, 'pass');
     logLine(`⚪ ${d.player} passed`, isSpectator);
   } else if (d.kind === 'quit') {
@@ -284,6 +295,7 @@ function applyAuctionUpdate(msg, isSpectator) {
       const o = ensureOpponent(d.player);
       o.active = false;
       o.outOfAuction = true;
+      o.lastBid = null;
     }
     enqueueEvent(isSpectator, `${actorLabel(d.player)} quit`, 'quit');
     logLine(`❌ ${d.player} quit`, isSpectator);
