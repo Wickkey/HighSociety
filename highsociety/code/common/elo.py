@@ -25,12 +25,19 @@ DEFAULT_K_FACTOR = 32
 def compute_elo_deltas(standings: list, k_factor: float = DEFAULT_K_FACTOR) -> dict:
     """
     standings: one dict per rated player -- {"username", "points", "rating"}
-    (their Elo *before* this game). Only ever called with players whose
-    rating actually means something persistent (see game_history.py's own
-    call site, which filters to Google-linked accounts before this --
-    same reasoning as achievements.py's own gating: a guest's identity
-    resets on every browser clear, so there's nothing meaningful to track
-    a rating against). Bots are never included here at all.
+    (their Elo *before* this game). Only ever called with participants
+    whose rating actually means something persistent: a Google-linked
+    human (a guest's identity resets on every browser clear, so there's
+    nothing meaningful to track a rating against -- same reasoning as
+    achievements.py's own gating), or a bot with a known difficulty (see
+    game_history.py's `bots` table -- each difficulty tier has one
+    shared, real, evolving rating of its own, used here exactly like a
+    human's so a human's rating actually moves in practice against the
+    overwhelmingly common solo-vs-bots case, but never surfaced to
+    players anywhere in the UI). "username" here is whatever key the
+    caller used to identify each participant -- not necessarily a real
+    players.username, see game_history.py's `game_username` for why a
+    bot needs a different one.
 
     Returns {username: delta} (whole numbers, can be negative). Fewer
     than 2 rated players means there's no comparison to make -- returns

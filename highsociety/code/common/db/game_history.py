@@ -949,10 +949,19 @@ def record_finished_game(*, room_code: str, seats: int, bot_mix: list,
                     bot_name = p["name"]
                     difficulty = p.get("difficulty")
                     if difficulty:
-                        cur.execute("SELECT player_id FROM bots WHERE difficulty = %s", (difficulty,))
+                        # Also fetches the bot's *current* elo (unlike the
+                        # player_id-only lookup this used to be) -- bots
+                        # are now real rated participants (see the elo
+                        # gating below), so this needs elo_before the same
+                        # way _upsert_player already gives a human.
+                        cur.execute(
+                            "SELECT b.player_id, p.elo FROM bots b JOIN players p ON p.id = b.player_id "
+                            "WHERE b.difficulty = %s",
+                            (difficulty,),
+                        )
                         row = cur.fetchone()
                         if row is not None:
-                            player_id = row[0]
+                            player_id, elo_before = row
                 else:
                     player_id, google_id, elo_before = _upsert_player(cur, p["username"], p["name"])
                     cur.execute(
@@ -986,11 +995,23 @@ def record_finished_game(*, room_code: str, seats: int, bot_mix: list,
                          placement_by_index[index]),
                     )
 
-                if player_id is not None and google_id is not None:
-                    rated_standings.append({"username": p["username"], "points": p["points"], "rating": elo_before})
-                    rated_player_ids[p["username"]] = player_id
-                    elo_before_by_username[p["username"]] = elo_before
+                # Elo eligibility now includes bots with a known difficulty
+                # (they have a real, evolving rating of their own -- see
+                # this function's own docstring) alongside Google-linked
+                # humans; a bot's real per-game username (never a stable
+                # DB `username`, see `game_username`'s own doc) is what
+                # keys rated_standings here, since two bots in the same
+                # game would otherwise collide on `None`.
+                is_rated = player_id is not None and (google_id is not None or p["is_bot"])
+                if is_rated:
+                    rating_key = p.get("game_username") or p["username"]
+                    rated_standings.append({"username": rating_key, "points": p["points"], "rating": elo_before})
+                    rated_player_ids[rating_key] = player_id
+                    elo_before_by_username[rating_key] = elo_before
 
+                # Achievements stay strictly human-only -- a bot must never
+                # unlock one, regardless of the elo change above.
+                if player_id is not None and google_id is not None:
                     ids_to_unlock = set(achievement_unlocks.get(p["username"]) or ())
                     if p["is_winner"]:
                         cur.execute("SELECT count(*) FROM player_games WHERE player_id = %s AND is_winner",
