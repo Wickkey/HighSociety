@@ -46,16 +46,37 @@ export function saveProfile(username, name, googleId) {
   writeCookie(PROFILE_STORAGE_KEY, value, 365);
 }
 
-export function setBadge(text) {
-  const badge = $('connection-badge');
-  $('connection-badge-text').textContent = text;
-  badge.classList.remove('hidden');
+// "What you're currently doing" -- deliberately separate from the
+// identity chip next to it (that one only ever answers "who you are",
+// see renderProfileChip). Each status gets its own small icon rather than
+// reusing generic prose, matching the app's existing badge language
+// (compare .home-tile-live-badge) instead of a plain text pill.
+const SESSION_STATUS = {
+  connecting: { label: 'Connecting…', icon: '' },
+  reconnecting: { label: 'Reconnecting…', icon: '' },
+  playing: {
+    label: 'Playing',
+    icon: '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M6 4.5v15l14-7.5z"/></svg>',
+  },
+  spectating: {
+    label: 'Spectating',
+    icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" '
+        + 'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+        + '<path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>',
+  },
+};
+
+export function setSessionStatus(status) {
+  const config = SESSION_STATUS[status];
+  const badge = $('session-status-badge');
+  badge.className = `session-status-badge ${status}`;
+  badge.innerHTML = `${config.icon}<span>${config.label}</span>`;
   // A live room session's identity is already fixed — editing the *saved*
   // profile wouldn't change the current seat, so the chip stops being an
-  // "edit" target for as long as this text describes a session (see
-  // renderProfileChip, which re-enables it once back at the idle state).
-  badge.classList.remove('editable');
-  badge.classList.remove('needs-attention');
+  // "edit" target for as long as any status here is showing (see
+  // renderProfileChip, which re-enables it, and hides this badge, once
+  // back at the idle state).
+  $('connection-badge').classList.remove('editable', 'needs-attention');
   closeProfilePopover();
 }
 
@@ -63,10 +84,11 @@ export function setBadge(text) {
 // #profile-chip-wrap in index.html): whenever this browser isn't currently
 // locked into a room session, it shows the saved name (or "Guest" — a
 // placeholder that itself signals "click me to set this") and opens the
-// popover below on click. setBadge() above is what locks it during an
-// actual session (connecting/playing/spectating), where the joined
-// identity is already fixed and editing the *saved* profile wouldn't
-// change anything about the current seat anyway.
+// popover below on click. setSessionStatus() above is what locks it (and
+// shows the separate status badge) during an actual session, where the
+// joined identity is already fixed and editing the *saved* profile
+// wouldn't change anything about the current seat anyway -- calling this
+// is also what un-locks it and hides that badge again, once idle.
 export function renderProfileChip() {
   const badge = $('connection-badge');
   const profile = loadProfile();
@@ -78,6 +100,7 @@ export function renderProfileChip() {
   // account.js's onAccountSaveClick) -- a passive "this still needs you"
   // cue, gone for good the moment one exists.
   badge.classList.toggle('needs-attention', !profile);
+  $('session-status-badge').classList.add('hidden');
   closeProfilePopover();
   applyJoinIdentityDefaults();
 }

@@ -12,7 +12,7 @@
 // is read inside a function body, never at this module's own top-level
 // evaluation, so load order never matters.
 import { $, hide, show, showError, showScreen } from '../utils/dom.js';
-import { ensureProfileSet, loadProfile, renderProfileChip, saveProfile, setBadge } from '../auth/profile.js';
+import { ensureProfileSet, loadProfile, renderProfileChip, saveProfile, setSessionStatus } from '../auth/profile.js';
 import { game, resetGameState, seedOpponents, applyRoomDisplaySettings } from '../game/gameState.js';
 import { renderOpponents } from '../game/gameRenderer.js';
 import { ws, closeSocket, attemptReconnect, connectPlayerSocket, connectSpectatorSocket } from '../network/websocket.js';
@@ -475,5 +475,5 @@ export function onSpectateJoin() {
     }).catch(() => {});
   connectSpectatorSocket();
   showScreen('screen-spectate');
-  setBadge('spectating');
+  setSessionStatus('spectating');
 }

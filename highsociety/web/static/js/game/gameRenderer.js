@@ -279,7 +279,13 @@ export function renderOpponents(isSpectator) {
     if (!row) {
       row = document.createElement('div');
       row.dataset.username = username;
-      row.innerHTML = '<div class="opponent-header"><span class="name"></span><span class="opp-timer"></span><span class="bid-badge"></span><span class="pts"></span></div>'
+      // Two explicit sub-groups (not 3 flat children space-between'd)
+      // so the bid badge sits directly next to the name it belongs to,
+      // rather than floating in its own slot between the timer and points.
+      row.innerHTML = '<div class="opponent-header">'
+        + '<div class="opponent-header-left"><span class="name"></span><span class="bid-badge"></span></div>'
+        + '<div class="opponent-header-right"><span class="opp-timer"></span><span class="pts"></span></div>'
+        + '</div>'
         + '<div class="chip-row small"></div>';
     }
     // appendChild on an already-attached node moves it -- calling this

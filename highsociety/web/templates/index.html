@@ -114,28 +114,35 @@
     <div class="app-main-col">
   <header class="topbar">
     <h1 id="home-link" class="home-link" role="link" tabindex="0">High&nbsp;Society</h1>
-    <div id="profile-chip-wrap" class="profile-chip-wrap">
-      <button type="button" id="connection-badge" class="badge profile-chip">
-        <span id="connection-badge-avatar" class="profile-chip-avatar"></span>
-        <span id="connection-badge-text" class="profile-chip-name"></span>
-      </button>
-      <div id="profile-popover" class="profile-popover card panel hidden">
-        <button type="button" id="btn-open-account" class="popover-menu-item">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <circle cx="12" cy="8.5" r="3.5"/>
-            <path d="M5 19.5c0-3.8 3.3-6.5 7-6.5s7 2.7 7 6.5"/>
-          </svg>
-          Account
+    <div class="topbar-right">
+      <!-- Whether this browser is connecting/reconnecting/playing/spectating
+           -- deliberately its own element, not folded into the identity
+           chip next to it (that chip's only job is "who you are", not
+           "what you're currently doing"). Hidden outside an active session. -->
+      <span id="session-status-badge" class="session-status-badge hidden"></span>
+      <div id="profile-chip-wrap" class="profile-chip-wrap">
+        <button type="button" id="connection-badge" class="badge profile-chip">
+          <span id="connection-badge-avatar" class="profile-chip-avatar"></span>
+          <span id="connection-badge-text" class="profile-chip-name"></span>
         </button>
-        <div id="popover-menu-divider" class="popover-menu-divider hidden"></div>
-        <button type="button" id="btn-logout" class="popover-menu-item popover-menu-item-danger hidden">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <path d="M15 4H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h8"/>
-            <path d="M10 12h10"/>
-            <path d="M17 8.5 20.5 12 17 15.5"/>
-          </svg>
-          Log out
-        </button>
+        <div id="profile-popover" class="profile-popover card panel hidden">
+          <button type="button" id="btn-open-account" class="popover-menu-item">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <circle cx="12" cy="8.5" r="3.5"/>
+              <path d="M5 19.5c0-3.8 3.3-6.5 7-6.5s7 2.7 7 6.5"/>
+            </svg>
+            Account
+          </button>
+          <div id="popover-menu-divider" class="popover-menu-divider hidden"></div>
+          <button type="button" id="btn-logout" class="popover-menu-item popover-menu-item-danger hidden">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M15 4H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h8"/>
+              <path d="M10 12h10"/>
+              <path d="M17 8.5 20.5 12 17 15.5"/>
+            </svg>
+            Log out
+          </button>
+        </div>
       </div>
     </div>
   </header>

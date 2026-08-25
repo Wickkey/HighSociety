@@ -209,12 +209,38 @@ body {
 }
 .hidden { display: none !important; }
 
-/* Top-right profile chip: doubles as the in-session status pill ("playing
-   as X" / "spectating" / "reconnecting…" — see app.js's setBadge, not
-   clickable while locked into a room) and, whenever idle, as the entry
-   point into editing the saved device identity (see app.js's
-   renderProfileChip/loadProfile) — sized and positioned so it visibly
-   reads as "the profile area" rather than a small aside. */
+/* Groups the session-status indicator and the identity chip as one visual
+   unit on the topbar's right side, without merging them into one element
+   -- "who you are" (the chip) and "what you're currently doing" (the
+   badge) are two different questions, so a room/game session shows both
+   side by side instead of overloading the chip's own text with either. */
+.topbar-right { display: flex; align-items: center; gap: 0.6rem; min-width: 0; }
+
+/* "Connecting…" / "Reconnecting…" / a player-vs-spectator indicator --
+   see profile.js's setSessionStatus. Hidden outside an active session
+   (idle at the home/login screens, nothing to report yet). */
+.session-status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  padding: 0.3rem 0.7rem;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.session-status-badge.connecting,
+.session-status-badge.reconnecting { background: rgba(255, 255, 255, 0.14); color: #f5f1e6; }
+.session-status-badge svg { width: 13px; height: 13px; flex-shrink: 0; }
+
+/* Top-right profile chip: purely an identity display now (avatar + name,
+   revealed on hover — see .profile-chip-name below) plus, whenever idle,
+   the entry point into editing the saved device identity (see
+   profile.js's renderProfileChip/loadProfile) — sized and positioned so
+   it visibly reads as "the profile area" rather than a small aside. */
 .profile-chip-wrap { position: relative; min-width: 0; flex-shrink: 1; }
 .profile-chip {
   font: inherit;

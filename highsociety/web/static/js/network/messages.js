@@ -6,7 +6,7 @@
 // function body (never at this module's own top-level evaluation), by
 // which point every module involved has finished loading.
 import { $, showError, showScreen } from '../utils/dom.js';
-import { setBadge } from '../auth/profile.js';
+import { setSessionStatus } from '../auth/profile.js';
 import { game } from '../game/gameState.js';
 import { applyGameMessage, ensureGameScreenVisible } from '../game/gameEvents.js';
 import { ws } from './websocket.js';
@@ -74,12 +74,12 @@ export function handlePlayerMessage(msg) {
     case 'IDENTIFY_SUCCESS':
       if (isReconnecting) {
         isReconnecting = false;
-        setBadge(`Playing as ${game.myUsername}`);
+        setSessionStatus('playing');
         ensureGameScreenVisible(false);
       } else {
         $('join-form').classList.add('hidden');
         $('join-waiting').classList.remove('hidden');
-        setBadge(`Playing as ${game.myUsername}`);
+        setSessionStatus('playing');
         startWaitingRoomPolling();
         if (msg.data && msg.data.rejoin_token) {
           saveRejoinInfo(currentRoomCode(), msg.data.rejoin_token, pendingJoin.username, pendingJoin.name);

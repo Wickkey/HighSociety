@@ -11,7 +11,7 @@
 // is safe -- every one of these is only ever read inside a function body
 // (never at module-evaluation time), by which point both modules have
 // finished loading and every binding is populated.
-import { setBadge } from '../auth/profile.js';
+import { setSessionStatus } from '../auth/profile.js';
 import { resetGameState, seedOpponents } from '../game/gameState.js';
 import { handlePlayerMessage, handleSpectatorMessage, beginReconnectAttempt } from './messages.js';
 import { currentRoomCode, lastStatus, loadRejoinInfo, refreshStatus } from '../lobby/lobby.js';
@@ -40,7 +40,7 @@ export function connectPlayerSocket() {
   // fire a spurious refreshStatus() on top of it. See gameActions.js's
   // delivery watchdog for the concrete case this was found from.
   socket.onclose = () => { if (ws === socket) { ws = null; refreshStatus(); } };
-  setBadge('connecting…');
+  setSessionStatus('connecting');
 }
 
 // Called when the room turns out to already be starting/in_progress and we
@@ -65,7 +65,7 @@ export function attemptReconnect() {
   // See connectPlayerSocket's identical guard for why this checks identity
   // rather than unconditionally nulling `ws`.
   socket.onclose = () => { if (ws === socket) { ws = null; refreshStatus(); } };
-  setBadge('reconnecting…');
+  setSessionStatus('reconnecting');
   return true;
 }
 

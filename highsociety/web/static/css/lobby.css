@@ -273,6 +273,10 @@
   margin-bottom: 0.2rem;
 }
 .home-tile-icon svg { width: 27px; height: 27px; }
+/* The Host tile's crown gets the same size bump as the sidebar's -- see
+   main.css's #sidebar-host .sidebar-icon -- so the same icon doesn't read
+   as two different sizes depending on which entry point shows it. */
+.home-tile[data-home-target="host"] .home-tile-icon svg { width: 33px; height: 33px; }
 .home-tile-title { font-weight: 700; font-size: 1.05rem; }
 .home-tile-sub { color: var(--muted); font-size: 0.82rem; }
 .home-tile-sub.has-live { color: var(--accent-strong); font-weight: 600; }

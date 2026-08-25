@@ -464,7 +464,8 @@
 .opponent-row.waiting { opacity: 0.7; }
 .opponent-row.out-of-auction { opacity: 0.4; filter: grayscale(0.3); }
 .opponent-row.inactive { opacity: 0.35; }
-.opponent-header { display: flex; justify-content: space-between; align-items: center; font-size: 0.9rem; margin-bottom: 0.35rem; }
+.opponent-header { display: flex; justify-content: space-between; align-items: center; font-size: 0.9rem; margin-bottom: 0.35rem; gap: 0.5rem; }
+.opponent-header-left, .opponent-header-right { display: flex; align-items: center; gap: 0.4rem; min-width: 0; }
 .opponent-header .name { font-weight: 600; }
 .opp-timer {
   display: inline-flex;
@@ -482,15 +483,23 @@
 .opp-timer svg, .move-timer svg { width: 12px; height: 12px; flex-shrink: 0; }
 
 /* This opponent's own current committed bid for the live auction -- see
-   gameRenderer.js's renderOpponents. Empty (and hidden via :empty) once
-   they haven't bid yet this round, or the moment they pass/fold/quit. */
+   gameRenderer.js's renderOpponents. Solid-accent pill (matching
+   .home-tile-live-badge's colors/weight -- the app's own established
+   "badge" look) sitting inline right next to their name, not a corner
+   overlay: .opponent-row has no surrounding whitespace the way a home
+   tile does (rows stack directly against each other), so an absolutely-
+   positioned corner badge here just collides with the row above or the
+   row's own points text instead of floating cleanly. Empty (and hidden
+   via :empty) once they haven't bid yet this round, or the moment they
+   pass/fold/quit. */
 .bid-badge {
-  font-size: 0.75rem;
-  font-weight: 600;
-  color: var(--chip-money);
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--accent);
+  color: #fff;
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 0.15rem 0.5rem;
   border-radius: 999px;
-  padding: 0.1rem 0.5rem;
+  flex-shrink: 0;
 }
 .bid-badge:empty { display: none; }
 
