@@ -443,6 +443,19 @@ input.needs-attention {
   box-shadow: var(--shadow);
 }
 
+/* Wider than the plain-form screens above (a ranked table / games list
+   needs more room than a login field does), but the same centering --
+   these two previously had no `margin: auto` at all (My Games) or a
+   max-width with nothing to center it (Leaderboard), so both sat flush
+   against the left edge of the content column instead of centered like
+   every sibling screen. */
+#screen-leaderboard .panel,
+#screen-game-history .panel {
+  max-width: 560px;
+  margin: 3rem auto;
+  box-shadow: var(--shadow);
+}
+
 
 h2 { margin-top: 0; font-size: 1.35rem; }
 h3 { margin: 0 0 0.7rem; font-size: 1rem; letter-spacing: 0.01em; }

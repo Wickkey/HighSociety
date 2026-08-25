@@ -543,14 +543,22 @@ def get_player_achievements(username: str) -> list:
 def get_player_profile_stats(username: str) -> Optional[dict]:
     """
     {"games_played", "wins", "win_rate", "avg_placement", "avg_points",
-    "avg_money_remaining"} for any known username, guest or Google-linked
-    -- unlike achievements, profile stats aren't gated to linked accounts,
-    since this is just a factual record of games already played under
-    that exact username, nothing tied to a persistent identity guarantee.
-    None if the username has no players row at all (never played, or no
-    database) -- distinguishes "never played" from "played zero games"
-    for the caller, though today's UI renders both as an empty profile
-    either way.
+    "avg_money_remaining", "elo"} for any known username, guest or
+    Google-linked -- unlike achievements, profile stats aren't gated to
+    linked accounts, since this is just a factual record of games already
+    played under that exact username, nothing tied to a persistent
+    identity guarantee. None if the username has no players row at all
+    (never played, or no database) -- distinguishes "never played" from
+    "played zero games" for the caller, though today's UI renders both as
+    an empty profile either way.
+
+    `elo` is included here (not left to a separate get_player_elo() call)
+    specifically so /api/profile can answer with exactly one database
+    connection instead of two -- each _connect() call is a real TCP+TLS
+    handshake to a remote Supabase Postgres instance, not a local
+    round-trip, and this endpoint was visibly slow to load partly because
+    of that redundant second connection. get_player_elo() itself stays
+    (matchmaking.py calls it on its own, unrelated to this endpoint).
 
     The three averages come from `game_results` (added after
     `player_games`) rather than `player_games` itself -- a player whose
@@ -568,11 +576,11 @@ def get_player_profile_stats(username: str) -> Optional[dict]:
     try:
         conn = _connect()
         with conn, conn.cursor() as cur:
-            cur.execute("SELECT id FROM players WHERE username = %s", (username,))
+            cur.execute("SELECT id, elo FROM players WHERE username = %s", (username,))
             row = cur.fetchone()
             if row is None:
                 return None
-            player_id = row[0]
+            player_id, elo = row
             cur.execute(
                 "SELECT count(*), count(*) FILTER (WHERE is_winner) FROM player_games WHERE player_id = %s",
                 (player_id,),
@@ -586,7 +594,7 @@ def get_player_profile_stats(username: str) -> Optional[dict]:
             )
             avg_placement, avg_points, avg_money_remaining = cur.fetchone()
             return {
-                "games_played": games_played, "wins": wins, "win_rate": win_rate,
+                "games_played": games_played, "wins": wins, "win_rate": win_rate, "elo": elo,
                 "avg_placement": float(avg_placement) if avg_placement is not None else None,
                 "avg_points": float(avg_points) if avg_points is not None else None,
                 "avg_money_remaining": float(avg_money_remaining) if avg_money_remaining is not None else None,

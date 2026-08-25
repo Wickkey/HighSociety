@@ -813,14 +813,14 @@ def test_get_player_profile_stats_computes_win_rate(database_url):
     game_history._schema_ready = True
     conn, cursor = _fake_connection()
     cursor.fetchone.side_effect = iter([
-        (1,),              # player id
+        (1, 1000),         # (player id, elo)
         (4, 3),            # (games_played, wins)
         (2.5, 10.0, 8.0),  # (avg_placement, avg_points, avg_money_remaining)
     ])
     with patch.object(game_history, "_connect", return_value=conn):
         result = game_history.get_player_profile_stats("alice")
     assert result == {
-        "games_played": 4, "wins": 3, "win_rate": 0.75,
+        "games_played": 4, "wins": 3, "win_rate": 0.75, "elo": 1000,
         "avg_placement": 2.5, "avg_points": 10.0, "avg_money_remaining": 8.0,
     }
 
@@ -828,11 +828,11 @@ def test_get_player_profile_stats_computes_win_rate(database_url):
 def test_get_player_profile_stats_zero_games_has_zero_win_rate_not_a_division_error(database_url):
     game_history._schema_ready = True
     conn, cursor = _fake_connection()
-    cursor.fetchone.side_effect = iter([(1,), (0, 0), (None, None, None)])
+    cursor.fetchone.side_effect = iter([(1, 1000), (0, 0), (None, None, None)])
     with patch.object(game_history, "_connect", return_value=conn):
         result = game_history.get_player_profile_stats("alice")
     assert result == {
-        "games_played": 0, "wins": 0, "win_rate": 0.0,
+        "games_played": 0, "wins": 0, "win_rate": 0.0, "elo": 1000,
         "avg_placement": None, "avg_points": None, "avg_money_remaining": None,
     }
 
@@ -843,13 +843,27 @@ def test_get_player_profile_stats_averages_are_none_when_no_game_results_rows_ex
     report -- None, not a wrong 0."""
     game_history._schema_ready = True
     conn, cursor = _fake_connection()
-    cursor.fetchone.side_effect = iter([(1,), (5, 2), (None, None, None)])
+    cursor.fetchone.side_effect = iter([(1, 1000), (5, 2), (None, None, None)])
     with patch.object(game_history, "_connect", return_value=conn):
         result = game_history.get_player_profile_stats("alice")
     assert result["games_played"] == 5
     assert result["avg_placement"] is None
     assert result["avg_points"] is None
     assert result["avg_money_remaining"] is None
+
+
+def test_get_player_profile_stats_includes_elo_from_the_same_connection(database_url):
+    """elo comes from the same players-row lookup as the id -- see this
+    function's own docstring on why (avoids a second, separate DB
+    connection/round-trip that a naive get_player_elo() call would add)."""
+    game_history._schema_ready = True
+    conn, cursor = _fake_connection()
+    cursor.fetchone.side_effect = iter([(1, 1234), (2, 1), (1.0, 15.0, 5.0)])
+    with patch.object(game_history, "_connect", return_value=conn):
+        result = game_history.get_player_profile_stats("alice")
+    assert result["elo"] == 1234
+    # Only one connection ever opened for the whole call.
+    assert conn.__enter__.call_count == 1
 
 
 def test_get_player_profile_stats_failure_is_caught_not_raised(database_url):

@@ -255,28 +255,44 @@
 }
 .achievement-tile.unlocked:hover { transform: translateY(-2px); box-shadow: var(--shadow); }
 
+/* A plain block by default, #screen-host-setup just sits at the top of
+   #app's available height with nothing to push its later children
+   (the global-stats footer) down -- flex column + margin-top:auto on
+   that footer is what actually pins it to the bottom of the page rather
+   than immediately under the tiles. Doesn't affect the join/host/rules
+   sub-panels shown instead of the tiles (see showHomeTile) -- they're
+   still plain centered blocks (main.css's #screen-host-setup .panel
+   rule) within this same flex column. */
+#screen-host-setup { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+
 .home-tiles {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 1.1rem;
   max-width: 780px;
-  margin: 4rem auto;
+  margin: 4rem auto 0;
 }
 @media (max-width: 700px) {
   .home-tiles { grid-template-columns: 1fr; max-width: 420px; }
 }
+.home-recent-games { max-width: 780px; margin: 2rem auto 0; text-align: left; width: 100%; }
+.home-recent-games h3 { margin: 0 0 0.8rem; }
+/* Pushed to the very bottom of the page (not just under the tiles) --
+   margin-top:auto in the flex column above consumes whatever space is
+   left, same trick a footer uses to stay pinned regardless of how much
+   content sits above it. */
 .home-global-stats {
   display: flex;
   justify-content: center;
   gap: 2.5rem;
   max-width: 780px;
-  margin: -1.5rem auto 2rem;
+  margin: auto auto 2rem;
+  padding-top: 2rem;
+  width: 100%;
 }
 .home-global-stat { display: flex; flex-direction: column; align-items: center; gap: 0.15rem; }
 .home-global-stat-value { font-size: 1.5rem; font-weight: 800; color: var(--accent-strong); }
 .home-global-stat-label { font-size: 0.78rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
-.home-recent-games { max-width: 780px; margin: 0 auto 2rem; text-align: left; }
-.home-recent-games h3 { margin: 0 0 0.8rem; }
 .home-tile {
   position: relative;
   display: flex;
@@ -593,8 +609,9 @@ button.secondary.standalone { margin-top: 0.9rem; display: inline-block; }
 .game-detail-box { max-width: 480px; width: 100%; }
 
 /* ---------------- leaderboard (Part G) ---------------- */
+/* Width + centering for .leaderboard-panel itself now live in main.css,
+   alongside every other screen's own panel-centering rule. */
 
-.leaderboard-panel { max-width: 560px; }
 .leaderboard-table { width: 100%; border-collapse: collapse; margin-top: 1rem; font-size: 0.9rem; }
 .leaderboard-table th, .leaderboard-table td {
   padding: 0.5rem 0.6rem;
