@@ -11,10 +11,10 @@
 // non-circular static imports.
 import { $, hide, show, showError, showScreen } from '../utils/dom.js';
 import { escapeHtml } from '../utils/formatting.js';
-import { clearRejoinInfo, currentRoomCode, fetchJSON } from './lobby.js';
+import { clearRejoinInfo, currentRoomCode, fetchJSON, lastStatus } from './lobby.js';
 import { openProfileModal } from '../ui/modals.js';
 import { ws } from '../network/websocket.js';
-import { game, resetGameState, seedOpponents } from '../game/gameState.js';
+import { game, resetGameState, seedOpponents, applyRoomDisplaySettings } from '../game/gameState.js';
 import { ensureGameScreenVisible } from '../game/gameEvents.js';
 import { renderOpponents } from '../game/gameRenderer.js';
 
@@ -209,7 +209,25 @@ export function handleRematchMessage(msg) {
   // REMATCH_STARTING
   currentRematch = null;
   const myUsername = game.myUsername;
-  resetGameState(myUsername, null);
+  // Passing lastStatus() here (not null) matters: reveal_cards/show_logs/
+  // turn_time_limit are GameRoom-level settings _maybe_start_rematch never
+  // touches (only bot_mix/players/state/seed change for a rematch), so the
+  // finished-game status this already holds is still exactly right for
+  // those three -- no need to wait on a fresh fetch. Passing null made
+  // resetGameState fall back to its own hardcoded defaults (reveal_cards/
+  // show_logs both true, no timer) regardless of what the room was
+  // actually configured with -- a real, live-reported bug ("logs were
+  // off, then a rematch turned them back on").
+  resetGameState(myUsername, lastStatus());
+  // Seed is the one exception: _maybe_start_rematch deliberately re-rolls
+  // it for every rematch (a fresh shuffle for a fresh game -- see its own
+  // comment), so lastStatus()'s seed is already stale by the time this
+  // arrives. The server hands over the actual new one right here instead
+  // of requiring a second round trip just to display it correctly.
+  if (msg.data && msg.data.seed != null) {
+    game.seed = msg.data.seed;
+    applyRoomDisplaySettings(); // resetGameState already called this once with the stale seed baked in
+  }
   // Resign works anytime once in a game (see gameActions.js's onResign) --
   // re-enable it for the fresh game immediately rather than waiting for
   // its first PLAYER_STATE/PLAYER_MOVE.

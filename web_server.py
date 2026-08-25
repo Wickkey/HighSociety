@@ -1051,6 +1051,14 @@ def _maybe_start_rematch(room: "GameRoom") -> None:
         bot_mix = r["bot_mix"]
         room.rematch = None
         room.bot_mix = bot_mix
+        # A fresh shuffle for a fresh game -- self.seed was otherwise fixed
+        # once in __init__ and run_game() always passes seed=self.seed, so
+        # every rematch replayed the exact same deck order as the room's
+        # very first game, forever. Re-rolled here regardless of whether
+        # the original was an explicit host-chosen seed or an auto-random
+        # one: that seed was for reproducing *that* game, not for pinning
+        # every rematch to it too.
+        room.seed = random.randint(0, 2 ** 31 - 1)
         bots = create_bot_players(
             bot_mix, think_time=room.bot_think_time,
             taken_usernames={p.username for p in eligible},
@@ -1067,7 +1075,8 @@ def _maybe_start_rematch(room: "GameRoom") -> None:
         room.state = "starting"
         room.touch()
     for p in eligible:
-        p.send_message("", message_type="REMATCH_STARTING", data={"bot_mix": bot_mix, "seats": room.seats})
+        p.send_message("", message_type="REMATCH_STARTING",
+                        data={"bot_mix": bot_mix, "seats": room.seats, "seed": room.seed})
     room.run_game()
 
 

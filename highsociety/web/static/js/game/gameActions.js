@@ -3,7 +3,7 @@
 import { $, hide, showError } from '../utils/dom.js';
 import { ws } from '../network/websocket.js';
 import { game, answerMyPrompt } from './gameState.js';
-import { clearMoveTimer, renderMovePanel, updateSelectedBidTotal, renderOpponents } from './gameRenderer.js';
+import { clearMoveTimer, renderMovePanel, updateSelectedBidTotal, renderOpponents, clearSelectedBidVisual } from './gameRenderer.js';
 import { confirmDialog } from '../ui/modals.js';
 import { clearRejoinInfo, currentRoomCode, setHasResigned } from '../lobby/lobby.js';
 import { showReactionBubble } from './gameEvents.js';
@@ -45,6 +45,7 @@ export function onPlaceBid() {
   // re-renders) would add the just-submitted chips a *second* time on top
   // of that new total, e.g. selecting 10 shows "10 → 20" instead of "0 → 10".
   game.selectedBid.clear();
+  clearSelectedBidVisual();
   updateSelectedBidTotal();
   answerMyPrompt();
 }

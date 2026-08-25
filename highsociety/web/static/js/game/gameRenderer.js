@@ -390,6 +390,19 @@ export function updateSelectedBidTotal() {
   $('new-total-bid').textContent = game.myAuctionBid + addingTotal;
 }
 
+// The .selected CSS class on a money chip is only ever *added* by the
+// click handler above -- clearing game.selectedBid (the actual set of
+// values) doesn't touch it. onPlaceBid clears the set right after sending
+// a bid (see its own comment for why), but without this, the chips stayed
+// visually highlighted regardless of whether the bid was then accepted or
+// rejected -- a rejected bid reopens the same prompt with "Adding: 0" (the
+// set is genuinely empty) while the just-submitted chips still looked
+// selected, a real, live-reported mismatch between the visual and the
+// actual state.
+export function clearSelectedBidVisual() {
+  $('my-money-cards').querySelectorAll('.chip.selected').forEach((el) => el.classList.remove('selected'));
+}
+
 export function renderPaintingChoices(values, onSelect) {
   const row = $('my-paintings');
   row.innerHTML = '';
