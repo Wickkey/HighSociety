@@ -51,6 +51,14 @@ class MCTSBot(BasePlayer):
         self._think_time = think_time
         self._difficulty = difficulty
 
+    @property
+    def difficulty(self) -> str:
+        """"easy"/"medium"/"hard" (or "custom" for an ad hoc MCTSBot) --
+        see game_history.py's bots table, which needs this to attribute a
+        finished game's bot seats to the right shared per-difficulty
+        player_id."""
+        return self._difficulty
+
     def send_message(self, message: str, message_type: str = None, created_at: float = None, **kwargs) -> None:
         # Nothing to track -- get_current_auction_history()/
         # get_live_auction_state() (both live references PlayGame.__init__

@@ -144,11 +144,17 @@ class GameRoom:
 
     def __init__(self, room_code: str, seats: int, bot_mix: list[str], seed: Optional[int],
                  bot_think_time: float, visibility: str, turn_time_limit: Optional[float] = None,
-                 reveal_cards: bool = True, show_logs: bool = True):
+                 reveal_cards: bool = True, show_logs: bool = True, host_username: Optional[str] = None):
         self.room_code = room_code
         self.game_id = generate_game_id()
         self.seats = seats
         self.bot_mix = bot_mix
+        # Whoever's browser called /api/create_game -- purely informational
+        # (game_history.py's games.host_player_id), resolved to a player_id
+        # at game-history-write time the same way any other participant is.
+        # None for the rare case a caller omits it; no gameplay logic
+        # depends on this being set.
+        self.host_username = host_username
         self.seed = seed if seed is not None else random.randint(0, 2 ** 31 - 1)
         self.bot_think_time = bot_think_time
         self.visibility = visibility  # "public" | "private"
@@ -248,6 +254,23 @@ class GameRoom:
                 LoggingManager.exception("Game thread crashed; closing the room's connections")
                 self.state = "finished"
                 self.touch()
+                # Previously this left *no* games row at all -- "aborted"
+                # and "never happened" were indistinguishable in history.
+                # No participants (final_standings may never have been
+                # populated) -- is_finished_successfully=False is the
+                # entire signal this write exists to record.
+                if game_history.is_configured():
+                    game_history.record_finished_game_async(
+                        room_code=self.room_code,
+                        seats=self.seats,
+                        bot_mix=self.bot_mix,
+                        started_at=started_at,
+                        finished_at=datetime.datetime.now(datetime.timezone.utc),
+                        participants=[],
+                        host_username=self.host_username,
+                        time_control=int(self.turn_time_limit) if self.turn_time_limit else None,
+                        is_finished_successfully=False,
+                    )
                 for p in self.players:
                     if isinstance(p, NetworkPlayer):
                         p.close()
@@ -300,6 +323,12 @@ def _record_game_history(room: "GameRoom", game: PlayGame, started_at: datetime.
             "money_left": standing["money_left"],
             "is_winner": standing["username"] in winner_usernames,
             "eliminated": standing["eliminated"],
+            # Only MCTSBot instances (the web lobby's easy/medium/hard
+            # choices) have this — see game_history.py's bots table, which
+            # uses it to attribute this seat to the right shared
+            # per-difficulty player_id. None for a human or for any of the
+            # other bot classes (greedy/pass/capped, not offered here).
+            "difficulty": getattr(player, "difficulty", None),
         })
     achievement_unlocks = achievements.detect_per_game_achievements(
         final_standings=game.final_standings,
@@ -315,6 +344,8 @@ def _record_game_history(room: "GameRoom", game: PlayGame, started_at: datetime.
         achievement_unlocks=achievement_unlocks,
         finished_at=datetime.datetime.now(datetime.timezone.utc),
         participants=participants,
+        host_username=room.host_username,
+        time_control=int(room.turn_time_limit) if room.turn_time_limit else None,
     )
 
 
@@ -342,7 +373,8 @@ def _generate_room_code() -> str:
 
 def _create_room(seats: int, bot_mix: list[str], seed: Optional[int], bot_think_time: float,
                   visibility: str, turn_time_limit: Optional[float] = None,
-                  reveal_cards: bool = True, show_logs: bool = True) -> GameRoom:
+                  reveal_cards: bool = True, show_logs: bool = True,
+                  host_username: Optional[str] = None) -> GameRoom:
     with _rooms_lock:
         for _ in range(20):
             code = _generate_room_code()
@@ -355,7 +387,7 @@ def _create_room(seats: int, bot_mix: list[str], seed: Optional[int], bot_think_
         room = GameRoom(room_code=code, seats=seats, bot_mix=bot_mix, seed=seed,
                          bot_think_time=bot_think_time, visibility=visibility,
                          turn_time_limit=turn_time_limit, reveal_cards=reveal_cards,
-                         show_logs=show_logs)
+                         show_logs=show_logs, host_username=host_username)
         _rooms[code] = room
         return room
 
@@ -817,9 +849,14 @@ def api_create_game():
     if not isinstance(reveal_cards, bool) or not isinstance(show_logs, bool):
         return jsonify({"error": "reveal_cards and show_logs must be booleans"}), 400
 
+    host_username = body.get("host_username")
+    if host_username is not None and not isinstance(host_username, str):
+        return jsonify({"error": "host_username must be a string"}), 400
+
     room = _create_room(seats=seats, bot_mix=bot_mix, seed=seed, bot_think_time=bot_think_time,
                          visibility=visibility, turn_time_limit=turn_time_limit,
-                         reveal_cards=reveal_cards, show_logs=show_logs)
+                         reveal_cards=reveal_cards, show_logs=show_logs,
+                         host_username=host_username)
     return jsonify(_status_payload(room))
 
 

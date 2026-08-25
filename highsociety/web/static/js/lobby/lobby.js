@@ -381,6 +381,7 @@ export async function onCreateGame() {
 
   const turnTimeRaw = $('host-turn-time').value;
   const seedRaw = $('host-seed').value;
+  const profile = loadProfile();
   const body = {
     seats,
     bot_mix: botMix,
@@ -389,6 +390,9 @@ export async function onCreateGame() {
     turn_time_limit: turnTimeRaw ? parseFloat(turnTimeRaw) : null,
     reveal_cards: $('host-reveal-cards').checked,
     show_logs: $('host-show-logs').checked,
+    // Purely informational (see game_history.py's games.host_player_id) --
+    // ensureProfileSet() above already guarantees a profile exists here.
+    host_username: profile ? profile.username : null,
   };
   if (seedRaw) body.seed = parseInt(seedRaw, 10);
   try {

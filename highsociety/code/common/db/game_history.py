@@ -7,23 +7,30 @@ existing local/dev/test setup that hasn't configured a database. A game
 whose write fails or is slow also never blocks the actual game-over message
 reaching players — see record_finished_game_async.
 
-Schema (3 tables, see _SCHEMA_STATEMENTS for the exact DDL):
-  players       One row per distinct human username ever seen. `username`
-                is the identity key today, since there's no login system
-                yet — the nullable google_id/email columns exist so a future
-                Google Sign-In can attach a *real* identity to an existing
+Schema (see _SCHEMA_STATEMENTS for the exact DDL; the core three tables
+below, plus bots/game_results/ratings/cards/meta added for
+BACKEND_REWORK.MD's rework — see record_finished_game's own docstring for
+how those fit together):
+  players       One row per distinct human username ever seen, plus 3
+                reserved rows representing the shared identity of each bot
+                difficulty tier (see `bots`). `username` is the identity
+                key today, since there's no login system yet — the
+                nullable google_id/email columns exist so a future Google
+                Sign-In can attach a *real* identity to an existing
                 players.id later without changing any foreign key that
                 already points at it.
-  games         One row per finished game, including each rematch (a
+  games         One row per finished (or crashed/aborted — see
+                is_finished_successfully) game, including each rematch (a
                 rematch is just another call to record_finished_game).
   player_games  The "key that maps players to their past games": one row
-                per (game, participant). Bots have no persistent identity to
-                attach a row to, so they're recorded by name only
-                (player_id NULL, bot_name set) rather than being forced into
-                the players table.
+                per (game, participant). A bot participant is recorded by
+                flavor name (bot_name) same as always, and — when its
+                difficulty is known — also by the shared per-difficulty
+                player_id from `bots`, so it's no longer forced to be
+                identity-less the way a genuinely unique-per-bot row would
+                have to be.
 """
 import datetime
-import json
 import os
 import threading
 from typing import Optional
@@ -86,6 +93,163 @@ _SCHEMA_STATEMENTS = [
         unlocked_at TIMESTAMPTZ NOT NULL DEFAULT now(),
         UNIQUE (player_id, achievement_id)
     )
+    """,
+
+    # ---------------------------------------------------------------------
+    # Everything below was added for BACKEND_REWORK.MD's schema rework.
+    # Same idempotent style as above throughout -- every statement here is
+    # safe to re-run on every process start against the live production DB.
+    # ---------------------------------------------------------------------
+
+    "ALTER TABLE players ADD COLUMN IF NOT EXISTS games_played INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE players ADD COLUMN IF NOT EXISTS games_won INTEGER NOT NULL DEFAULT 0",
+
+    # One row per difficulty tier, pointing at a dedicated players row (see
+    # the seed INSERTs below) -- NOT one row per bot flavor name. A "Wagon
+    # bot" this game and a "Pip bot" next game can both be Hard difficulty;
+    # there's no meaningful persistent identity behind the random flavor
+    # name itself; there is behind the difficulty tier, which is what a
+    # game_actions/game_rounds row actually wants to attribute to.
+    """
+    CREATE TABLE IF NOT EXISTS bots (
+        player_id INTEGER PRIMARY KEY REFERENCES players(id) ON DELETE CASCADE,
+        difficulty TEXT NOT NULL CHECK (difficulty IN ('easy', 'medium', 'hard'))
+    )
+    """,
+    # Postgres has no `ADD CONSTRAINT IF NOT EXISTS` -- drop-then-recreate
+    # on every startup is how this codebase already achieves idempotency
+    # for anything that isn't a plain column/table (see this file's own
+    # comment above the `elo` column). Relaxed from a strict xor: bot rows
+    # now also carry a real player_id (the shared per-difficulty id above)
+    # alongside their existing bot_name flavor label -- every row already
+    # satisfies this looser check, since the old constraint was stricter.
+    "ALTER TABLE player_games DROP CONSTRAINT IF EXISTS player_xor_bot",
+    "ALTER TABLE player_games DROP CONSTRAINT IF EXISTS player_or_bot",
+    "ALTER TABLE player_games ADD CONSTRAINT player_or_bot "
+    "CHECK (player_id IS NOT NULL OR bot_name IS NOT NULL)",
+
+    # `bot_mix` (still present, see this file's own module docstring on
+    # `games`) is no longer populated for new rows -- these are its
+    # richer, per-seat replacement. All nullable: an untimed 2-seat game
+    # only ever fills player_1/player_2, and a seat's occupant (human or
+    # bot) might fail to resolve to a player_id in some edge case without
+    # that blocking the rest of the write.
+    "ALTER TABLE games ADD COLUMN IF NOT EXISTS host_player_id INTEGER REFERENCES players(id)",
+    "ALTER TABLE games ADD COLUMN IF NOT EXISTS time_control INTEGER",
+    "ALTER TABLE games ADD COLUMN IF NOT EXISTS winner_id INTEGER REFERENCES players(id)",
+    # True unless explicitly written False -- until this rework, a crashed/
+    # aborted game (see web_server.py's run_game exception path) left no
+    # row at all rather than one marked failed, so every row that existed
+    # before this column was added did, in fact, reach a clean finish.
+    "ALTER TABLE games ADD COLUMN IF NOT EXISTS is_finished_successfully BOOLEAN NOT NULL DEFAULT TRUE",
+    "ALTER TABLE games ADD COLUMN IF NOT EXISTS player_1 INTEGER REFERENCES players(id)",
+    "ALTER TABLE games ADD COLUMN IF NOT EXISTS player_2 INTEGER REFERENCES players(id)",
+    "ALTER TABLE games ADD COLUMN IF NOT EXISTS player_3 INTEGER REFERENCES players(id)",
+    "ALTER TABLE games ADD COLUMN IF NOT EXISTS player_4 INTEGER REFERENCES players(id)",
+    "ALTER TABLE games ADD COLUMN IF NOT EXISTS player_5 INTEGER REFERENCES players(id)",
+
+    # A per-(game, participant) summary purpose-built for "show me X's last
+    # N games" -- overlaps in content with player_games (which stays the
+    # source of truth for bot_name/eliminated/the xor-relaxed player_id),
+    # but keyed and shaped for that specific query instead of general use.
+    """
+    CREATE TABLE IF NOT EXISTS game_results (
+        game_id INTEGER NOT NULL REFERENCES games(id) ON DELETE CASCADE,
+        user_id INTEGER NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+        num_players INTEGER NOT NULL,
+        final_money INTEGER NOT NULL,
+        final_score INTEGER NOT NULL,
+        placement INTEGER NOT NULL,
+        PRIMARY KEY (game_id, user_id)
+    )
+    """,
+
+    # Full rating history -- players.elo (updated in place since it was
+    # first added) stays the fast "current rating" read matchmaking.py
+    # uses; this is the append-only audit trail alongside it.
+    """
+    CREATE TABLE IF NOT EXISTS ratings (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+        game_id INTEGER NOT NULL REFERENCES games(id) ON DELETE CASCADE,
+        old_rating INTEGER NOT NULL,
+        new_rating INTEGER NOT NULL,
+        rating_change INTEGER NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_ratings_user_id ON ratings (user_id)",
+
+    # A pure metadata mirror of the fixed card set in HSConfig.json's
+    # game_settings.rules (painting_values/prestige_card_count/
+    # disgrace_card_types) -- not deduplicated by (name, type, value): the
+    # 3 identical Prestige cards deliberately get 3 distinct card_id rows,
+    # since the request was for a stable id per physical card, not per
+    # card design. No natural unique key to ON CONFLICT against, so this
+    # only seeds once, guarded by "the table is still empty" rather than
+    # per-row conflict handling.
+    """
+    CREATE TABLE IF NOT EXISTS cards (
+        card_id SERIAL PRIMARY KEY,
+        name TEXT NOT NULL,
+        type TEXT NOT NULL,
+        value INTEGER NOT NULL
+    )
+    """,
+    """
+    INSERT INTO cards (name, type, value)
+    SELECT * FROM (VALUES
+        ('Painting (1)', 'Painting', 1), ('Painting (2)', 'Painting', 2),
+        ('Painting (3)', 'Painting', 3), ('Painting (4)', 'Painting', 4),
+        ('Painting (5)', 'Painting', 5), ('Painting (6)', 'Painting', 6),
+        ('Painting (7)', 'Painting', 7), ('Painting (8)', 'Painting', 8),
+        ('Painting (9)', 'Painting', 9), ('Painting (10)', 'Painting', 10),
+        ('Prestige Card', 'PrestigeCard', 0), ('Prestige Card', 'PrestigeCard', 0),
+        ('Prestige Card', 'PrestigeCard', 0),
+        ('Faux Pas', 'FauxPas', 0), ('Passe', 'Passe', -5), ('Scandale', 'Scandale', 0)
+    ) AS v(name, type, value)
+    WHERE NOT EXISTS (SELECT 1 FROM cards)
+    """,
+
+    # One-line description per table, for anyone poking around the
+    # database directly without this file's own docstrings in front of
+    # them. A real unique key (table_name) exists here, so ON CONFLICT
+    # DO NOTHING is the natural idempotency guard, unlike `cards` above.
+    """
+    CREATE TABLE IF NOT EXISTS meta (
+        table_name TEXT PRIMARY KEY,
+        description TEXT NOT NULL
+    )
+    """,
+    """
+    INSERT INTO meta (table_name, description) VALUES
+        ('players', 'One row per distinct human username ever seen, plus 3 reserved rows (see bots) representing the shared identity of each bot difficulty tier.'),
+        ('games', 'One row per finished (or crashed/aborted -- see is_finished_successfully) game, including each rematch.'),
+        ('player_games', 'One row per (game, participant), human or bot -- the join between players/bots and games.'),
+        ('player_achievements', 'Unlocked achievement ids per player, Google-linked accounts only.'),
+        ('bots', 'Maps the 3 reserved per-difficulty players rows to their difficulty tier.'),
+        ('game_results', 'One row per (game, participant) shaped for "show me a player''s last N games".'),
+        ('ratings', 'Append-only Elo rating history, one row per rated participant per game.'),
+        ('cards', 'Metadata mirror of the fixed status-card set -- one row per physical card, not deduplicated by design/value.'),
+        ('meta', 'This table.')
+    ON CONFLICT (table_name) DO NOTHING
+    """,
+
+    # The 3 reserved bot-tier identities themselves -- namespaced usernames
+    # that can never collide with a real guest/Google username (see
+    # guest_username.py's own generator, which never produces a "__"
+    # prefix).
+    """
+    INSERT INTO players (username, display_name) VALUES
+        ('__bot_easy__', 'Easy Bot'), ('__bot_medium__', 'Medium Bot'), ('__bot_hard__', 'Hard Bot')
+    ON CONFLICT (username) DO NOTHING
+    """,
+    """
+    INSERT INTO bots (player_id, difficulty)
+    SELECT p.id, v.difficulty FROM players p
+    JOIN (VALUES ('__bot_easy__', 'easy'), ('__bot_medium__', 'medium'), ('__bot_hard__', 'hard'))
+        AS v(username, difficulty) ON p.username = v.username
+    ON CONFLICT (player_id) DO NOTHING
     """,
 ]
 
@@ -451,20 +615,31 @@ def rename_player(old_username: str, new_username: str) -> bool:
 
 def record_finished_game(*, room_code: str, seats: int, bot_mix: list,
                           started_at: datetime.datetime, finished_at: datetime.datetime,
-                          participants: list, achievement_unlocks: Optional[dict] = None) -> None:
+                          participants: list, achievement_unlocks: Optional[dict] = None,
+                          host_username: Optional[str] = None, time_control: Optional[int] = None,
+                          is_finished_successfully: bool = True) -> None:
     """
     `participants`: one dict per seat, already reduced to exactly what this
     module needs — see web_server.py's call site for how it's built from
     PlayGame.final_standings/GameRoom.players. Keeping that translation in
     the caller (rather than importing NetworkPlayer/PlayGame here) is what
     lets this stay a plain, independently-testable persistence layer with no
-    dependency on the game engine's own classes.
+    dependency on the game engine's own classes. Empty for a game that
+    crashed before final_standings ever existed (see
+    is_finished_successfully below) — every per-participant write below is
+    simply skipped in that case, leaving just the bare `games` row.
 
     Each participant: {"is_bot": bool, "username": str | None, "name": str,
                         "points": int, "money_left": int, "is_winner": bool,
-                        "eliminated": bool}
+                        "eliminated": bool, "difficulty": str | None}
     Exactly one of (is_bot False + username set) or (is_bot True + username
-    None) holds per participant — see the player_xor_bot constraint.
+    None) holds per participant. `difficulty` ("easy"/"medium"/"hard") is
+    only meaningful when is_bot is True — see the `bots` table: a bot
+    participant with a known difficulty gets a real player_id (the shared
+    identity for that whole difficulty tier) alongside its existing
+    bot_name flavor label; omitted or unrecognized, it falls back to the
+    original bot_name-only behavior (player_id stays NULL), so older
+    callers/tests that don't pass it are unaffected.
 
     `achievement_unlocks`: {username: {achievement_id, ...}} from
     achievements.detect_per_game_achievements — everything earned in this
@@ -480,7 +655,23 @@ def record_finished_game(*, room_code: str, seats: int, bot_mix: list,
     everyone else's `elo` column simply sits at whatever it already was
     (1000 by default), which matchmaking.py still reads and pairs by as
     normal, just never diverging for an identity with nothing persistent
-    behind it.
+    behind it. Every rating change is also appended to `ratings` (the
+    audit trail `elo` alone doesn't keep).
+
+    `games_played`/`games_won` on `players`, by contrast, are NOT gated to
+    google_id -- they increment for every human participant, matching
+    get_player_profile_stats' own (already ungated) COUNT query, which
+    these columns exist to duplicate as a cheap denormalization rather
+    than replace.
+
+    `host_username`: whoever created the room (see web_server.py's
+    GameRoom.host_username), resolved to a player_id the same way any
+    other participant would be -- independent of whether they're also
+    seated (the common case) or even human.
+
+    `is_finished_successfully`: False only for the crash/abort path (see
+    web_server.py's run_game) -- True is the default because every
+    pre-existing call site is a clean finish.
     """
     if not is_configured():
         return
@@ -492,26 +683,81 @@ def record_finished_game(*, room_code: str, seats: int, bot_mix: list,
     try:
         conn = _connect()
         with conn, conn.cursor() as cur:
+            host_player_id = None
+            if host_username:
+                host_player_id, _, _ = _upsert_player(cur, host_username, host_username)
+
+            # `bot_mix` (the parameter) is still accepted for backward
+            # compatibility with existing callers/tests, but deliberately
+            # not written here any more -- superseded by player_1..
+            # player_5 + the bots table, which carry the same information
+            # (and more) per-seat rather than as one game-wide list. The
+            # column itself stays (old rows still have it; new rows just
+            # get the schema's own DEFAULT '[]').
             cur.execute(
                 """
-                INSERT INTO games (room_code, seats, bot_mix, started_at, finished_at)
-                VALUES (%s, %s, %s, %s, %s)
+                INSERT INTO games (room_code, seats, started_at, finished_at,
+                                    host_player_id, time_control, is_finished_successfully)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
                 RETURNING id
                 """,
-                (room_code, seats, json.dumps(bot_mix), started_at, finished_at),
+                (room_code, seats, started_at, finished_at,
+                 host_player_id, time_control, is_finished_successfully),
             )
             game_id = cur.fetchone()[0]
+
+            # Mirrors PlayGame's own win rule (gameplay.py's
+            # final_standings/winners computation), NOT a plain points
+            # sort: a player eliminated for having the least money loses
+            # outright regardless of points (they can easily have the
+            # *highest* points and still lose this way -- confirmed live),
+            # so eliminated participants always rank behind everyone else
+            # here. Within each tier, higher points ranks better. Ties
+            # (including multiple simultaneous winners) are broken by
+            # participants' original order -- a documented simplification,
+            # since the game itself doesn't produce a single strict
+            # ranking on a genuine tie.
+            def _placement_tier(participant: dict) -> int:
+                if participant["is_winner"]:
+                    return 0
+                if participant["eliminated"]:
+                    return 2
+                return 1
+
+            placement_by_index = {
+                original_index: rank + 1
+                for rank, original_index in enumerate(
+                    sorted(range(len(participants)),
+                           key=lambda i: (_placement_tier(participants[i]), -participants[i]["points"]))
+                )
+            }
+
             rated_standings = []  # {"username", "points", "rating"} -- see elo.compute_elo_deltas
             rated_player_ids = {}  # username -> player_id, for writing the delta back below
-            for p in participants:
+            elo_before_by_username = {}  # username -> rating before this game, for the ratings audit row
+            seat_player_ids = []  # in participant order -- becomes player_1..player_5 below
+            winner_player_id = None  # first winner only -- see this function's own docstring on ties
+            for index, p in enumerate(participants):
                 player_id = None
                 google_id = None
                 elo_before = None
                 bot_name = None
                 if p["is_bot"]:
                     bot_name = p["name"]
+                    difficulty = p.get("difficulty")
+                    if difficulty:
+                        cur.execute("SELECT player_id FROM bots WHERE difficulty = %s", (difficulty,))
+                        row = cur.fetchone()
+                        if row is not None:
+                            player_id = row[0]
                 else:
                     player_id, google_id, elo_before = _upsert_player(cur, p["username"], p["name"])
+                    cur.execute(
+                        "UPDATE players SET games_played = games_played + 1, games_won = games_won + %s WHERE id = %s",
+                        (1 if p["is_winner"] else 0, player_id),
+                    )
+                seat_player_ids.append(player_id)
+
                 cur.execute(
                     """
                     INSERT INTO player_games
@@ -521,9 +767,24 @@ def record_finished_game(*, room_code: str, seats: int, bot_mix: list,
                     (game_id, player_id, bot_name, p["points"], p["money_left"],
                      p["is_winner"], p["eliminated"]),
                 )
+
+                if player_id is not None:
+                    if p["is_winner"] and winner_player_id is None:
+                        winner_player_id = player_id
+                    cur.execute(
+                        """
+                        INSERT INTO game_results (game_id, user_id, num_players, final_money, final_score, placement)
+                        VALUES (%s, %s, %s, %s, %s, %s)
+                        ON CONFLICT (game_id, user_id) DO NOTHING
+                        """,
+                        (game_id, player_id, len(participants), p["money_left"], p["points"],
+                         placement_by_index[index]),
+                    )
+
                 if player_id is not None and google_id is not None:
                     rated_standings.append({"username": p["username"], "points": p["points"], "rating": elo_before})
                     rated_player_ids[p["username"]] = player_id
+                    elo_before_by_username[p["username"]] = elo_before
 
                     ids_to_unlock = set(achievement_unlocks.get(p["username"]) or ())
                     if p["is_winner"]:
@@ -542,10 +803,29 @@ def record_finished_game(*, room_code: str, seats: int, bot_mix: list,
                             """,
                             (player_id, achievement_id),
                         )
+
             for username, delta in elo.compute_elo_deltas(rated_standings).items():
                 if delta:
-                    cur.execute("UPDATE players SET elo = elo + %s WHERE id = %s",
-                                (delta, rated_player_ids[username]))
+                    player_id = rated_player_ids[username]
+                    old_rating = elo_before_by_username[username]
+                    cur.execute("UPDATE players SET elo = elo + %s WHERE id = %s", (delta, player_id))
+                    cur.execute(
+                        """
+                        INSERT INTO ratings (user_id, game_id, old_rating, new_rating, rating_change)
+                        VALUES (%s, %s, %s, %s, %s)
+                        """,
+                        (player_id, game_id, old_rating, old_rating + delta, delta),
+                    )
+
+            seat_columns = (seat_player_ids + [None] * 5)[:5]
+            cur.execute(
+                """
+                UPDATE games SET winner_id = %s, player_1 = %s, player_2 = %s,
+                                  player_3 = %s, player_4 = %s, player_5 = %s
+                WHERE id = %s
+                """,
+                (winner_player_id, *seat_columns, game_id),
+            )
     except Exception as e:  # noqa: BLE001 — see record_finished_game_async's docstring
         LoggingManager.warning(f"game_history.record_finished_game failed: {e}")
     finally:

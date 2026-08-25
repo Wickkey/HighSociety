@@ -121,6 +121,192 @@ def test_record_finished_game_writes_one_row_per_human_and_bot_participant(datab
     conn.close.assert_called_once()
 
 
+def test_record_finished_game_gives_a_bot_with_known_difficulty_a_real_player_id(database_url):
+    """BACKEND_REWORK.MD: a bot participant whose difficulty is known
+    resolves to the shared per-difficulty player_id from the `bots` table
+    (alongside its existing bot_name flavor label), instead of staying
+    player_id-less the way a bot with no difficulty info still does (see
+    test_record_finished_game_writes_one_row_per_human_and_bot_participant,
+    unchanged)."""
+    game_history._schema_ready = True
+    conn, cursor = _fake_connection()
+    cursor.fetchone.side_effect = iter([
+        (1,),               # INSERT INTO games ... RETURNING id
+        (10, None, 1000),   # _upsert_player(alice) -- guest, no google_id
+        (55,),              # SELECT player_id FROM bots WHERE difficulty = 'hard'
+    ])
+    participants = [
+        {"is_bot": False, "username": "alice", "name": "Alice",
+         "points": 12, "money_left": 3, "is_winner": True, "eliminated": False},
+        {"is_bot": True, "username": None, "name": "Wagon bot",
+         "points": 5, "money_left": 0, "is_winner": False, "eliminated": True, "difficulty": "hard"},
+    ]
+    with patch.object(game_history, "_connect", return_value=conn):
+        game_history.record_finished_game(
+            room_code="ABCDE", seats=2, bot_mix=["hard"],
+            started_at=datetime.datetime.now(datetime.timezone.utc),
+            finished_at=datetime.datetime.now(datetime.timezone.utc),
+            participants=participants,
+        )
+
+    queries_and_params = [(call.args[0], call.args[1]) for call in cursor.execute.call_args_list]
+    bot_lookups = [(q, p) for q, p in queries_and_params if "SELECT player_id FROM bots" in q]
+    assert bot_lookups == [("SELECT player_id FROM bots WHERE difficulty = %s", ("hard",))]
+
+    player_games_inserts = [p for q, p in queries_and_params if "INSERT INTO player_games" in q]
+    bot_row = player_games_inserts[1]
+    assert bot_row[1] == 55  # player_id -- the shared "hard" identity, not None
+    assert bot_row[2] == "Wagon bot"  # bot_name -- the flavor label, untouched
+
+    game_results_inserts = [p for q, p in queries_and_params if "INSERT INTO game_results" in q]
+    assert any(p[1] == 55 for p in game_results_inserts)  # bot gets a game_results row too now
+
+
+def test_record_finished_game_resolves_host_username_to_host_player_id(database_url):
+    game_history._schema_ready = True
+    conn, cursor = _fake_connection()
+    cursor.fetchone.side_effect = iter([
+        (99, None, 1000),  # _upsert_player(host) -- resolved before the games INSERT
+        (1,),               # INSERT INTO games ... RETURNING id
+    ])
+    with patch.object(game_history, "_connect", return_value=conn):
+        game_history.record_finished_game(
+            room_code="ABCDE", seats=2, bot_mix=[],
+            started_at=datetime.datetime.now(datetime.timezone.utc),
+            finished_at=datetime.datetime.now(datetime.timezone.utc),
+            participants=[], host_username="hosty",
+        )
+    games_insert = next(call for call in cursor.execute.call_args_list if "INSERT INTO games" in call.args[0])
+    # (room_code, seats, started_at, finished_at, host_player_id, time_control, is_finished_successfully)
+    assert games_insert.args[1][4] == 99
+
+
+def test_record_finished_game_can_mark_a_crashed_game_as_unsuccessful(database_url):
+    """See web_server.py's run_game crash path -- a game that never
+    reached final_standings still gets a row, just one that says so."""
+    game_history._schema_ready = True
+    conn, cursor = _fake_connection()
+    cursor.fetchone.side_effect = iter([(1,)])  # just the games insert -- no participants
+    with patch.object(game_history, "_connect", return_value=conn):
+        game_history.record_finished_game(
+            room_code="ABCDE", seats=2, bot_mix=[],
+            started_at=datetime.datetime.now(datetime.timezone.utc),
+            finished_at=datetime.datetime.now(datetime.timezone.utc),
+            participants=[], is_finished_successfully=False,
+        )
+    games_insert = next(call for call in cursor.execute.call_args_list if "INSERT INTO games" in call.args[0])
+    assert games_insert.args[1][-1] is False
+
+
+def test_record_finished_game_increments_games_played_and_won_for_every_human(database_url):
+    """Unlike achievements/elo, these aren't gated to a google_id -- every
+    human participant counts, matching get_player_profile_stats' own
+    (already ungated) COUNT query."""
+    game_history._schema_ready = True
+    conn, cursor = _fake_connection()  # default fixture: google_id=None for every upsert
+    participants = [
+        {"is_bot": False, "username": "alice", "name": "Alice",
+         "points": 12, "money_left": 3, "is_winner": True, "eliminated": False},
+        {"is_bot": False, "username": "bob", "name": "Bob",
+         "points": 5, "money_left": 0, "is_winner": False, "eliminated": False},
+    ]
+    with patch.object(game_history, "_connect", return_value=conn):
+        game_history.record_finished_game(
+            room_code="ABCDE", seats=2, bot_mix=[],
+            started_at=datetime.datetime.now(datetime.timezone.utc),
+            finished_at=datetime.datetime.now(datetime.timezone.utc),
+            participants=participants,
+        )
+    updates = [call.args[1] for call in cursor.execute.call_args_list
+               if call.args[0].startswith("UPDATE players SET games_played")]
+    assert len(updates) == 2  # one per human, none for a bot
+    assert sorted(params[0] for params in updates) == [0, 1]  # one winner (+1), one loser (+0)
+
+
+def test_record_finished_game_placement_reflects_is_winner_not_raw_points(database_url):
+    """The money-elimination rule (gameplay.py's final_standings) means a
+    participant can have the *highest* points and still lose outright --
+    confirmed live. placement must follow is_winner/eliminated, not a
+    naive points sort (which would have ranked the eliminated bot below
+    first despite its higher score)."""
+    game_history._schema_ready = True
+    conn, cursor = _fake_connection()
+    participants = [
+        {"is_bot": True, "username": None, "name": "Juno bot",
+         "points": 164, "money_left": 1, "is_winner": False, "eliminated": True},
+        {"is_bot": False, "username": "alice", "name": "Alice",
+         "points": -3, "money_left": 106, "is_winner": True, "eliminated": False},
+    ]
+    with patch.object(game_history, "_connect", return_value=conn):
+        game_history.record_finished_game(
+            room_code="ABCDE", seats=2, bot_mix=["easy"],
+            started_at=datetime.datetime.now(datetime.timezone.utc),
+            finished_at=datetime.datetime.now(datetime.timezone.utc),
+            participants=participants,
+        )
+    game_results_inserts = [call.args[1] for call in cursor.execute.call_args_list
+                             if "INSERT INTO game_results" in call.args[0]]
+    placement_by_user = {p[1]: p[5] for p in game_results_inserts}
+    alice_id = next(p[1] for p in game_results_inserts if p[4] == -3)
+    assert placement_by_user[alice_id] == 1  # the actual winner, despite fewer points
+
+
+def test_record_finished_game_writes_seat_columns_and_winner_id(database_url):
+    game_history._schema_ready = True
+    conn, cursor = _fake_connection()
+    participants = [
+        {"is_bot": False, "username": "alice", "name": "Alice",
+         "points": 12, "money_left": 3, "is_winner": True, "eliminated": False},
+        {"is_bot": True, "username": None, "name": "Marble",
+         "points": 5, "money_left": 0, "is_winner": False, "eliminated": True},  # no difficulty known
+    ]
+    with patch.object(game_history, "_connect", return_value=conn):
+        game_history.record_finished_game(
+            room_code="ABCDE", seats=2, bot_mix=["greedy"],
+            started_at=datetime.datetime.now(datetime.timezone.utc),
+            finished_at=datetime.datetime.now(datetime.timezone.utc),
+            participants=participants,
+        )
+    seat_update = next(call for call in cursor.execute.call_args_list
+                        if call.args[0].strip().startswith("UPDATE games SET winner_id"))
+    winner_id, p1, p2, p3, p4, p5, game_id = seat_update.args[1]
+    assert p1 is not None and winner_id == p1  # alice, seat 1, also the winner
+    assert p2 is None  # the bot -- no difficulty info, so no resolvable player_id
+    assert p3 is None and p4 is None and p5 is None  # only 2 seats were ever filled
+
+
+def test_record_finished_game_writes_a_ratings_row_per_rated_participant(database_url):
+    game_history._schema_ready = True
+    conn, cursor = _fake_connection()
+    cursor.fetchone.side_effect = iter([
+        (1,),                    # INSERT INTO games ... RETURNING id
+        (10, "g-alice", 1000),   # _upsert_player(alice) RETURNING id, google_id, elo
+        (1,),                    # win-count SELECT for alice (her 1st win)
+        (11, "g-bob", 1000),     # _upsert_player(bob) RETURNING id, google_id, elo
+    ])
+    participants = [
+        {"is_bot": False, "username": "alice", "name": "Alice",
+         "points": 15, "money_left": 5, "is_winner": True, "eliminated": False},
+        {"is_bot": False, "username": "bob", "name": "Bob",
+         "points": 5, "money_left": 0, "is_winner": False, "eliminated": False},
+    ]
+    with patch.object(game_history, "_connect", return_value=conn):
+        game_history.record_finished_game(
+            room_code="ABCDE", seats=2, bot_mix=[],
+            started_at=datetime.datetime.now(datetime.timezone.utc),
+            finished_at=datetime.datetime.now(datetime.timezone.utc),
+            participants=participants,
+        )
+    ratings_inserts = [call.args[1] for call in cursor.execute.call_args_list
+                       if "INSERT INTO ratings" in call.args[0]]
+    assert len(ratings_inserts) == 2
+    by_player = {row[0]: row for row in ratings_inserts}  # user_id -> (user_id, game_id, old, new, change)
+    assert by_player[10][2] == 1000  # old_rating
+    assert by_player[10][3] == by_player[10][2] + by_player[10][4]  # new_rating == old + change
+    assert by_player[10][4] > 0  # alice (winner) gains
+    assert by_player[11][4] < 0  # bob (loser) loses
+
+
 def test_record_finished_game_failure_is_caught_not_raised(database_url):
     game_history._schema_ready = True
     with patch.object(game_history, "_connect", side_effect=RuntimeError("unreachable")):

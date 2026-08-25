@@ -207,6 +207,27 @@ def test_create_status_and_config_endpoints(running_web_server):
     assert bad_visibility.status_code == 400
 
 
+def test_create_game_stores_host_username_for_game_history(running_web_server):
+    client = web_server.app.test_client()
+
+    resp = client.post(
+        "/api/create_game", json={"seats": 2, "bot_mix": ["pass"], "host_username": "alice"}
+    )
+    assert resp.status_code == 200
+    room_code = resp.get_json()["room_code"]
+    assert web_server._rooms[room_code].host_username == "alice"
+
+    # Omitted entirely -- purely informational, never required.
+    no_host = client.post("/api/create_game", json={"seats": 2, "bot_mix": ["pass"]})
+    assert no_host.status_code == 200
+    assert web_server._rooms[no_host.get_json()["room_code"]].host_username is None
+
+    bad_type = client.post(
+        "/api/create_game", json={"seats": 2, "bot_mix": ["pass"], "host_username": 123}
+    )
+    assert bad_type.status_code == 400
+
+
 def test_rooms_listing_shows_only_open_public_rooms(running_web_server):
     client = web_server.app.test_client()
 
