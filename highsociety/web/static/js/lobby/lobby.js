@@ -11,7 +11,7 @@
 // for the same reason documented in gameState.js/messages.js: everything
 // is read inside a function body, never at this module's own top-level
 // evaluation, so load order never matters.
-import { $, hide, show, showError, showScreen } from '../utils/dom.js';
+import { $, hide, show, showError, showScreen, setScreenPath } from '../utils/dom.js';
 import { ensureProfileSet, loadProfile, renderProfileChip, saveProfile, setSessionStatus } from '../auth/profile.js';
 import { game, resetGameState, seedOpponents, applyRoomDisplaySettings } from '../game/gameState.js';
 import { renderOpponents } from '../game/gameRenderer.js';
@@ -127,10 +127,12 @@ export function showHomeTile(target) {
   hide($('home-global-stats'));
   hide($('home-recent-games'));
   HOME_TILE_TARGETS.forEach((t) => $(`home-panel-${t}`).classList.toggle('hidden', t !== target));
+  setScreenPath(`/${target}`); // 'join'/'host'/'rules' -- matches web_server.py's static routes exactly
 }
 export function showHomeTiles() {
   show($('home-tiles'));
   HOME_TILE_TARGETS.forEach((t) => hide($(`home-panel-${t}`)));
+  setScreenPath('/');
   loadHomeGlobalStats();
   loadHomeRecentGames();
 }
@@ -139,7 +141,7 @@ export function showHomeTiles() {
 // scoped to "active" in any real sense. Fetched fresh every time the tile
 // picker is (re-)shown rather than cached, since it's cheap and this
 // screen is revisited often (e.g. every "Return to Home").
-async function loadHomeGlobalStats() {
+export async function loadHomeGlobalStats() {
   const section = $('home-global-stats');
   try {
     const res = await fetch('/api/global_stats');
@@ -465,10 +467,12 @@ export async function onCopyRoomLink() {
   const btn = $('btn-copy-room-link');
   btn.classList.add('copied');
   btn.title = 'Copied!';
+  btn.querySelector('span').textContent = 'Copied!';
   clearTimeout(onCopyRoomLink._resetTimer);
   onCopyRoomLink._resetTimer = setTimeout(() => {
     btn.classList.remove('copied');
     btn.title = 'Copy invite link';
+    btn.querySelector('span').textContent = 'Copy';
   }, 1500);
 }
 

@@ -1,5 +1,5 @@
 // Account screen: profile editing, achievements grid, public stats.
-import { $, hide, show, showError, showScreen } from '../utils/dom.js';
+import { $, hide, show, showError, showScreen, setScreenPath } from '../utils/dom.js';
 import { escapeHtml } from '../utils/formatting.js';
 import { loadProfile, saveProfile, renderProfileChip } from '../auth/profile.js';
 import { fetchJSON } from '../lobby/lobby.js';
@@ -57,6 +57,24 @@ function renderAchievementTile(a, unlocked) {
 }
 
 // Games played/win rate: shown as a dimmed "—" skeleton (see the
+// Fired once as soon as boot knows who's signed in (see login.js's
+// proceedPastLogin) rather than waiting for the user to actually click
+// into Account -- the query itself is cheap, but it's still a real round
+// trip to remote Supabase (2-3s isn't unusual, see this session's own
+// production timing notes), so front-loading it while they're still
+// browsing the home screen removes that wait from the moment they open
+// Account. Keyed by username so a mid-session identity change (login/
+// logout/username edit) doesn't serve a stale prefetch for someone else.
+let _statsPrefetch = null;
+let _statsPrefetchUsername = null;
+
+export function prefetchAccountStats() {
+  const profile = loadProfile();
+  if (!profile) return;
+  _statsPrefetchUsername = profile.username;
+  _statsPrefetch = fetchJSON(`/api/profile/${encodeURIComponent(profile.username)}`).catch(() => null);
+}
+
 // account-stats-row.loading CSS) the instant the screen opens, then
 // swapped for real numbers once /api/profile resolves -- previously the
 // whole row was just `hidden` until the fetch finished, so the cards
@@ -70,8 +88,17 @@ async function loadAccountStats() {
   row.classList.add('loading');
   if (!profile) return;
   try {
-    const stats = await fetchJSON(`/api/profile/${encodeURIComponent(profile.username)}`);
-    $('account-elo').textContent = stats.elo;
+    const stats = (_statsPrefetch && _statsPrefetchUsername === profile.username)
+      ? await _statsPrefetch
+      : await fetchJSON(`/api/profile/${encodeURIComponent(profile.username)}`);
+    // null means the prefetch itself failed (404/network error, caught to
+    // null above rather than a rejection) -- same as the 404 catch below,
+    // just arriving through the cached-promise path instead of a throw.
+    if (!stats) return;
+    // A guest's elo column never actually moves (record_finished_game only
+    // rates google_id-linked players and bots) -- showing the untouched
+    // default as if it meant something would just be misleading.
+    $('account-elo').textContent = profile.google_id ? stats.elo : 'Unrated';
     $('account-stat-games').textContent = stats.games_played;
     $('account-stat-wins').textContent = stats.wins;
     $('account-stat-winrate').textContent = `${Math.round(stats.win_rate * 100)}%`;
@@ -119,11 +146,15 @@ export function showAccountScreen() {
   $('account-avatar').textContent = profile ? profile.username.charAt(0).toUpperCase() : '?';
   $('account-username-display').textContent = profile ? profile.username : '';
   $('account-username-input').value = profile ? profile.username : '';
-  $('account-elo').textContent = '1000';
+  $('account-elo').textContent = profile && !profile.google_id ? 'Unrated' : '1000';
+  if (profile && !profile.google_id) {
+    showToast('Sign in with Google to start tracking your Elo rating.');
+  }
   hide($('account-username-edit')); // collapsed by default -- see onAccountEditUsernameClick
   hide($('account-error'));
   hide($('account-saved'));
   showScreen('screen-account');
+  setScreenPath('/account');
   loadAccountStats();
 }
 
@@ -149,6 +180,7 @@ export function onAccountCancelEditClick() {
 // same unlock logic, just reachable independently of profile editing.
 export function showAchievementsScreen() {
   showScreen('screen-achievements');
+  setScreenPath('/achievements');
   loadAchievements();
 }
 

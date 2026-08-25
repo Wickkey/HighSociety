@@ -4,7 +4,7 @@
 // library: a sparkline here is just a <polyline> built from an array of
 // points, computed once when this screen opens, not a render loop -- see
 // this session's own cost discussion, it's negligible either way.
-import { $, hide, show, showScreen } from '../utils/dom.js';
+import { $, hide, show, showScreen, setScreenPath } from '../utils/dom.js';
 import { escapeHtml } from '../utils/formatting.js';
 import { loadProfile } from '../auth/profile.js';
 import { fetchJSON } from './lobby.js';
@@ -40,6 +40,7 @@ function renderSparkline(history) {
 
 export async function showLeaderboardScreen() {
   showScreen('screen-leaderboard');
+  setScreenPath('/leaderboard');
   const body = $('leaderboard-body');
   const empty = $('leaderboard-empty');
   body.innerHTML = '';

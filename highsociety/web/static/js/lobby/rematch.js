@@ -226,6 +226,10 @@ export function handleRematchMessage(msg) {
   // of requiring a second round trip just to display it correctly.
   if (msg.data && msg.data.seed != null) {
     game.seed = msg.data.seed;
+    // Always false in practice (rematches always auto-roll, see
+    // _maybe_start_rematch's own comment) but read from the server
+    // rather than hardcoded, so this stays correct if that ever changes.
+    game.manualSeed = !!msg.data.manual_seed;
     applyRoomDisplaySettings(); // resetGameState already called this once with the stale seed baked in
   }
   // Resign works anytime once in a game (see gameActions.js's onResign) --

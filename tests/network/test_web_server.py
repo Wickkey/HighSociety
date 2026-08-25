@@ -262,20 +262,25 @@ def test_seed_is_reported_explicit_or_random(running_web_server):
     """The seed is shown in-game (see app.js's seed-display) so a game can
     be reported/reproduced precisely -- confirm both an explicitly chosen
     seed and an auto-generated one round-trip correctly through
-    /api/create_game and /api/status."""
+    /api/create_game and /api/status. manual_seed distinguishes the two
+    cases so the client only displays a seed someone actually typed in
+    (see gameState.js's applyRoomDisplaySettings), not one nobody chose."""
     client = web_server.app.test_client()
 
     explicit = client.post(
         "/api/create_game", json={"seats": 2, "bot_mix": ["pass"], "seed": 424242}
     ).get_json()
     assert explicit["seed"] == 424242
+    assert explicit["manual_seed"] is True
     status = client.get(f"/api/status?room={explicit['room_code']}").get_json()
     assert status["seed"] == 424242
+    assert status["manual_seed"] is True
 
     random_seed = client.post(
         "/api/create_game", json={"seats": 2, "bot_mix": ["pass"]}
     ).get_json()
     assert isinstance(random_seed["seed"], int)  # some real seed was picked, not null/omitted
+    assert random_seed["manual_seed"] is False
 
 
 def test_add_bot_fills_an_empty_seat_and_can_start_the_game(running_web_server):
@@ -1505,6 +1510,31 @@ def test_guest_suggest_retries_past_a_taken_candidate(monkeypatch):
     assert resp.get_json() == {"username": "CoralGoku222"}
 
 
+def test_guest_suggest_retries_past_a_username_live_in_a_room(monkeypatch, running_web_server):
+    """username_is_taken() alone only knows about `players` rows, which
+    don't exist for a guest mid-game -- a candidate matching someone
+    currently seated in a live room must also be retried past (see
+    _active_usernames). Constructs the NetworkPlayer directly (transport
+    mocked out) rather than a real websocket handshake, since only
+    room.players' membership matters here."""
+    from highsociety.code.gamecore.player.networkplayer import NetworkPlayer
+
+    monkeypatch.setattr(game_history, "is_configured", lambda: True)
+    monkeypatch.setattr(game_history, "username_is_taken", lambda username: False)
+    monkeypatch.setattr(web_server, "generate_guest_username",
+                         iter(["AzureNaruto111", "CoralGoku222"]).__next__)
+
+    client = web_server.app.test_client()
+    room = client.post("/api/create_game", json={"seats": 2, "bot_mix": []}).get_json()
+    live_player = NetworkPlayer(name="AzureNaruto111", username="AzureNaruto111",
+                                 transport=MagicMock(), game_id=room["room_code"])
+    web_server._rooms[room["room_code"]].players.append(live_player)
+
+    resp = client.get("/api/auth/guest/suggest")
+    assert resp.status_code == 200
+    assert resp.get_json() == {"username": "CoralGoku222"}
+
+
 def test_guest_claim_requires_a_non_empty_username():
     resp = web_server.app.test_client().post("/api/auth/guest/claim", json={"username": "   "})
     assert resp.status_code == 400
@@ -1766,3 +1796,16 @@ def test_rating_history_endpoint_returns_a_list(monkeypatch):
     assert resp.get_json()["history"] == [
         {"old_rating": 1000, "new_rating": 1016, "created_at": "2026-01-01T00:00:00"},
     ]
+
+
+# ---------------------------------------- static per-screen URLs --------
+
+@pytest.mark.parametrize("path", ["/", "/play", "/join", "/host", "/leaderboard", "/rules", "/account", "/achievements"])
+def test_static_screen_paths_all_serve_the_same_app_shell(path):
+    """Each of the 7 top-level sidebar screens gets a real, refreshable/
+    shareable URL (see app.js's SCREEN_PATHS/setScreenPath) -- all served
+    by the same index() view as '/', since this is a single-page app that
+    figures out which screen to show client-side."""
+    resp = web_server.app.test_client().get(path)
+    assert resp.status_code == 200
+    assert b"High Society" in resp.data

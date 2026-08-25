@@ -69,9 +69,11 @@ export function resetGameState(myUsername, status) {
     // (see urgentWindowSeconds), not re-sent per move.
     turnTimeLimit: status ? status.turn_time_limit : null,
     // Shown in-game (see applyRoomDisplaySettings) so a game can be
-    // reported/reproduced precisely -- "it happened in seed 12345" -- even
-    // if nobody thought to set one deliberately when hosting.
+    // reported/reproduced precisely -- "it happened in seed 12345" -- but
+    // only when manualSeed is true: an auto-rolled seed nobody chose
+    // isn't a useful number to show, just noise.
     seed: status ? status.seed : null,
+    manualSeed: status ? !!status.manual_seed : false,
   };
   // Every other piece of state whose lifetime is "this one active game" --
   // not already inside the `game` object above -- must be reset here too.
@@ -133,7 +135,7 @@ export function applyRoomDisplaySettings() {
   $('spec-reveal-cards-status').textContent = label;
   $('game-log').closest('details').classList.toggle('hidden', !game.showLogs);
 
-  const seedLabel = game.seed != null ? `(Seed: ${game.seed})` : '';
+  const seedLabel = game.manualSeed && game.seed != null ? `(Seed: ${game.seed})` : '';
   $('seed-display').textContent = seedLabel;
   $('spec-seed-display').textContent = seedLabel;
 }

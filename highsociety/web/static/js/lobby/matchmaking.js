@@ -1,6 +1,6 @@
 // The ELO matchmaking flow: find-match, live queue polling, elapsed timer,
 // cancel, and the "fill with bots after timing out" fallback.
-import { $, hide, show, showScreen } from '../utils/dom.js';
+import { $, hide, show, showScreen, setScreenPath } from '../utils/dom.js';
 import { loadProfile } from '../auth/profile.js';
 import { fetchJSON, enterRoom, onJoin, startRoomsPolling, showHomeTiles } from './lobby.js';
 
@@ -12,6 +12,7 @@ let matchmakingElapsedTimer = null;
 
 export function onPlayClick() {
   showScreen('screen-matchmaking');
+  setScreenPath('/play');
   show($('matchmaking-setup'));
   hide($('matchmaking-waiting'));
 }

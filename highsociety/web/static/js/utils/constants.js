@@ -15,6 +15,17 @@ export const CLOCK_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="curr
 // style.css) -- everywhere else the nav rail is a fixed part of the layout.
 export const SIDEBAR_HIDDEN_SCREENS = new Set(['screen-login', 'screen-game']);
 
+// The "Games played / Players" sticky footer only makes sense on the
+// top-level, sidebar-navigable screens someone browses between games --
+// not once they're inside an actual room (waiting room, live game,
+// spectating, finished) where it would just be clutter over gameplay.
+// An allow-list (rather than SIDEBAR_HIDDEN_SCREENS' deny-list) since
+// there are more "hide" screens than "show" ones.
+export const GLOBAL_STATS_FOOTER_SCREENS = new Set([
+  'screen-host-setup', 'screen-matchmaking', 'screen-leaderboard',
+  'screen-account', 'screen-achievements', 'screen-game-history',
+]);
+
 const TOAST_DURATION_MS = 1500; // long enough to actually read before it clears
 // "X bought Y for Z" / "X is stuck with Y" packs in more to actually read
 // (who, what card, how much) than a routine bid/pass update — this was

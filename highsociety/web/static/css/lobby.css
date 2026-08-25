@@ -255,16 +255,6 @@
 }
 .achievement-tile.unlocked:hover { transform: translateY(-2px); box-shadow: var(--shadow); }
 
-/* A plain block by default, #screen-host-setup just sits at the top of
-   #app's available height with nothing to push its later children
-   (the global-stats footer) down -- flex column + margin-top:auto on
-   that footer is what actually pins it to the bottom of the page rather
-   than immediately under the tiles. Doesn't affect the join/host/rules
-   sub-panels shown instead of the tiles (see showHomeTile) -- they're
-   still plain centered blocks (main.css's #screen-host-setup .panel
-   rule) within this same flex column. */
-#screen-host-setup { display: flex; flex-direction: column; flex: 1; min-height: 0; }
-
 .home-tiles {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -277,18 +267,25 @@
 }
 .home-recent-games { max-width: 780px; margin: 2rem auto 0; text-align: left; width: 100%; }
 .home-recent-games h3 { margin: 0 0 0.8rem; }
-/* Pushed to the very bottom of the page (not just under the tiles) --
-   margin-top:auto in the flex column above consumes whatever space is
-   left, same trick a footer uses to stay pinned regardless of how much
-   content sits above it. */
+/* A real sticky footer -- position:fixed rather than a flex/margin-auto
+   trick tied to one screen's internal layout, so it can never misalign
+   with whatever a specific screen happens to render (see showScreen's
+   GLOBAL_STATS_FOOTER_SCREENS, which owns whether this is shown at all
+   on the current screen). 96px matches .app-sidebar's width so it never
+   overlaps the nav rail. */
 .home-global-stats {
   display: flex;
   justify-content: center;
   gap: 2.5rem;
-  max-width: 780px;
-  margin: auto auto 2rem;
-  padding-top: 2rem;
-  width: 100%;
+  position: fixed;
+  left: 96px;
+  right: 0;
+  bottom: 0;
+  padding: 0.9rem 1.5rem;
+  background: rgba(0, 0, 0, 0.22);
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(6px);
+  z-index: 20;
 }
 .home-global-stat { display: flex; flex-direction: column; align-items: center; gap: 0.15rem; }
 .home-global-stat-value { font-size: 1.5rem; font-weight: 800; color: var(--accent-strong); }
@@ -539,6 +536,12 @@ button.secondary.standalone { margin-top: 0.9rem; display: inline-block; }
 .copy-link-btn:hover { background: var(--accent-highlight); color: #fff; }
 .copy-link-btn:active { transform: scale(0.97); }
 .copy-link-btn.copied { background: var(--accent-strong); color: #fff; border-color: var(--accent-strong); }
+/* Two icons occupying the same slot -- only one shown at a time, swapped
+   by the .copied class so a successful copy is visibly confirmed rather
+   than only reflected in the (easy-to-miss) title tooltip. */
+.copy-link-btn .check-icon { display: none; }
+.copy-link-btn.copied .copy-icon { display: none; }
+.copy-link-btn.copied .check-icon { display: block; }
 
 .radio-label {
   display: flex;

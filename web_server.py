@@ -156,6 +156,12 @@ class GameRoom:
         # depends on this being set.
         self.host_username = host_username
         self.seed = seed if seed is not None else random.randint(0, 2 ** 31 - 1)
+        # Whether *this* seed was something the host actually typed in, vs.
+        # an auto-rolled one nobody asked for -- the frontend only shows
+        # the seed in the game log when this is true (see gameState.js's
+        # applyRoomDisplaySettings), since a number nobody chose isn't
+        # useful for "it happened in seed 12345"-style bug reports.
+        self.manual_seed = seed is not None
         self.bot_think_time = bot_think_time
         self.visibility = visibility  # "public" | "private"
         self.turn_time_limit = turn_time_limit  # seconds per move, or None for no limit
@@ -612,20 +618,37 @@ def api_auth_google_claim_username():
     return jsonify({"username": username, "display_name": display_name})
 
 
+def _active_usernames() -> set[str]:
+    """
+    Every human username currently seated in a live room, whether or not
+    they've finished a game yet -- username_is_taken() alone only knows
+    about `players` rows, which don't exist for a guest until
+    _record_game_history runs at game end. Without this, a suggested
+    "available" name could collide with someone mid-game right now.
+    Bots excluded: they're not NetworkPlayer instances, and their fixed
+    reserved names never look like a generated guest username anyway.
+    """
+    with _rooms_lock:
+        rooms = list(_rooms.values())
+    return {p.username for room in rooms for p in room.players if isinstance(p, NetworkPlayer)}
+
+
 def _generate_unique_guest_username() -> Optional[str]:
     """
     No database means nothing to check a candidate against -- just hand
     back a fresh one so the guest flow keeps working under this app's
     established DATABASE_URL="" local-testing convention. With a real
-    database, retries a handful of times against username_is_taken;
-    with ~30 colors * ~50 names * 900 numbers, a collision on every one
-    of 20 random tries is effectively impossible.
+    database, retries a handful of times against username_is_taken and
+    every username currently live in a room (_active_usernames); with
+    ~30 colors * ~50 names * 900 numbers, a collision on every one of 20
+    random tries is effectively impossible.
     """
     if not game_history.is_configured():
         return generate_guest_username()
+    active = _active_usernames()
     for _ in range(20):
         candidate = generate_guest_username()
-        if not game_history.username_is_taken(candidate):
+        if candidate not in active and not game_history.username_is_taken(candidate):
             return candidate
     return None
 
@@ -826,6 +849,21 @@ def api_rating_history(username):
 
 
 @app.route("/")
+# The 7 top-level, sidebar-navigable screens (see app.js's SCREEN_PATHS)
+# each get a real, shareable/refreshable URL -- all served by this exact
+# same view, since it's a single-page app: the client reads
+# location.pathname on boot and jumps straight to the matching screen
+# (dom.js's showScreen already updates the URL bar to match via
+# pushState whenever one of these becomes the visible screen). Deep
+# room/game state deliberately isn't included here -- that's still the
+# existing ?room=<code> query-param mechanism, unchanged.
+@app.route("/play")
+@app.route("/join")
+@app.route("/host")
+@app.route("/leaderboard")
+@app.route("/rules")
+@app.route("/account")
+@app.route("/achievements")
 def index():
     return render_template(
         "index.html", ga_measurement_id=GA_MEASUREMENT_ID,
@@ -930,6 +968,7 @@ def _status_payload(room: Optional[GameRoom]) -> dict:
         "human_seats": room.human_seats,
         "bot_mix": room.bot_mix,
         "seed": room.seed,
+        "manual_seed": room.manual_seed,
         "turn_time_limit": room.turn_time_limit,
         "reveal_cards": room.reveal_cards,
         "show_logs": room.show_logs,
@@ -1153,6 +1192,7 @@ def _maybe_start_rematch(room: "GameRoom") -> None:
         # one: that seed was for reproducing *that* game, not for pinning
         # every rematch to it too.
         room.seed = random.randint(0, 2 ** 31 - 1)
+        room.manual_seed = False  # always auto-rolled on rematch, see comment above
         bots = create_bot_players(
             bot_mix, think_time=room.bot_think_time,
             taken_usernames={p.username for p in eligible},
@@ -1170,7 +1210,8 @@ def _maybe_start_rematch(room: "GameRoom") -> None:
         room.touch()
     for p in eligible:
         p.send_message("", message_type="REMATCH_STARTING",
-                        data={"bot_mix": bot_mix, "seats": room.seats, "seed": room.seed})
+                        data={"bot_mix": bot_mix, "seats": room.seats, "seed": room.seed,
+                              "manual_seed": room.manual_seed})
     room.run_game()
 
 

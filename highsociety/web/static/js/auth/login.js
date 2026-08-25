@@ -1,7 +1,27 @@
 // Login screen flow: guest continuation and Google sign-in.
 import { $, hide, show, showError, showScreen } from '../utils/dom.js';
-import { fetchJSON, currentRoomCode, refreshStatus, startPolling, showHomeTiles, startRoomsPolling } from '../lobby/lobby.js';
+import {
+  fetchJSON, currentRoomCode, refreshStatus, startPolling, showHomeTiles, showHomeTile, startRoomsPolling,
+} from '../lobby/lobby.js';
 import { saveProfile, renderProfileChip } from './profile.js';
+import { prefetchAccountStats, showAccountScreen, showAchievementsScreen } from '../account/account.js';
+import { showLeaderboardScreen } from '../lobby/leaderboard.js';
+import { onPlayClick } from '../lobby/matchmaking.js';
+
+// Maps a direct/refreshed visit to one of the 7 static screen URLs
+// (web_server.py's routes) back to the in-app navigation that would have
+// produced it -- boot's own version of what each sidebar/tile button
+// already does, so a bookmark or shared link lands on the right screen
+// instead of always defaulting to the tile picker.
+const BOOT_PATH_HANDLERS = {
+  '/play': onPlayClick,
+  '/join': () => { showScreen('screen-host-setup'); showHomeTile('join'); startRoomsPolling(); },
+  '/host': () => { showScreen('screen-host-setup'); showHomeTile('host'); },
+  '/rules': () => { showScreen('screen-host-setup'); showHomeTile('rules'); },
+  '/leaderboard': showLeaderboardScreen,
+  '/account': showAccountScreen,
+  '/achievements': showAchievementsScreen,
+};
 
 // Set while the login screen's username form is collecting a name for a
 // first-time Google sign-in (see handleGoogleCredential) rather than a
@@ -35,14 +55,20 @@ export function proceedPastLogin() {
   renderProfileChip(); // the header chip was last rendered at boot, before
                         // this browser had a profile at all -- refresh it
                         // now that saveProfile has actually run.
+  prefetchAccountStats(); // see account.js -- so Account's own stats are already in hand by the time it's opened
   if (currentRoomCode()) {
     refreshStatus();
     startPolling();
-  } else {
-    showScreen('screen-host-setup');
-    showHomeTiles();
-    startRoomsPolling();
+    return;
   }
+  const bootHandler = BOOT_PATH_HANDLERS[location.pathname];
+  if (bootHandler) {
+    bootHandler();
+    return;
+  }
+  showScreen('screen-host-setup');
+  showHomeTiles();
+  startRoomsPolling();
 }
 
 // showShuffle: only the guest path offers a "get a different name" reroll

@@ -97,18 +97,18 @@
         </svg>
         <span class="sidebar-label">How to Play</span>
       </button>
+      <button type="button" class="sidebar-item" id="sidebar-achievements" title="Achievements">
+        <svg class="sidebar-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M12 3.4l2.1 4.4 4.8.6-3.5 3.4.9 4.8L12 14.3l-4.3 2.3.9-4.8-3.5-3.4 4.8-.6L12 3.4z"/>
+        </svg>
+        <span class="sidebar-label">Achievements</span>
+      </button>
       <button type="button" class="sidebar-item" id="sidebar-account" title="Account">
         <svg class="sidebar-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <circle cx="12" cy="8.3" r="3.6"/>
           <path d="M4.8 20c0-3.9 3.3-6.7 7.2-6.7s7.2 2.8 7.2 6.7"/>
         </svg>
         <span class="sidebar-label">Account</span>
-      </button>
-      <button type="button" class="sidebar-item" id="sidebar-achievements" title="Achievements">
-        <svg class="sidebar-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <path d="M12 3.4l2.1 4.4 4.8.6-3.5 3.4.9 4.8L12 14.3l-4.3 2.3.9-4.8-3.5-3.4 4.8-.6L12 3.4z"/>
-        </svg>
-        <span class="sidebar-label">Achievements</span>
       </button>
     </nav>
     <div class="app-main-col">
@@ -422,21 +422,6 @@
         </button>
       </div>
 
-      <!-- Hidden by default -- shown only once /api/global_stats actually
-           returns something (see lobby.js's loadHomeGlobalStats); no
-           database configured (local dev) just leaves this out entirely
-           rather than showing a hardcoded 0. -->
-      <div id="home-global-stats" class="home-global-stats hidden">
-        <div class="home-global-stat">
-          <span id="home-global-stat-games" class="home-global-stat-value">—</span>
-          <span class="home-global-stat-label">Games played</span>
-        </div>
-        <div class="home-global-stat">
-          <span id="home-global-stat-players" class="home-global-stat-value">—</span>
-          <span class="home-global-stat-label">Players</span>
-        </div>
-      </div>
-
       <!-- Hidden until loadHomeRecentGames actually has rows -- a guest/
            new player with no games yet just never sees this section. -->
       <div id="home-recent-games" class="card panel home-recent-games hidden">
@@ -554,9 +539,12 @@
         <div id="room-link-row" class="room-link-row hidden">
           <input type="text" id="room-link-input" class="room-link-input" readonly aria-label="Invite link">
           <button type="button" id="btn-copy-room-link" class="copy-link-btn" title="Copy invite link" aria-label="Copy invite link">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <svg class="copy-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <rect x="9" y="9" width="12" height="12" rx="2"/>
               <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+            </svg>
+            <svg class="check-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M20 6 9 17l-5-5"/>
             </svg>
             <span>Copy</span>
           </button>
@@ -855,6 +843,25 @@
     </section>
 
   </main>
+
+  <!-- A sticky footer, not tied to any one screen's internal layout --
+       showScreen() (dom.js) toggles its visibility via
+       GLOBAL_STATS_FOOTER_SCREENS, the same central-switch pattern it
+       already uses for SIDEBAR_HIDDEN_SCREENS. Hidden by default --
+       shown only once /api/global_stats actually returns something (see
+       lobby.js's loadHomeGlobalStats); no database configured (local
+       dev) just leaves this out entirely rather than showing a
+       hardcoded 0. -->
+  <div id="home-global-stats" class="home-global-stats hidden">
+    <div class="home-global-stat">
+      <span id="home-global-stat-games" class="home-global-stat-value">—</span>
+      <span class="home-global-stat-label">Games played</span>
+    </div>
+    <div class="home-global-stat">
+      <span id="home-global-stat-players" class="home-global-stat-value">—</span>
+      <span class="home-global-stat-label">Players</span>
+    </div>
+  </div>
     </div>
   </div>
 
