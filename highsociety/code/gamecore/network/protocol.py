@@ -31,6 +31,12 @@ PLAYER_MESSAGE_TYPES = {
     "REMATCH_UPDATE",  # a request was just made, or someone just voted on one
     "REMATCH_DECLINED",  # cancels a pending request
     "REMATCH_STARTING",  # unanimous accept — a fresh game is starting now
+    # A quick emoji (see web_server.py's _relay_player_chat) -- shares
+    # CHAT's live, off-thread relay path (WebSocketTransport filters both
+    # the same way), but needs its own payload shape (from_user + data,
+    # no prompt text) so it gets its own message_type rather than being
+    # folded into CHAT's.
+    "REACTION",
 }
 
 SPECTATOR_MESSAGE_TYPES = {
@@ -39,6 +45,7 @@ SPECTATOR_MESSAGE_TYPES = {
     "CHAT",
     "AUCTION_RESULT",
     "AUCTION_UPDATE",
+    "REACTION",
 }
 
 
@@ -90,6 +97,18 @@ def build_player_payload(
 
     if message_type == "CHAT":
         payload = _chat_payload(game_id=game_id, prompt=prompt, created_at=created_at, from_user=from_user, to_users=to_users)
+    elif message_type == "REACTION":
+        # Needs from_user (who reacted) — unlike the GLOBAL_EVENT-shaped
+        # group below, which never sets it — plus the `data` field (the
+        # emoji itself) attached below like every other message type.
+        payload = {
+            "game_id": game_id,
+            "message_type": message_type,
+            "prompt": prompt,
+            "from_user": from_user or "nan",
+            "requires_response": False,
+            "created_at": created_at,
+        }
     elif message_type in ("GLOBAL_EVENT", "AUCTION_RESULT", "AUCTION_UPDATE",
                           "REMATCH_UPDATE", "REMATCH_DECLINED", "REMATCH_STARTING"):
         payload = {
@@ -155,6 +174,15 @@ def build_spectator_payload(
 
     if message_type == "CHAT":
         payload = _chat_payload(game_id=game_id, prompt=prompt, created_at=created_at, from_user=from_user, to_users=to_users)
+    elif message_type == "REACTION":
+        payload = {
+            "game_id": game_id,
+            "message_type": message_type,
+            "prompt": prompt,
+            "from_user": from_user or "nan",
+            "requires_response": False,
+            "created_at": created_at,
+        }
     elif message_type == "GLOBAL_MOVE_INFO":
         payload = {
             "game_id": game_id,

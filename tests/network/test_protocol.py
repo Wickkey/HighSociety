@@ -87,6 +87,36 @@ class TestPlayerChatPayload:
         assert "player_id" not in payload  # CHAT isn't addressed to a specific player_id
 
 
+class TestReactionPayload:
+    """Regression coverage: REACTION was wired into WebSocketTransport's
+    live-relay filtering and web_server.py's _relay_player_chat, but was
+    never actually added to PLAYER_MESSAGE_TYPES/SPECTATOR_MESSAGE_TYPES --
+    build_player_payload/build_spectator_payload raised ValueError for
+    every single reaction ever sent. Confirmed live: that exception was
+    uncaught in WebSocketTransport's reader thread, permanently killing
+    the *sender's* own ability to have any future message (including a
+    real bid/pass) received by the server at all -- see test_transport.py
+    for that half of the fix."""
+
+    def test_player_payload_accepts_reaction_with_sender_and_emoji_data(self):
+        payload = build_player_payload(
+            game_id="g1", username="alice", message_type="REACTION", prompt="",
+            from_user="bob", data={"emoji": "🔥"},
+        )
+        assert payload["message_type"] == "REACTION"
+        assert payload["from_user"] == "bob"
+        assert payload["data"] == {"emoji": "🔥"}
+
+    def test_spectator_payload_accepts_reaction_with_sender_and_emoji_data(self):
+        payload = build_spectator_payload(
+            game_id="g1", message_type="REACTION", prompt="",
+            from_user="bob", data={"emoji": "🔥"},
+        )
+        assert payload["message_type"] == "REACTION"
+        assert payload["from_user"] == "bob"
+        assert payload["data"] == {"emoji": "🔥"}
+
+
 class TestStructuredDataField:
     """data lets any broadcast carry machine-parseable content (e.g. AUCTION_RESULT)
     alongside its human-readable prompt — this is what a bot actually parses."""

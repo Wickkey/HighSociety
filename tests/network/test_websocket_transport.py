@@ -114,3 +114,35 @@ def test_resign_works_with_no_on_resign_callback():
         assert result == {"message_type": "RESPONSE", "prompt": "quit"}
     finally:
         transport.close()
+
+
+def test_on_chat_exception_does_not_kill_the_reader_thread():
+    """Regression: REACTION was relayed here (see the CHAT/REACTION branch
+    above) into on_chat, but protocol.py's PLAYER_MESSAGE_TYPES never
+    actually included "REACTION" -- build_player_payload raised ValueError
+    for every single reaction ever sent. That exception was previously
+    uncaught right here, which silently killed this whole background
+    thread -- and since receive() only ever reads from the queue this loop
+    fills (once on_chat is set), that meant the sender's every future
+    message, including a real bid/pass RESPONSE, would vanish forever
+    without reconnecting. Confirmed live before this fix landed. A future
+    on_chat bug (this one or any other) must degrade to "that one message
+    was dropped", never "this connection is now silently dead"."""
+    ws = FakeWebSocket()
+
+    def flaky_on_chat(msg):
+        if msg.get("message_type") == "REACTION":
+            raise ValueError("simulates protocol.py rejecting an unknown message_type")
+
+    transport = WebSocketTransport(ws, label="test", on_chat=flaky_on_chat)
+    transport.start()
+    try:
+        ws.push({"message_type": "REACTION", "emoji": "🔥"})  # this one raises inside on_chat
+        # The reader thread must survive that and keep servicing this same
+        # connection -- a completely ordinary message right after it must
+        # still reach receive() normally.
+        ws.push({"message_type": "RESPONSE", "prompt": "5"})
+        result = transport.receive(timeout=2.0)
+        assert result == {"message_type": "RESPONSE", "prompt": "5"}
+    finally:
+        transport.close()

@@ -241,7 +241,23 @@ class WebSocketTransport(Transport):
                 # relay path for the same reason: it must not compete with a
                 # real bid/discard response on the synchronous receive()
                 # queue below.
-                self._on_chat(msg)
+                #
+                # Guarded, unlike every other branch here: this loop is the
+                # ONLY thing that ever calls self._queue.put() below, so an
+                # uncaught exception here doesn't just drop this one
+                # CHAT/REACTION -- it silently kills the whole thread,
+                # permanently starving receive() (which only ever reads
+                # from that queue once on_chat is set) of this player's
+                # every future message, including real bid/pass responses.
+                # Confirmed live: a REACTION with a message_type the
+                # protocol layer didn't yet recognize raised ValueError
+                # here and the sender could never act again without
+                # reconnecting. A chat/reaction relay bug must never be
+                # able to take down a player's whole connection like that.
+                try:
+                    self._on_chat(msg)
+                except Exception:  # noqa: BLE001
+                    LoggingManager.exception(f"on_chat failed for {self._label} on {msg.get('message_type')}")
                 continue
             if msg.get("message_type") == "RESIGN":
                 # Out-of-band: unlike a bid/discard answer, this must take
