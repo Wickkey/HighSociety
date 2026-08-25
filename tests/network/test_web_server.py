@@ -1708,3 +1708,59 @@ def test_profile_endpoint_returns_stats_and_elo(monkeypatch):
         "username": "alice", "games_played": 4, "wins": 3, "win_rate": 0.75,
         "avg_placement": 1.5, "avg_points": 12.0, "avg_money_remaining": 6.0, "elo": 1032,
     }
+
+
+def test_global_stats_endpoint_returns_204_when_unavailable(monkeypatch):
+    monkeypatch.setattr(game_history, "get_global_stats", lambda: None)
+    resp = web_server.app.test_client().get("/api/global_stats")
+    assert resp.status_code == 204
+
+
+def test_global_stats_endpoint_returns_counts(monkeypatch):
+    monkeypatch.setattr(game_history, "get_global_stats",
+                         lambda: {"total_games": 433, "total_players": 49})
+    resp = web_server.app.test_client().get("/api/global_stats")
+    assert resp.status_code == 200
+    assert resp.get_json() == {"total_games": 433, "total_players": 49}
+
+
+def test_recent_games_endpoint_always_200s_with_a_list(monkeypatch):
+    monkeypatch.setattr(game_history, "get_recent_games", lambda username, **kw: [])
+    resp = web_server.app.test_client().get("/api/games/nobody")
+    assert resp.status_code == 200
+    assert resp.get_json() == {"games": []}
+
+
+def test_game_detail_endpoint_404s_for_an_unknown_game(monkeypatch):
+    monkeypatch.setattr(game_history, "get_game_detail", lambda game_id: None)
+    resp = web_server.app.test_client().get("/api/games/detail/999")
+    assert resp.status_code == 404
+
+
+def test_game_detail_endpoint_returns_the_detail(monkeypatch):
+    monkeypatch.setattr(game_history, "get_game_detail",
+                         lambda game_id: {"game_id": game_id, "finished_at": "2026-01-01T00:00:00", "participants": []})
+    resp = web_server.app.test_client().get("/api/games/detail/42")
+    assert resp.status_code == 200
+    assert resp.get_json()["game_id"] == 42
+
+
+def test_leaderboard_endpoint_returns_a_list(monkeypatch):
+    monkeypatch.setattr(game_history, "get_leaderboard",
+                         lambda **kw: [{"username": "alice", "elo": 1200, "games_played": 10, "games_won": 6}])
+    resp = web_server.app.test_client().get("/api/leaderboard")
+    assert resp.status_code == 200
+    assert resp.get_json() == {
+        "leaderboard": [{"username": "alice", "elo": 1200, "games_played": 10, "games_won": 6}],
+    }
+
+
+def test_rating_history_endpoint_returns_a_list(monkeypatch):
+    monkeypatch.setattr(game_history, "get_rating_history", lambda username: [
+        {"old_rating": 1000, "new_rating": 1016, "created_at": "2026-01-01T00:00:00"},
+    ])
+    resp = web_server.app.test_client().get("/api/profile/alice/rating_history")
+    assert resp.status_code == 200
+    assert resp.get_json()["history"] == [
+        {"old_rating": 1000, "new_rating": 1016, "created_at": "2026-01-01T00:00:00"},
+    ]

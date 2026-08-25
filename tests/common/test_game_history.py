@@ -856,3 +856,112 @@ def test_get_player_profile_stats_failure_is_caught_not_raised(database_url):
     game_history._schema_ready = True
     with patch.object(game_history, "_connect", side_effect=RuntimeError("unreachable")):
         assert game_history.get_player_profile_stats("alice") is None
+
+
+# --------------------------------------------------- game history / leaderboard --
+
+def test_get_recent_games_is_empty_without_a_database(no_database_url):
+    assert game_history.get_recent_games("alice") == []
+
+
+def test_get_recent_games_returns_none_for_an_unknown_username(database_url):
+    game_history._schema_ready = True
+    conn, cursor = _fake_connection()
+    cursor.fetchone.side_effect = None
+    cursor.fetchone.return_value = None
+    with patch.object(game_history, "_connect", return_value=conn):
+        assert game_history.get_recent_games("nobody") == []
+
+
+def test_get_recent_games_groups_opponents_by_game(database_url):
+    game_history._schema_ready = True
+    conn, cursor = _fake_connection()
+    cursor.fetchone.side_effect = None
+    cursor.fetchone.return_value = (1,)  # player id lookup
+    finished_at = datetime.datetime(2026, 1, 1, tzinfo=datetime.timezone.utc)
+    cursor.fetchall.side_effect = [
+        [(100, finished_at, 1), (101, finished_at, 2)],  # the two games + this player's placement
+        [  # every participant across both games, in one query
+            (100, "alice", False, True),
+            (100, "Marble", True, False),
+            (101, "alice", False, False),
+            (101, "bob", False, True),
+        ],
+    ]
+    with patch.object(game_history, "_connect", return_value=conn):
+        result = game_history.get_recent_games("alice")
+    assert [g["game_id"] for g in result] == [100, 101]
+    assert result[0]["placement"] == 1
+    assert {o["name"] for o in result[0]["opponents"]} == {"alice", "Marble"}
+    assert result[1]["opponents"] == [
+        {"name": "alice", "is_bot": False, "is_winner": False},
+        {"name": "bob", "is_bot": False, "is_winner": True},
+    ]
+
+
+def test_get_recent_games_failure_is_caught_not_raised(database_url):
+    game_history._schema_ready = True
+    with patch.object(game_history, "_connect", side_effect=RuntimeError("unreachable")):
+        assert game_history.get_recent_games("alice") == []
+
+
+def test_get_game_detail_returns_none_for_an_unknown_game(database_url):
+    game_history._schema_ready = True
+    conn, cursor = _fake_connection()
+    cursor.fetchone.side_effect = None
+    cursor.fetchone.return_value = None
+    with patch.object(game_history, "_connect", return_value=conn):
+        assert game_history.get_game_detail(999) is None
+
+
+def test_get_game_detail_returns_every_participant_ordered_by_placement(database_url):
+    game_history._schema_ready = True
+    conn, cursor = _fake_connection()
+    finished_at = datetime.datetime(2026, 1, 1, tzinfo=datetime.timezone.utc)
+    cursor.fetchone.side_effect = None
+    cursor.fetchone.return_value = (finished_at,)
+    cursor.fetchall = MagicMock(return_value=[
+        ("alice", False, 15, 5, True, False, 1),
+        ("Marble", True, 5, 0, False, True, 2),
+    ])
+    with patch.object(game_history, "_connect", return_value=conn):
+        result = game_history.get_game_detail(42)
+    assert result["game_id"] == 42
+    assert len(result["participants"]) == 2
+    assert result["participants"][0] == {
+        "name": "alice", "is_bot": False, "points": 15, "money_left": 5,
+        "is_winner": True, "eliminated": False, "placement": 1,
+    }
+
+
+def test_get_leaderboard_excludes_guests_and_bots_by_query(database_url):
+    """Doesn't fake a real WHERE-clause result (that's Postgres' job) --
+    just confirms the query text actually filters both, and the shape of
+    what comes back."""
+    game_history._schema_ready = True
+    conn, cursor = _fake_connection()
+    cursor.fetchall = MagicMock(return_value=[("alice", 1200, 10, 6)])
+    with patch.object(game_history, "_connect", return_value=conn):
+        result = game_history.get_leaderboard()
+    query = cursor.execute.call_args.args[0]
+    assert "google_id IS NOT NULL" in query
+    assert "NOT IN (SELECT player_id FROM bots)" in query
+    assert result == [{"username": "alice", "elo": 1200, "games_played": 10, "games_won": 6}]
+
+
+def test_get_rating_history_is_empty_without_a_database(no_database_url):
+    assert game_history.get_rating_history("alice") == []
+
+
+def test_get_rating_history_returns_rows_oldest_first(database_url):
+    game_history._schema_ready = True
+    conn, cursor = _fake_connection()
+    t1 = datetime.datetime(2026, 1, 1, tzinfo=datetime.timezone.utc)
+    t2 = datetime.datetime(2026, 1, 2, tzinfo=datetime.timezone.utc)
+    cursor.fetchall = MagicMock(return_value=[(1000, 1016, t1), (1016, 1005, t2)])
+    with patch.object(game_history, "_connect", return_value=conn):
+        result = game_history.get_rating_history("alice")
+    assert result == [
+        {"old_rating": 1000, "new_rating": 1016, "created_at": t1.isoformat()},
+        {"old_rating": 1016, "new_rating": 1005, "created_at": t2.isoformat()},
+    ]

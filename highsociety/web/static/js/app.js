@@ -2,7 +2,7 @@
 // DOMContentLoaded. Owns nothing itself -- every handler it wires lives in
 // its own feature module; this file only imports and attaches them.
 import { $, showScreen } from './utils/dom.js';
-import { resolveConfirmDialog, openProfileModal, closeProfileModal } from './ui/modals.js';
+import { resolveConfirmDialog, openProfileModal, closeProfileModal, closeGameDetailModal } from './ui/modals.js';
 import { onSpecChatSend, onPlayerChatSend } from './ui/chat.js';
 import {
   onContinueAsGuest, onShuffleUsername, onLoginUsernameContinue, initGoogleSignIn, proceedPastLogin,
@@ -21,6 +21,8 @@ import {
   applySpectateIdentityDefaults, refreshStatus, leaveToHome, setCurrentRoomCode,
 } from './lobby/lobby.js';
 import { onAddBot } from './lobby/playerList.js';
+import { showGameHistoryScreen } from './lobby/gameHistory.js';
+import { showLeaderboardScreen } from './lobby/leaderboard.js';
 import { onPlayClick, onFindMatch, onMatchmakingCancel, onMatchmakingAddBots } from './lobby/matchmaking.js';
 import {
   onRequestRematchClick, onCancelRematchForm, onSendRematchRequest, onAcceptRematch, onDeclineRematch,
@@ -95,6 +97,15 @@ function wireStaticHandlers() {
   $('btn-achievements-back').addEventListener('click', () => navigateFromSidebar(() => {
     showScreen('screen-host-setup'); showHomeTiles(); startRoomsPolling();
   }));
+  $('btn-game-history-back').addEventListener('click', () => navigateFromSidebar(() => {
+    showScreen('screen-host-setup'); showHomeTiles(); startRoomsPolling();
+  }));
+  $('btn-leaderboard-back').addEventListener('click', () => navigateFromSidebar(() => {
+    showScreen('screen-host-setup'); showHomeTiles(); startRoomsPolling();
+  }));
+  $('btn-account-my-games').addEventListener('click', () => navigateFromSidebar(showGameHistoryScreen));
+  $('sidebar-leaderboard').addEventListener('click', () => navigateFromSidebar(showLeaderboardScreen));
+  $('game-detail-close').addEventListener('click', closeGameDetailModal);
   $('btn-account-save').addEventListener('click', onAccountSaveClick);
   $('btn-account-edit-username').addEventListener('click', onAccountEditUsernameClick);
   $('btn-account-cancel-edit').addEventListener('click', onAccountCancelEditClick);

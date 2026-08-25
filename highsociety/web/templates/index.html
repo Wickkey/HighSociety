@@ -82,7 +82,7 @@
         </svg>
         <span class="sidebar-label">Host</span>
       </button>
-      <button type="button" class="sidebar-item sidebar-item-disabled" title="Leaderboard — coming soon" disabled>
+      <button type="button" class="sidebar-item" id="sidebar-leaderboard" title="Leaderboard">
         <svg class="sidebar-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <rect x="3.5" y="14.5" width="4.5" height="6" rx="1.1"/>
           <rect x="9.75" y="9.5" width="4.5" height="11" rx="1.1"/>
@@ -288,9 +288,59 @@
           </div>
         </div>
 
+        <button type="button" id="btn-account-my-games" class="secondary standalone">My Games</button>
         <button type="button" id="btn-account-logout" class="secondary standalone">Log out</button>
       </div>
     </section>
+
+    <!-- ===================== MY GAMES ===================== -->
+    <section id="screen-game-history" class="screen hidden">
+      <div class="card panel account-panel">
+        <button type="button" class="screen-back" id="btn-game-history-back">← Back</button>
+        <h2>My Games</h2>
+        <div id="game-history-list" class="recent-games-list"></div>
+        <p id="game-history-empty" class="muted hidden">No games recorded yet.</p>
+      </div>
+    </section>
+
+    <!-- ===================== LEADERBOARD ===================== -->
+    <section id="screen-leaderboard" class="screen hidden">
+      <div class="card panel account-panel leaderboard-panel">
+        <button type="button" class="screen-back" id="btn-leaderboard-back">← Back</button>
+        <h2>Leaderboard</h2>
+        <p class="muted">Top-rated players (Google-linked accounts).</p>
+        <div id="leaderboard-my-rating" class="leaderboard-my-rating hidden">
+          <div>
+            <span class="leaderboard-my-rating-label">Your rating over time</span>
+            <div id="leaderboard-sparkline"></div>
+          </div>
+        </div>
+        <table class="leaderboard-table">
+          <thead>
+            <tr><th>#</th><th>Player</th><th>Elo</th><th>Games</th><th>Wins</th></tr>
+          </thead>
+          <tbody id="leaderboard-body"></tbody>
+        </table>
+        <p id="leaderboard-empty" class="muted hidden">No ranked players yet.</p>
+      </div>
+    </section>
+
+    <!-- ===================== GAME DETAIL MODAL ===================== -->
+    <div id="game-detail-modal" class="modal-overlay hidden">
+      <div class="modal-box card panel game-detail-box">
+        <h3>Game Results</h3>
+        <p id="game-detail-date" class="muted"></p>
+        <table class="leaderboard-table">
+          <thead>
+            <tr><th>#</th><th>Player</th><th>Points</th><th>Money</th></tr>
+          </thead>
+          <tbody id="game-detail-body"></tbody>
+        </table>
+        <div class="button-row modal-actions">
+          <button type="button" id="game-detail-close" class="secondary">Close</button>
+        </div>
+      </div>
+    </div>
 
     <!-- ===================== ACHIEVEMENTS ===================== -->
     <section id="screen-achievements" class="screen hidden">

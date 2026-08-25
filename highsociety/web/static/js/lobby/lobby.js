@@ -20,6 +20,7 @@ import { setPendingJoin, setPendingSpectate } from '../network/messages.js';
 import { confirmDialog } from '../ui/modals.js';
 import { renderFinished } from './rematch.js';
 import { renderLobby } from './playerList.js';
+import { loadHomeRecentGames } from './gameHistory.js';
 
 export async function fetchJSON(url, opts) {
   const res = await fetch(url, opts);
@@ -131,6 +132,7 @@ export function showHomeTiles() {
   show($('home-tiles'));
   HOME_TILE_TARGETS.forEach((t) => hide($(`home-panel-${t}`)));
   loadHomeGlobalStats();
+  loadHomeRecentGames();
 }
 
 // "Less accurate is fine" per the request -- plain site-wide counts, not

@@ -790,6 +790,41 @@ def api_global_stats():
     return jsonify(stats)
 
 
+@app.route("/api/games/<username>")
+def api_recent_games(username):
+    """'My Games' list + the home screen's Recent Games widget -- same
+    data, different caller. Always 200 with a (possibly empty) list, no
+    404: an empty list already means "nothing to show" to both callers."""
+    return jsonify({"games": game_history.get_recent_games(username)})
+
+
+@app.route("/api/games/detail/<int:game_id>")
+def api_game_detail(game_id):
+    """Full per-participant breakdown for one game -- the "click a game
+    to see full results" view. No username in this path (unlike /api/
+    games/<username> above) since a game's own id is all this needs -- see
+    get_game_detail's own docstring on why no access check is tied to it."""
+    detail = game_history.get_game_detail(game_id)
+    if detail is None:
+        return jsonify({"error": "No such game."}), 404
+    return jsonify(detail)
+
+
+@app.route("/api/leaderboard")
+def api_leaderboard():
+    """Top players by Elo -- Google-linked accounts only (see
+    get_leaderboard's own docstring for why guests and bots are both
+    excluded)."""
+    return jsonify({"leaderboard": game_history.get_leaderboard()})
+
+
+@app.route("/api/profile/<username>/rating_history")
+def api_rating_history(username):
+    """This player's Elo over time, for the leaderboard screen's
+    sparkline -- always 200 with a (possibly empty) list."""
+    return jsonify({"history": game_history.get_rating_history(username)})
+
+
 @app.route("/")
 def index():
     return render_template(

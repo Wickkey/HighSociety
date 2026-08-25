@@ -1,5 +1,6 @@
 // Generic confirm dialog + the public profile-viewer modal.
 import { $, hide, show } from '../utils/dom.js';
+import { escapeHtml } from '../utils/formatting.js';
 import { fetchJSON } from '../lobby/lobby.js';
 
 // In-page confirm dialog (resign, leaving mid-game — see gameActions.js's
@@ -51,3 +52,29 @@ export async function openProfileModal(username) {
   }
 }
 export function closeProfileModal() { hide($('profile-view-modal')); }
+
+// "Click a game -> see full results" -- the same modal serves both the
+// My Games screen and the home page's Recent Games widget (see
+// lobby/gameHistory.js, which only ever fetches the list; this owns the
+// one detail view both lists open into).
+export async function openGameDetailModal(gameId) {
+  const body = $('game-detail-body');
+  body.innerHTML = '';
+  $('game-detail-date').textContent = '';
+  show($('game-detail-modal'));
+  try {
+    const detail = await fetchJSON(`/api/games/detail/${encodeURIComponent(gameId)}`);
+    $('game-detail-date').textContent = new Date(detail.finished_at).toLocaleDateString();
+    body.innerHTML = detail.participants.map((p) => `
+      <tr>
+        <td>${p.placement != null ? p.placement : '—'}</td>
+        <td>${escapeHtml(p.name)}${p.is_bot ? ' (bot)' : ''}${p.is_winner ? ' 🏆' : ''}</td>
+        <td>${p.points}</td>
+        <td>${p.money_left}</td>
+      </tr>
+    `).join('');
+  } catch (e) {
+    body.innerHTML = '<tr><td colspan="4">Could not load this game.</td></tr>';
+  }
+}
+export function closeGameDetailModal() { hide($('game-detail-modal')); }

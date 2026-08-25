@@ -634,6 +634,202 @@ def get_global_stats() -> Optional[dict]:
             conn.close()
 
 
+def get_recent_games(username: str, limit: int = 20) -> list:
+    """
+    This player's most recent games, newest first -- {"game_id",
+    "finished_at", "placement", "opponents": [{"name", "is_bot",
+    "is_winner"}, ...]} per game. `opponents` includes every seat at the
+    table (not just non-`username` ones) since the caller (the "My Games"
+    list, and the home screen's Recent Games widget) wants to show who
+    was actually at the table, this player included. [] on any failure or
+    no database -- an empty list renders as "no games yet", never an
+    error, for what's a purely supplementary view.
+    """
+    if not is_configured():
+        return []
+    ensure_schema()
+    if not _schema_ready:
+        return []
+    conn = None
+    try:
+        conn = _connect()
+        with conn, conn.cursor() as cur:
+            cur.execute("SELECT id FROM players WHERE username = %s", (username,))
+            row = cur.fetchone()
+            if row is None:
+                return []
+            player_id = row[0]
+            cur.execute(
+                """
+                SELECT g.id, g.finished_at, gr.placement
+                FROM game_results gr
+                JOIN games g ON g.id = gr.game_id
+                WHERE gr.user_id = %s
+                ORDER BY g.finished_at DESC
+                LIMIT %s
+                """,
+                (player_id, limit),
+            )
+            games = [{"game_id": r[0], "finished_at": r[1].isoformat(), "placement": r[2]} for r in cur.fetchall()]
+            if not games:
+                return []
+            game_ids = [g["game_id"] for g in games]
+            # One query for every participant across all of these games,
+            # rather than one query per game -- grouped back below.
+            cur.execute(
+                """
+                SELECT pg.game_id, COALESCE(p.username, pg.bot_name) AS name,
+                       p.id IS NULL AS is_bot, pg.is_winner
+                FROM player_games pg
+                LEFT JOIN players p ON p.id = pg.player_id AND p.id NOT IN (SELECT player_id FROM bots)
+                WHERE pg.game_id = ANY(%s)
+                """,
+                (game_ids,),
+            )
+            opponents_by_game = {}
+            for game_id, name, is_bot, is_winner in cur.fetchall():
+                opponents_by_game.setdefault(game_id, []).append(
+                    {"name": name, "is_bot": is_bot, "is_winner": is_winner})
+            for g in games:
+                g["opponents"] = opponents_by_game.get(g["game_id"], [])
+            return games
+    except Exception as e:  # noqa: BLE001
+        LoggingManager.warning(f"game_history.get_recent_games failed: {e}")
+        return []
+    finally:
+        if conn is not None:
+            conn.close()
+
+
+def get_game_detail(game_id: int) -> Optional[dict]:
+    """
+    Full per-participant breakdown of one game -- {"game_id",
+    "finished_at", "participants": [{"name", "is_bot", "points",
+    "money_left", "is_winner", "eliminated", "placement"}, ...]},
+    ordered by placement. No access check tied to any particular
+    username -- consistent with this app's existing stateless,
+    sessionless trust model (e.g. /api/auth/username/change's own
+    docstring), and a finished game's results aren't sensitive. None if
+    the game_id doesn't exist or on any failure.
+    """
+    if not is_configured():
+        return None
+    ensure_schema()
+    if not _schema_ready:
+        return None
+    conn = None
+    try:
+        conn = _connect()
+        with conn, conn.cursor() as cur:
+            cur.execute("SELECT finished_at FROM games WHERE id = %s", (game_id,))
+            row = cur.fetchone()
+            if row is None:
+                return None
+            finished_at = row[0]
+            cur.execute(
+                """
+                SELECT COALESCE(p.username, pg.bot_name) AS name, p.id IS NULL AS is_bot,
+                       pg.points, pg.money_left, pg.is_winner, pg.eliminated, gr.placement
+                FROM player_games pg
+                LEFT JOIN players p ON p.id = pg.player_id AND p.id NOT IN (SELECT player_id FROM bots)
+                LEFT JOIN game_results gr ON gr.game_id = pg.game_id AND gr.user_id = pg.player_id
+                WHERE pg.game_id = %s
+                ORDER BY gr.placement NULLS LAST
+                """,
+                (game_id,),
+            )
+            participants = [
+                {"name": name, "is_bot": is_bot, "points": points, "money_left": money_left,
+                 "is_winner": is_winner, "eliminated": eliminated, "placement": placement}
+                for name, is_bot, points, money_left, is_winner, eliminated, placement in cur.fetchall()
+            ]
+            return {"game_id": game_id, "finished_at": finished_at.isoformat(), "participants": participants}
+    except Exception as e:  # noqa: BLE001
+        LoggingManager.warning(f"game_history.get_game_detail failed: {e}")
+        return None
+    finally:
+        if conn is not None:
+            conn.close()
+
+
+def get_leaderboard(limit: int = 50) -> list:
+    """
+    Top `limit` players by elo -- {"username", "elo", "games_played",
+    "games_won"} -- restricted to Google-linked accounts (a guest's elo
+    never moves off the 1000 default, so including them would just be a
+    meaningless tie-heavy list) and explicitly excluding the 3 reserved
+    bot identities (see the `bots` table): bots are real rated
+    participants now (see record_finished_game's own docstring) so their
+    elo genuinely moves, but it must never be shown to players. []
+    on any failure or no database.
+    """
+    if not is_configured():
+        return []
+    ensure_schema()
+    if not _schema_ready:
+        return []
+    conn = None
+    try:
+        conn = _connect()
+        with conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT username, elo, games_played, games_won
+                FROM players
+                WHERE google_id IS NOT NULL AND id NOT IN (SELECT player_id FROM bots)
+                ORDER BY elo DESC
+                LIMIT %s
+                """,
+                (limit,),
+            )
+            return [
+                {"username": username, "elo": elo, "games_played": games_played, "games_won": games_won}
+                for username, elo, games_played, games_won in cur.fetchall()
+            ]
+    except Exception as e:  # noqa: BLE001
+        LoggingManager.warning(f"game_history.get_leaderboard failed: {e}")
+        return []
+    finally:
+        if conn is not None:
+            conn.close()
+
+
+def get_rating_history(username: str) -> list:
+    """This player's full ratings history, oldest first -- {"old_rating",
+    "new_rating", "created_at"} per game they were rated in. Always []
+    for a guest/bot (see `ratings`' own write path in record_finished_
+    game) or a Google-linked human who's simply never been rated yet."""
+    if not is_configured():
+        return []
+    ensure_schema()
+    if not _schema_ready:
+        return []
+    conn = None
+    try:
+        conn = _connect()
+        with conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT r.old_rating, r.new_rating, r.created_at
+                FROM ratings r
+                JOIN players p ON p.id = r.user_id
+                WHERE p.username = %s
+                ORDER BY r.created_at ASC
+                """,
+                (username,),
+            )
+            return [
+                {"old_rating": old, "new_rating": new, "created_at": created_at.isoformat()}
+                for old, new, created_at in cur.fetchall()
+            ]
+    except Exception as e:  # noqa: BLE001
+        LoggingManager.warning(f"game_history.get_rating_history failed: {e}")
+        return []
+    finally:
+        if conn is not None:
+            conn.close()
+
+
 def create_google_player(google_id: str, email: str, username: str, display_name: str) -> bool:
     """
     Creates a new players row for a first-time Google sign-in -- see
