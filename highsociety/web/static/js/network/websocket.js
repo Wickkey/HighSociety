@@ -28,9 +28,18 @@ export function closeSocket() {
 }
 
 export function connectPlayerSocket() {
-  ws = new WebSocket(wsUrl(`/ws?room=${encodeURIComponent(currentRoomCode())}`));
-  ws.onmessage = (evt) => handlePlayerMessage(JSON.parse(evt.data));
-  ws.onclose = () => { ws = null; refreshStatus(); };
+  const socket = new WebSocket(wsUrl(`/ws?room=${encodeURIComponent(currentRoomCode())}`));
+  ws = socket;
+  socket.onmessage = (evt) => handlePlayerMessage(JSON.parse(evt.data));
+  // Guarded by identity, not just "close happened": a socket that's already
+  // been superseded (closeSocket() ran, or a newer connectPlayerSocket/
+  // attemptReconnect call replaced `ws`) still fires its own close event
+  // later, asynchronously — WebSocket events are always dispatched as a
+  // separate task, never synchronously inside .close(). An unguarded
+  // handler would null out whatever *new* socket `ws` points to by then and
+  // fire a spurious refreshStatus() on top of it. See gameActions.js's
+  // delivery watchdog for the concrete case this was found from.
+  socket.onclose = () => { if (ws === socket) { ws = null; refreshStatus(); } };
   setBadge('connecting…');
 }
 
@@ -48,23 +57,29 @@ export function attemptReconnect() {
   beginReconnectAttempt();
   resetGameState(info.username, lastStatus());
   if (lastStatus()) seedOpponents(lastStatus(), info.username);
-  ws = new WebSocket(wsUrl(
+  const socket = new WebSocket(wsUrl(
     `/ws?room=${encodeURIComponent(currentRoomCode())}&rejoin_token=${encodeURIComponent(info.token)}`,
   ));
-  ws.onmessage = (evt) => handlePlayerMessage(JSON.parse(evt.data));
-  ws.onclose = () => { ws = null; refreshStatus(); };
+  ws = socket;
+  socket.onmessage = (evt) => handlePlayerMessage(JSON.parse(evt.data));
+  // See connectPlayerSocket's identical guard for why this checks identity
+  // rather than unconditionally nulling `ws`.
+  socket.onclose = () => { if (ws === socket) { ws = null; refreshStatus(); } };
   setBadge('reconnecting…');
   return true;
 }
 
 export function connectSpectatorSocket() {
-  ws = new WebSocket(wsUrl(`/ws_spectate?room=${encodeURIComponent(currentRoomCode())}`));
-  ws.onmessage = (evt) => handleSpectatorMessage(JSON.parse(evt.data));
+  const socket = new WebSocket(wsUrl(`/ws_spectate?room=${encodeURIComponent(currentRoomCode())}`));
+  ws = socket;
+  socket.onmessage = (evt) => handleSpectatorMessage(JSON.parse(evt.data));
   // The server closes every spectator's connection right after the game
   // ends (see GameRoom.run_game in web_server.py) — same signal the player
   // side already uses (connectPlayerSocket) to notice the game finished and
   // switch to the results screen. This was previously a no-op here, so a
   // spectator's browser just sat on the live table forever after the game
   // actually ended, never showing results at all.
-  ws.onclose = () => { ws = null; refreshStatus(); };
+  // Identity-guarded for the same reason as connectPlayerSocket/
+  // attemptReconnect above.
+  socket.onclose = () => { if (ws === socket) { ws = null; refreshStatus(); } };
 }

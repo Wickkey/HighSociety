@@ -5,7 +5,7 @@ import { ws, attemptReconnect, closeSocket } from '../network/websocket.js';
 import { game, answerMyPrompt } from './gameState.js';
 import { clearMoveTimer, renderMovePanel, updateSelectedBidTotal, renderOpponents, clearSelectedBidVisual } from './gameRenderer.js';
 import { confirmDialog } from '../ui/modals.js';
-import { clearRejoinInfo, currentRoomCode, setHasResigned } from '../lobby/lobby.js';
+import { clearRejoinInfo, currentRoomCode, markReconnectAttempted, setHasResigned } from '../lobby/lobby.js';
 import { showReactionBubble } from './gameEvents.js';
 
 // ----------------------------------------------------- delivery watchdog --
@@ -58,6 +58,13 @@ function onActionWatchdogFired() {
     // reconnect automatically instead of just complaining about it.
     showError($('move-error'), 'Connection lost — reconnecting…');
     closeSocket();
+    // Marked here (not left for lobby.js's own renderForStatus to notice
+    // later) so that if *this* reconnect also ends up closing, the status
+    // poll's "ws is null and we haven't tried yet" auto-reconnect doesn't
+    // pile another attempt on top of it — see websocket.js's identity-
+    // guarded onclose handlers, which this pairs with to close the race
+    // that motivated both changes.
+    markReconnectAttempted();
     attemptReconnect();
   } else {
     // Still claims OPEN: a genuine zombie connection, not one we can
@@ -89,6 +96,9 @@ function sendPlayerAction(payload, { confirmable = true } = {}) {
   if (!isSocketOpen()) {
     showError($('move-error'), 'Connection lost — reconnecting…');
     closeSocket();
+    // See onActionWatchdogFired's identical call for why this is marked
+    // here rather than left to renderForStatus's own dedup check.
+    markReconnectAttempted();
     attemptReconnect();
     return false;
   }
