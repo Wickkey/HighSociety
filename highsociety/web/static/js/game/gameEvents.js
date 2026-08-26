@@ -257,7 +257,18 @@ function applyAuctionUpdate(msg, isSpectator) {
     game.myAuctionBid = 0;
     game.turnPlayer = d.starting_player;
     game.turnStartedAt = Date.now();
-    if (d.starting_player !== game.myUsername) ensureOpponent(d.starting_player);
+    if (d.starting_player !== game.myUsername) {
+      ensureOpponent(d.starting_player);
+      // Defensive backstop, independent of the move-timer's own interval
+      // ever noticing expiration -- a turn_start/auction_start naming
+      // someone else is unambiguous proof my own turn (if I had one) is
+      // over. Without this, a backgrounded tab (browsers throttle
+      // setInterval there, sometimes to once a minute+) could leave a
+      // stale, already-wrong countdown visibly ticking long after the
+      // server actually auto-passed and moved on -- a real reported bug
+      // ("the clock is ticking even when I'm not playing").
+      clearMoveTimer();
+    }
     // Everyone's back in for the new auction — clear last round's greyed-out
     // state and their last-shown bid badge (see the 'bid' branch below).
     Object.values(game.opponents).forEach((o) => { o.outOfAuction = false; o.lastBid = null; });
@@ -266,7 +277,10 @@ function applyAuctionUpdate(msg, isSpectator) {
   } else if (d.kind === 'turn_start') {
     game.turnPlayer = d.player;
     game.turnStartedAt = Date.now();
-    if (d.player !== game.myUsername) ensureOpponent(d.player);
+    if (d.player !== game.myUsername) {
+      ensureOpponent(d.player);
+      clearMoveTimer(); // see auction_start's identical guard above for why
+    }
   } else if (d.kind === 'bid') {
     if (d.player === game.myUsername) {
       game.myAuctionBid = d.max_bid; // this event's max_bid is the bidder's own new cumulative total
