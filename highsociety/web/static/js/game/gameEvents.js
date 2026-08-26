@@ -175,7 +175,17 @@ export function applyGameMessage(msg, isSpectator) {
       // from this starting point (see startMoveTimer). Only ever sent to
       // the specific player whose turn it is (see NetworkPlayer.get_bid),
       // never broadcast, so spectators never receive this message type.
-      if (!isSpectator && msg.data && typeof msg.data.seconds_remaining === 'number') {
+      // move_seq staleness check mirrors openMyPrompt's identical guard
+      // for PLAYER_MOVE: the server resends a fresh PLAYER_MOVE_TIMER
+      // every 5s while waiting (_receive_with_periodic_resync) -- a real,
+      // live-reported bug was one of those crossing in flight with this
+      // player's own pass, arriving just after answerMyPrompt() already
+      // cleared the timer and re-starting it for a decision that's
+      // already been answered ("I passed, but I could still see my timer
+      // ticking while waiting for everyone else").
+      const moveSeq = msg.data && msg.data.move_seq;
+      const isStale = moveSeq != null && game.highestAnsweredMoveSeq != null && moveSeq <= game.highestAnsweredMoveSeq;
+      if (!isSpectator && !isStale && msg.data && typeof msg.data.seconds_remaining === 'number') {
         startMoveTimer(msg.data.seconds_remaining);
       }
       break;
