@@ -590,24 +590,39 @@ button.secondary.standalone { margin-top: 0.9rem; display: inline-block; }
 .recent-games-list { display: flex; flex-direction: column; gap: 0.5rem; margin-top: 0.8rem; }
 .recent-game-row {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.6rem;
+  flex-direction: column;
+  gap: 0.3rem;
   width: 100%;
   background: var(--panel-bg-soft);
   border: 1px solid var(--panel-border);
   border-radius: var(--radius-sm);
-  padding: 0.55rem 0.9rem;
+  padding: 0.65rem 0.9rem;
   font-size: 0.85rem;
   font: inherit;
   color: inherit;
   cursor: pointer;
   text-align: left;
+  transition: border-color 0.15s ease, background 0.15s ease;
 }
 .recent-game-row:hover { border-color: var(--accent-light); background: var(--accent-soft); }
-.recent-game-date { color: var(--muted); flex-shrink: 0; }
-.recent-game-opponents { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin: 0 0.8rem; }
-.recent-game-placement { font-weight: 700; color: var(--accent-strong); flex-shrink: 0; }
+.recent-game-row-top { display: flex; align-items: center; justify-content: space-between; gap: 0.6rem; }
+.recent-game-date { color: var(--muted); font-size: 0.78rem; }
+.recent-game-opponents {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+}
+.recent-game-placement {
+  font-weight: 700;
+  font-size: 0.78rem;
+  color: var(--text);
+  background: var(--panel-border);
+  border-radius: 999px;
+  padding: 0.15rem 0.55rem;
+  flex-shrink: 0;
+}
+.recent-game-placement-first { color: #1c1a16; background: var(--accent-light); }
 
 .game-detail-box { max-width: 480px; width: 100%; }
 

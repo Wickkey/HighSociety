@@ -11,18 +11,26 @@ import { loadProfile } from '../auth/profile.js';
 import { fetchJSON } from './lobby.js';
 import { openGameDetailModal } from '../ui/modals.js';
 
+// Bot display names already end in "bot" (see ai/bot_names.py's naming
+// convention -- "Ziggy bot", "Milo bot") -- appending "(bot)" again read
+// as a literal double "bot bot" and was the main source of this list
+// looking unpolished.
 function opponentsLabel(game, myUsername) {
   const others = game.opponents.filter((o) => o.name !== myUsername);
-  if (others.length === 0) return 'solo';
-  return others.map((o) => `${o.name}${o.is_bot ? ' (bot)' : ''}`).join(', ');
+  if (others.length === 0) return 'Solo game';
+  return others.map((o) => o.name).join(', ');
 }
+
+const DATE_FORMAT = { month: 'short', day: 'numeric', year: 'numeric' };
 
 function renderGamesList(container, games, myUsername) {
   container.innerHTML = games.map((g) => `
     <button type="button" class="recent-game-row" data-game-id="${g.game_id}">
-      <span class="recent-game-date">${new Date(g.finished_at).toLocaleDateString()}</span>
-      <span class="recent-game-opponents">vs ${escapeHtml(opponentsLabel(g, myUsername))}</span>
-      <span class="recent-game-placement">#${g.placement}</span>
+      <div class="recent-game-row-top">
+        <span class="recent-game-date">${new Date(g.finished_at).toLocaleDateString('en-US', DATE_FORMAT)}</span>
+        <span class="recent-game-placement${g.placement === 1 ? ' recent-game-placement-first' : ''}">#${g.placement}</span>
+      </div>
+      <div class="recent-game-opponents">${escapeHtml(opponentsLabel(g, myUsername))}</div>
     </button>
   `).join('');
   container.querySelectorAll('.recent-game-row').forEach((row) => {
@@ -41,7 +49,14 @@ export async function loadHomeRecentGames() {
   try {
     const result = await fetchJSON(`/api/games/${encodeURIComponent(profile.username)}`);
     const games = (result.games || []).slice(0, 5);
-    if (games.length === 0) { hide(section); return; }
+    // showHomeTile (lobby.js) hides this synchronously the instant a
+    // sub-panel (Join/Host/Rules) is picked -- but this fetch is async,
+    // so if that happened while it was in flight, this callback landing
+    // afterward would otherwise un-hide it again on the wrong screen (a
+    // real, reported bug: Recent Games appearing above the Host form).
+    // $('home-tiles') being hidden is exactly "no longer on the tile
+    // picker", regardless of which sub-panel is now showing instead.
+    if (games.length === 0 || $('home-tiles').classList.contains('hidden')) { hide(section); return; }
     renderGamesList($('home-recent-games-list'), games, profile.username);
     show(section);
   } catch (e) {

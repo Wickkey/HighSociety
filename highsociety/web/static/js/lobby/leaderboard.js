@@ -16,16 +16,30 @@ const SPARKLINE_HEIGHT = 48;
 // (see get_rating_history). Plots every new_rating, prefixed by the very
 // first entry's old_rating so the line actually starts somewhere instead
 // of jumping in mid-air on its first point.
+//
+// X spacing is proportional to real elapsed time between games (each
+// point's actual `created_at`), not evenly spaced by index -- a naive
+// index-based layout spread a burst of several games played in one
+// evening across the *entire* width, identical to if they'd been spread
+// across months, which is what made the line look like a meaningless
+// zigzag rather than an actual rating history (a real reported issue).
+// The prefixed old_rating point sits at a synthetic time just before the
+// first real game (5% of the whole span back) purely so the line has a
+// visible starting slope -- it's never a real game's own timestamp.
 function renderSparkline(history) {
   if (history.length === 0) {
     return '<p class="muted">No rated games yet.</p>';
   }
+  const gameTimes = history.map((h) => new Date(h.created_at).getTime());
+  const span = gameTimes[gameTimes.length - 1] - gameTimes[0] || 1;
+  const times = [gameTimes[0] - span * 0.05, ...gameTimes];
+  const timeRange = times[times.length - 1] - times[0] || 1;
   const values = [history[0].old_rating, ...history.map((h) => h.new_rating)];
   const min = Math.min(...values);
   const max = Math.max(...values);
   const range = max - min || 1; // avoid a divide-by-zero flat line
   const points = values.map((v, i) => {
-    const x = (i / (values.length - 1 || 1)) * SPARKLINE_WIDTH;
+    const x = ((times[i] - times[0]) / timeRange) * SPARKLINE_WIDTH;
     const y = SPARKLINE_HEIGHT - ((v - min) / range) * SPARKLINE_HEIGHT;
     return `${x.toFixed(1)},${y.toFixed(1)}`;
   }).join(' ');
