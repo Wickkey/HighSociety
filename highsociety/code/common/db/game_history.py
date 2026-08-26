@@ -128,6 +128,36 @@ _SCHEMA_STATEMENTS = [
     "ALTER TABLE player_games ADD CONSTRAINT player_or_bot "
     "CHECK (player_id IS NOT NULL OR bot_name IS NOT NULL)",
 
+    # Per-SEAT placement, deliberately NOT read from game_results (whose
+    # PRIMARY KEY (game_id, user_id) collapses two same-difficulty bot
+    # seats sharing one player_id into a single row -- correct for that
+    # table's own per-*account* purpose, but wrong here: confirmed live,
+    # get_game_detail's old game_results join gave both bot seats the
+    # exact same placement, since the join can only match by player_id,
+    # not by which physical seat it was). This column is this table's own
+    # source of truth for "what did *this seat* place", independent of
+    # how many other seats might share its player_id.
+    "ALTER TABLE player_games ADD COLUMN IF NOT EXISTS placement INTEGER",
+    # Backfill for every row written before this column existed -- ranks
+    # each game's own seats by the identical tier+points rule
+    # record_finished_game's _placement_tier already uses (winner first,
+    # eliminated last, else by descending points), computed fresh per
+    # seat from player_games' own data rather than borrowed from
+    # game_results, so it's correct even for the shared-bot-seat case
+    # this column exists to fix.
+    """
+    WITH ranked AS (
+        SELECT id, ROW_NUMBER() OVER (
+            PARTITION BY game_id
+            ORDER BY CASE WHEN is_winner THEN 0 WHEN eliminated THEN 2 ELSE 1 END, -points
+        ) AS computed_placement
+        FROM player_games
+        WHERE placement IS NULL
+    )
+    UPDATE player_games pg SET placement = ranked.computed_placement
+    FROM ranked WHERE pg.id = ranked.id
+    """,
+
     # `bot_mix` (still present, see this file's own module docstring on
     # `games`) is no longer populated for new rows -- these are its
     # richer, per-seat replacement. All nullable: an untimed 2-seat game
@@ -734,15 +764,20 @@ def get_game_detail(game_id: int) -> Optional[dict]:
             if row is None:
                 return None
             finished_at = row[0]
+            # Reads pg.placement (this table's own per-SEAT column), not a
+            # join through game_results -- that table's PRIMARY KEY
+            # (game_id, user_id) intentionally collapses two same-
+            # difficulty bot seats sharing one player_id into one row,
+            # which used to give both seats the same placement here (a
+            # real bug, confirmed live: two bots both showing "#1").
             cur.execute(
                 """
                 SELECT COALESCE(p.username, pg.bot_name) AS name, p.id IS NULL AS is_bot,
-                       pg.points, pg.money_left, pg.is_winner, pg.eliminated, gr.placement
+                       pg.points, pg.money_left, pg.is_winner, pg.eliminated, pg.placement
                 FROM player_games pg
                 LEFT JOIN players p ON p.id = pg.player_id AND p.id NOT IN (SELECT player_id FROM bots)
-                LEFT JOIN game_results gr ON gr.game_id = pg.game_id AND gr.user_id = pg.player_id
                 WHERE pg.game_id = %s
-                ORDER BY gr.placement NULLS LAST
+                ORDER BY pg.placement NULLS LAST
                 """,
                 (game_id,),
             )
@@ -1209,11 +1244,11 @@ def record_finished_game(*, room_code: str, seats: int, bot_mix: list,
                 cur.execute(
                     """
                     INSERT INTO player_games
-                        (game_id, player_id, bot_name, points, money_left, is_winner, eliminated)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                        (game_id, player_id, bot_name, points, money_left, is_winner, eliminated, placement)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                     """,
                     (game_id, player_id, bot_name, p["points"], p["money_left"],
-                     p["is_winner"], p["eliminated"]),
+                     p["is_winner"], p["eliminated"], placement_by_index[index]),
                 )
 
                 if player_id is not None:

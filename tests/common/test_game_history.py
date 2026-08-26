@@ -1003,6 +1003,61 @@ def test_get_game_detail_returns_every_participant_ordered_by_placement(database
     }
 
 
+def test_get_game_detail_reads_placement_from_player_games_not_game_results(database_url):
+    """Real bug, confirmed live: joining through game_results (PRIMARY KEY
+    (game_id, user_id)) gave two same-difficulty bot seats -- which share
+    one player_id -- the exact same placement, since the join can't tell
+    the seats apart. player_games.placement is this table's own per-seat
+    column, immune to that collapse."""
+    game_history._schema_ready = True
+    conn, cursor = _fake_connection()
+    cursor.fetchone.side_effect = None
+    cursor.fetchone.return_value = (datetime.datetime.now(datetime.timezone.utc),)
+    cursor.fetchall = MagicMock(return_value=[])
+    with patch.object(game_history, "_connect", return_value=conn):
+        game_history.get_game_detail(42)
+    query = cursor.execute.call_args_list[-1].args[0]
+    assert "game_results" not in query
+    assert "pg.placement" in query
+
+
+def test_record_finished_game_gives_distinct_placements_to_same_difficulty_bot_seats(database_url):
+    """Real bug, confirmed live: two bot seats of the same difficulty
+    share one player_id, but each seat still gets its own correct,
+    distinct placement written to player_games -- game_results (keyed by
+    (game_id, user_id)) is a separate, deliberately-deduplicated table
+    and is not what get_game_detail reads placement from any more."""
+    game_history._schema_ready = True
+    conn, cursor = _fake_connection()
+    cursor.fetchone.side_effect = iter([
+        (1,),              # INSERT INTO games ... RETURNING id
+        (10, None, 1000),  # _upsert_player(alice)
+        (55, 1000),        # bots lookup for the winning medium bot
+        (55, 1000),        # bots lookup for the eliminated medium bot -- same player_id
+    ])
+    participants = [
+        {"is_bot": False, "username": "alice", "name": "Alice", "game_username": "alice",
+         "points": 8, "money_left": 62, "is_winner": False, "eliminated": False},
+        {"is_bot": True, "username": None, "name": "Milo bot", "game_username": "milo bot",
+         "points": 40, "money_left": 66, "is_winner": True, "eliminated": False, "difficulty": "medium"},
+        {"is_bot": True, "username": None, "name": "Ziggy bot", "game_username": "ziggy bot",
+         "points": 18, "money_left": 27, "is_winner": False, "eliminated": True, "difficulty": "medium"},
+    ]
+    with patch.object(game_history, "_connect", return_value=conn):
+        game_history.record_finished_game(
+            room_code="ABCDE", seats=3, bot_mix=["medium", "medium"],
+            started_at=datetime.datetime.now(datetime.timezone.utc),
+            finished_at=datetime.datetime.now(datetime.timezone.utc),
+            participants=participants,
+        )
+
+    player_games_inserts = [call.args[1] for call in cursor.execute.call_args_list
+                             if "INSERT INTO player_games" in call.args[0]]
+    # (game_id, player_id, bot_name, points, money_left, is_winner, eliminated, placement)
+    placements_by_name = {row[2] or "alice": row[7] for row in player_games_inserts}
+    assert placements_by_name == {"alice": 2, "Milo bot": 1, "Ziggy bot": 3}
+
+
 def test_get_leaderboard_excludes_guests_and_bots_by_query(database_url):
     """Doesn't fake a real WHERE-clause result (that's Postgres' job) --
     just confirms the query text actually filters both, and the shape of
