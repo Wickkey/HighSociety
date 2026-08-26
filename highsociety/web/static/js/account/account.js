@@ -56,7 +56,6 @@ function renderAchievementTile(a, unlocked) {
     + `<span class="achievement-name">${escapeHtml(a.name)}</span></div>`;
 }
 
-// Games played/win rate: shown as a dimmed "—" skeleton (see the
 // Fired once as soon as boot knows who's signed in (see login.js's
 // proceedPastLogin) rather than waiting for the user to actually click
 // into Account -- the query itself is cheap, but it's still a real round
@@ -82,34 +81,49 @@ export function prefetchAccountStats() {
 // Stats aren't gated to Google-linked accounts (get_player_profile_stats
 // isn't either) -- a guest with no games yet just keeps the skeleton
 // (the 404 case below), same as before.
+function renderAccountStats(stats, profile) {
+  if (!stats) return;
+  // A guest's elo column never actually moves (record_finished_game only
+  // rates google_id-linked players and bots) -- showing the untouched
+  // default as if it meant something would just be misleading.
+  $('account-elo').textContent = profile.google_id ? stats.elo : 'Unrated';
+  $('account-stat-games').textContent = stats.games_played;
+  $('account-stat-wins').textContent = stats.wins;
+  $('account-stat-winrate').textContent = `${Math.round(stats.win_rate * 100)}%`;
+  // null for a player whose only games predate the game_results table
+  // (see get_player_profile_stats' own docstring) -- an em dash reads
+  // as "no data" rather than a misleading 0.
+  $('account-stat-avg-placement').textContent = stats.avg_placement != null ? stats.avg_placement.toFixed(1) : '—';
+  $('account-stat-avg-points').textContent = stats.avg_points != null ? stats.avg_points.toFixed(1) : '—';
+  $('account-stat-avg-money').textContent = stats.avg_money_remaining != null ? stats.avg_money_remaining.toFixed(1) : '—';
+  $('account-stats-row').classList.remove('loading');
+}
+
+// Stale-while-revalidate, deliberately: the login-time prefetch is only
+// ever trusted for the *instant* first paint (removing the visible wait
+// this screen used to have) -- every open of this screen still follows
+// up with a genuinely fresh fetch and re-renders on top of it. A real,
+// reported bug was the prefetch being treated as the last word: it's
+// fetched exactly once per page load, so any game finished afterward
+// (including a chain of rematches, which never revisits the home screen
+// where an invalidation hook could otherwise live) left Account showing
+// numbers from before that game -- a real, live-reported case: Elo and
+// avg. money both stuck at whatever they were after just the *first* of
+// two games played in one sitting, disagreeing with the Leaderboard
+// (which always fetches fresh) and with the games actually played.
 async function loadAccountStats() {
   const profile = loadProfile();
   const row = $('account-stats-row');
   row.classList.add('loading');
   if (!profile) return;
+  if (_statsPrefetch && _statsPrefetchUsername === profile.username) {
+    try {
+      renderAccountStats(await _statsPrefetch, profile);
+    } catch (e) { /* fall through to the fresh fetch below */ }
+  }
   try {
-    const stats = (_statsPrefetch && _statsPrefetchUsername === profile.username)
-      ? await _statsPrefetch
-      : await fetchJSON(`/api/profile/${encodeURIComponent(profile.username)}`);
-    // null means the prefetch itself failed (404/network error, caught to
-    // null above rather than a rejection) -- same as the 404 catch below,
-    // just arriving through the cached-promise path instead of a throw.
-    if (!stats) return;
-    // A guest's elo column never actually moves (record_finished_game only
-    // rates google_id-linked players and bots) -- showing the untouched
-    // default as if it meant something would just be misleading.
-    $('account-elo').textContent = profile.google_id ? stats.elo : 'Unrated';
-    $('account-stat-games').textContent = stats.games_played;
-    $('account-stat-wins').textContent = stats.wins;
-    $('account-stat-winrate').textContent = `${Math.round(stats.win_rate * 100)}%`;
-    // null for a player whose only games predate the game_results table
-    // (see get_player_profile_stats' own docstring) -- an em dash reads
-    // as "no data" rather than a misleading 0.
-    $('account-stat-avg-placement').textContent = stats.avg_placement != null ? stats.avg_placement.toFixed(1) : '—';
-    $('account-stat-avg-points').textContent = stats.avg_points != null ? stats.avg_points.toFixed(1) : '—';
-    $('account-stat-avg-money').textContent = stats.avg_money_remaining != null ? stats.avg_money_remaining.toFixed(1) : '—';
-    row.classList.remove('loading');
-  } catch (e) { /* 404: no games recorded yet -- leave the skeleton showing */ }
+    renderAccountStats(await fetchJSON(`/api/profile/${encodeURIComponent(profile.username)}`), profile);
+  } catch (e) { /* 404: no games recorded yet -- leave whatever's already rendered (or the skeleton) */ }
 }
 
 // Guests have no stable identity to hang persistent progress off (a
