@@ -429,8 +429,11 @@ def test_finished_game_is_recorded_when_a_database_is_configured(running_web_ser
     monkeypatch.setattr(game_history, "_connect", lambda: conn)
     # Run synchronously so the test doesn't have to race a background thread
     # for a database write that, in production, is deliberately fire-and-forget.
-    monkeypatch.setattr(game_history, "record_finished_game_async",
-                         lambda **kwargs: game_history.record_finished_game(**kwargs))
+    def _synchronous_record(on_complete=None, **kwargs):
+        result = game_history.record_finished_game(**kwargs)
+        if on_complete:
+            on_complete(result)
+    monkeypatch.setattr(game_history, "record_finished_game_async", _synchronous_record)
 
     resp = web_server.app.test_client().post(
         "/api/create_game", json={"seats": 2, "bot_mix": ["pass"], "seed": 42, "bot_think_time": 0}
@@ -455,6 +458,57 @@ def test_finished_game_is_recorded_when_a_database_is_configured(running_web_ser
     # human does -- see the player_xor_bot schema constraint.
     player_ids = sorted((c.args[1][1] is None) for c in player_games_calls)
     assert player_ids == [False, True]
+
+    player.close()
+
+
+def test_status_payload_exposes_elo_changes_once_the_async_write_completes(running_web_server, monkeypatch):
+    """The post-game Elo reveal (rematch.js's revealEloChange) polls
+    /api/status until elo_changes stops being null -- confirms the field
+    exists, starts null the instant the room is marked finished (the
+    real async write is still in flight), and becomes a real dict once
+    GameRoom's on_complete callback (_store_elo_changes) has run. Doesn't
+    re-duplicate game_history's own Elo-math unit tests -- alice here is
+    a guest (no rating change), so `{}` is the expected settled value;
+    what this test exists to prove is the wiring itself, not the math."""
+    port = running_web_server
+    monkeypatch.setenv("DATABASE_URL", "postgresql://user:pass@localhost/testdb")
+    game_history._schema_ready = True
+    conn = MagicMock()
+    cursor = MagicMock()
+    ids = iter(range(1, 1000))
+    cursor.fetchone.side_effect = lambda: (next(ids), None, 1000)
+    conn.cursor.return_value.__enter__.return_value = cursor
+    conn.__enter__.return_value = conn
+    monkeypatch.setattr(game_history, "_connect", lambda: conn)
+    # Deliberately NOT monkeypatched to run synchronously here (unlike the
+    # test above) -- the whole point is to exercise the real async
+    # on_complete wiring, including the brief window where it's still null.
+
+    resp = web_server.app.test_client().post(
+        "/api/create_game", json={"seats": 2, "bot_mix": ["pass"], "seed": 42, "bot_think_time": 0}
+    )
+    room_code = resp.get_json()["room_code"]
+    player = ScriptedWSClient(_ws_url(port, f"/ws?room={room_code}"), "alice")
+    player.handshake()
+    player.start()
+
+    room = web_server._rooms[room_code]
+    deadline = time.time() + 30
+    while time.time() < deadline and room.state != "finished":
+        threading.Event().wait(0.2)
+    assert room.state == "finished"
+
+    status = web_server.app.test_client().get(f"/api/status?room={room_code}").get_json()
+    assert "elo_changes" in status  # present even while still null/pending
+
+    deadline = time.time() + 5
+    while time.time() < deadline and room.elo_changes is None:
+        threading.Event().wait(0.1)
+    assert room.elo_changes == {}  # settled: alice is a guest, nothing rated
+
+    status = web_server.app.test_client().get(f"/api/status?room={room_code}").get_json()
+    assert status["elo_changes"] == {}
 
     player.close()
 

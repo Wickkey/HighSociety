@@ -239,6 +239,23 @@
                 </svg>
               </button>
             </div>
+            <!-- No prior indication anywhere in the app that a signed-in
+                 account is actually Google-linked (chess.com's "Connected
+                 Accounts" panel was the reference point) -- toggled in
+                 showAccountScreen() alongside the existing Unrated/numeric
+                 Elo branch, since both keyed off the same profile.google_id. -->
+            <span id="account-google-badge" class="account-connection-badge account-connection-badge-google hidden">
+              <svg viewBox="0 0 48 48" aria-hidden="true">
+                <path fill="#4285F4" d="M45.12 24.5c0-1.56-.14-3.06-.4-4.5H24v8.51h11.84c-.51 2.75-2.06 5.08-4.39 6.64v5.52h7.11c4.16-3.83 6.56-9.47 6.56-16.17z"/>
+                <path fill="#34A853" d="M24 46c5.94 0 10.92-1.97 14.56-5.33l-7.11-5.52c-1.97 1.32-4.49 2.1-7.45 2.1-5.73 0-10.58-3.87-12.31-9.07H4.34v5.7C7.96 41.07 15.4 46 24 46z"/>
+                <path fill="#FBBC05" d="M11.69 28.18C11.25 26.86 11 25.45 11 24s.25-2.86.69-4.18v-5.7H4.34C2.85 17.09 2 20.45 2 24s.85 6.91 2.34 9.88l7.35-5.7z"/>
+                <path fill="#EA4335" d="M24 10.75c3.23 0 6.13 1.11 8.41 3.29l6.31-6.31C34.91 4.18 29.93 2 24 2 15.4 2 7.96 6.93 4.34 14.12l7.35 5.7c1.73-5.2 6.58-9.07 12.31-9.07z"/>
+              </svg>
+              Connected with Google
+            </span>
+            <span id="account-guest-badge" class="account-connection-badge account-connection-badge-guest hidden">
+              Guest account
+            </span>
             <!-- The one number this whole screen exists to show off (see
                  account.js's loadAccountStats) -- previously a single muted
                  inline word next to the username, easy to miss entirely. -->
@@ -793,6 +810,30 @@
       <div class="card panel finished-panel">
         <div id="finished-trophy" class="finished-trophy">🏆</div>
         <h2 id="finished-headline">Game over</h2>
+
+        <!-- Post-game Elo reveal (see lobby/rematch.js's revealEloChange) --
+             three mutually-exclusive states, toggled via .hidden: a brief
+             "calculating" placeholder while the fire-and-forget game-history
+             write is still in flight, the real numbers once it lands, or a
+             guest sign-in nudge in the same slot (a guest never actually
+             gets a rating change, so this doubles as a conversion moment
+             rather than just showing nothing). -->
+        <div id="elo-reveal-calculating" class="elo-reveal elo-reveal-calculating hidden">
+          <span class="elo-reveal-label">Calculating your rating…</span>
+        </div>
+        <div id="elo-reveal" class="elo-reveal hidden">
+          <span class="elo-reveal-label">Rating</span>
+          <div class="elo-reveal-numbers">
+            <span id="elo-reveal-old" class="elo-reveal-number elo-reveal-old"></span>
+            <span class="elo-reveal-arrow">→</span>
+            <span id="elo-reveal-new" class="elo-reveal-number elo-reveal-new"></span>
+          </div>
+          <span id="elo-reveal-delta" class="elo-reveal-delta"></span>
+        </div>
+        <p id="elo-reveal-guest-note" class="hint elo-reveal-guest-note hidden">
+          Sign in with Google to start tracking your rating like this.
+        </p>
+
         <div id="standings-table"></div>
         <details class="advanced winner-rule-info">
           <summary>How is the winner decided?</summary>

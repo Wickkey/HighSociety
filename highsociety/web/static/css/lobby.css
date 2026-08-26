@@ -162,6 +162,27 @@
 }
 .account-edit-username-btn svg { width: 15px; height: 15px; }
 .account-edit-username-btn:hover { color: var(--accent-strong); background: var(--accent-soft); }
+/* No prior indication anywhere in the app that a signed-in account is
+   actually Google-linked (chess.com's "Connected Accounts" panel was
+   the reference) -- a small pill under the name, toggled in
+   showAccountScreen() alongside the existing Unrated/numeric Elo
+   branch. White background specifically for the Google badge (not the
+   parchment tone everything else uses) since Google's own brand marks
+   are designed against a plain white/light surface. */
+.account-connection-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-top: 0.3rem;
+  padding: 0.2rem 0.6rem 0.2rem 0.45rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  width: fit-content;
+}
+.account-connection-badge-google { background: #fff; color: #3c4043; border: 1px solid var(--panel-border); }
+.account-connection-badge-google svg { width: 14px; height: 14px; flex-shrink: 0; }
+.account-connection-badge-guest { background: var(--panel-bg-soft); color: var(--muted); border: 1px solid var(--panel-border); }
 /* The one number this whole screen exists to show off -- see
    account.js's loadAccountStats -- previously a single muted inline
    word easy to miss entirely. */

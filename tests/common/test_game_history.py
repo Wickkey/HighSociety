@@ -41,19 +41,47 @@ def test_ensure_schema_is_a_silent_no_op_without_a_database(no_database_url):
 def test_record_finished_game_is_a_silent_no_op_without_a_database(no_database_url):
     # Must not raise even though every field below is nonsense -- the whole
     # point is that this never gets far enough to touch any of it.
-    game_history.record_finished_game(
+    result = game_history.record_finished_game(
         room_code="ABCDE", seats=2, bot_mix=["greedy"],
         started_at=datetime.datetime.now(datetime.timezone.utc),
         finished_at=datetime.datetime.now(datetime.timezone.utc),
         participants=[{"is_bot": True, "username": None, "name": "Marble",
                        "points": 5, "money_left": 10, "is_winner": True, "eliminated": False}],
     )
+    assert result == {}
 
 
 def test_record_finished_game_async_spawns_nothing_without_a_database(no_database_url):
     with patch("threading.Thread") as mock_thread:
         game_history.record_finished_game_async(room_code="ABCDE")
         mock_thread.assert_not_called()
+
+
+def test_record_finished_game_async_calls_on_complete_with_empty_dict_without_a_database(no_database_url):
+    """The post-game Elo reveal (web_server.py) relies on on_complete
+    always firing, even when there's nothing to compute -- otherwise a
+    local dev setup with no DATABASE_URL would leave the reveal polling
+    forever instead of resolving immediately to "nothing to show"."""
+    seen = []
+    game_history.record_finished_game_async(room_code="ABCDE", on_complete=seen.append)
+    assert seen == [{}]
+
+
+def test_record_finished_game_async_calls_on_complete_with_the_real_result(database_url):
+    game_history._schema_ready = True
+    conn, cursor = _fake_connection()
+    seen = []
+    with patch.object(game_history, "_connect", return_value=conn):
+        game_history.record_finished_game_async(
+            on_complete=seen.append,
+            room_code="ABCDE", seats=2, bot_mix=[],
+            started_at=datetime.datetime.now(datetime.timezone.utc),
+            finished_at=datetime.datetime.now(datetime.timezone.utc),
+            participants=[],
+        )
+        import time
+        time.sleep(0.2)  # give the background thread a moment to actually run
+    assert seen == [{}]  # no participants -- nothing rated, but on_complete still fires
 
 
 def _fake_connection():
@@ -295,7 +323,7 @@ def test_record_finished_game_writes_a_ratings_row_per_rated_participant(databas
          "points": 5, "money_left": 0, "is_winner": False, "eliminated": False},
     ]
     with patch.object(game_history, "_connect", return_value=conn):
-        game_history.record_finished_game(
+        result = game_history.record_finished_game(
             room_code="ABCDE", seats=2, bot_mix=[],
             started_at=datetime.datetime.now(datetime.timezone.utc),
             finished_at=datetime.datetime.now(datetime.timezone.utc),
@@ -309,6 +337,11 @@ def test_record_finished_game_writes_a_ratings_row_per_rated_participant(databas
     assert by_player[10][3] == by_player[10][2] + by_player[10][4]  # new_rating == old + change
     assert by_player[10][4] > 0  # alice (winner) gains
     assert by_player[11][4] < 0  # bob (loser) loses
+
+    # The return value is what web_server.py's post-game Elo reveal
+    # actually reads -- keyed by rating_key (a human's real username).
+    assert result["alice"] == {"old_rating": 1000, "new_rating": by_player[10][3], "rating_change": by_player[10][4]}
+    assert result["bob"] == {"old_rating": 1000, "new_rating": by_player[11][3], "rating_change": by_player[11][4]}
 
 
 def test_record_finished_game_averages_elo_deltas_for_same_difficulty_bot_seats(database_url):
@@ -338,7 +371,7 @@ def test_record_finished_game_averages_elo_deltas_for_same_difficulty_bot_seats(
          "points": 18, "money_left": 27, "is_winner": False, "eliminated": True, "difficulty": "medium"},
     ]
     with patch.object(game_history, "_connect", return_value=conn):
-        game_history.record_finished_game(
+        result = game_history.record_finished_game(
             room_code="ABCDE", seats=3, bot_mix=["medium", "medium"],
             started_at=datetime.datetime.now(datetime.timezone.utc),
             finished_at=datetime.datetime.now(datetime.timezone.utc),
@@ -367,6 +400,15 @@ def test_record_finished_game_averages_elo_deltas_for_same_difficulty_bot_seats(
                    if call.args[0].startswith("UPDATE players SET elo")]
     bot_elo_update = next(p for p in elo_updates if p[1] == 55)
     assert bot_elo_update[0] == expected_bot_delta  # applied exactly once, not twice
+
+    # Both bot seats' rating_keys resolve to the same, correct combined
+    # change in the return value too (each one only matters if a future
+    # caller ever looks a bot seat up by name -- today only alice's own
+    # entry is actually read, by web_server.py's Elo reveal).
+    assert result["alice"]["rating_change"] == expected_seat_deltas["alice"]
+    assert result["medium bot a"] == result["medium bot b"] == {
+        "old_rating": by_player[55][2], "new_rating": by_player[55][3], "rating_change": expected_bot_delta,
+    }
 
 
 def test_record_finished_game_rates_bot_games_but_never_gives_bots_achievements(database_url):

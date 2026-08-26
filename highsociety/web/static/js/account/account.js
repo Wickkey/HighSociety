@@ -161,6 +161,12 @@ export function showAccountScreen() {
   $('account-username-display').textContent = profile ? profile.username : '';
   $('account-username-input').value = profile ? profile.username : '';
   $('account-elo').textContent = profile && !profile.google_id ? 'Unrated' : '1000';
+  // No prior indication anywhere in the app that a signed-in account is
+  // actually Google-linked (chess.com's "Connected Accounts" panel was
+  // the reference) -- same profile.google_id branch the Elo
+  // Unrated/numeric split above already uses.
+  $('account-google-badge').classList.toggle('hidden', !(profile && profile.google_id));
+  $('account-guest-badge').classList.toggle('hidden', !(profile && !profile.google_id));
   if (profile && !profile.google_id) {
     showToast('Sign in with Google to start tracking your Elo rating.');
   }

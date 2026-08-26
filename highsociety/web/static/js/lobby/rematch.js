@@ -17,6 +17,7 @@ import { ws } from '../network/websocket.js';
 import { game, resetGameState, seedOpponents, applyRoomDisplaySettings } from '../game/gameState.js';
 import { ensureGameScreenVisible } from '../game/gameEvents.js';
 import { renderOpponents } from '../game/gameRenderer.js';
+import { loadProfile } from '../auth/profile.js';
 
 // Rematch panel state on the finished screen: null while no vote is
 // underway, else {requestedBy, botMix, votes} mirroring web_server.py's
@@ -80,6 +81,93 @@ export function renderFinished(status) {
   rematchBotSeats = status.rematch_bot_seats || 0;
   rematchDefaultBotMix = status.rematch_default_bot_mix || [];
   renderRematchPanel();
+
+  if (game.myUsername) revealEloChange(status);
+}
+
+// A per-game token, bumped every time revealEloChange starts -- so a
+// rematch (which calls renderFinished again for a brand new game) can't
+// have its OLD poll loop's late response land on top of the NEW game's
+// card once it's already showing something else. Simpler than threading
+// an AbortController through fetchJSON for what's already a short,
+// bounded retry loop.
+let eloRevealToken = 0;
+
+// See index.html's three elo-reveal-* elements for the state machine
+// this drives: a brief "calculating" placeholder (shown immediately --
+// the game-history write is fire-and-forget, see game_history.py's own
+// docstring on why), replaced once /api/status's elo_changes stops being
+// null by either the real numbers or a guest sign-in nudge in the same
+// slot. Only ever shows *this* player's own change (chess.com/colonist.io
+// both treat a post-game rating reveal as personal, not table-wide).
+async function revealEloChange(initialStatus) {
+  const token = ++eloRevealToken;
+  const calculating = $('elo-reveal-calculating');
+  const reveal = $('elo-reveal');
+  const guestNote = $('elo-reveal-guest-note');
+  hide(reveal);
+  hide(guestNote);
+  showEnter(calculating);
+
+  let changes = initialStatus.elo_changes;
+  for (let attempt = 0; attempt < 8 && (changes === undefined || changes === null); attempt++) {
+    await new Promise((resolve) => setTimeout(resolve, 700));
+    if (token !== eloRevealToken) return; // superseded by a newer game (e.g. a rematch)
+    try {
+      const fresh = await fetchJSON(`/api/status?room=${encodeURIComponent(currentRoomCode())}`);
+      changes = fresh.elo_changes;
+    } catch (e) { /* transient network hiccup -- next attempt (or the timeout below) handles it */ }
+  }
+  if (token !== eloRevealToken) return;
+  hide(calculating);
+
+  const mine = changes && changes[game.myUsername];
+  const profile = loadProfile();
+  if (mine) {
+    showEloNumbers(mine.old_rating, mine.new_rating, mine.rating_change);
+  } else if (!profile || !profile.google_id) {
+    // A guest never actually gets a rating change -- the same slot that
+    // would show one instead nudges them to sign in, turning this into a
+    // conversion moment rather than just showing nothing.
+    showEnter(guestNote);
+  }
+  // Neither: e.g. a Google-linked human whose table had no other rated
+  // participant that game (compute_elo_deltas needs 2+) -- nothing
+  // meaningful to show, so the card just stays hidden.
+}
+
+function showEnter(el) {
+  el.classList.remove('hidden', 'enter');
+  void el.offsetWidth; // force reflow so the class removal above actually takes effect first
+  el.classList.add('enter');
+}
+
+function showEloNumbers(oldRating, newRating, delta) {
+  const card = $('elo-reveal');
+  card.classList.remove('gain', 'loss');
+  if (delta > 0) card.classList.add('gain');
+  else if (delta < 0) card.classList.add('loss');
+  $('elo-reveal-old').textContent = oldRating;
+  $('elo-reveal-new').textContent = oldRating; // count-up starts here, see animateEloNumber
+  $('elo-reveal-delta').textContent = delta > 0 ? `+${delta}` : `${delta}`;
+  showEnter(card);
+  animateEloNumber($('elo-reveal-new'), oldRating, newRating);
+}
+
+// No charting-library-style dependency for this (matching this session's
+// own hand-rolled-sparkline precedent) -- just a plain
+// requestAnimationFrame loop easing from old_rating to new_rating,
+// landing exactly on the real integer regardless of frame timing.
+function animateEloNumber(el, from, to, durationMs = 1100) {
+  const start = performance.now();
+  function tick(now) {
+    const t = Math.min(1, (now - start) / durationMs);
+    const eased = 1 - (1 - t) ** 3; // ease-out cubic
+    el.textContent = Math.round(from + (to - from) * eased);
+    if (t < 1) requestAnimationFrame(tick);
+    else el.textContent = to;
+  }
+  requestAnimationFrame(tick);
 }
 
 // Only a still-connected player (as opposed to a spectator, or a player

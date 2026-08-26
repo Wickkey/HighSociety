@@ -33,7 +33,7 @@ how those fit together):
 import datetime
 import os
 import threading
-from typing import Optional
+from typing import Callable, Optional
 
 from highsociety.code.common import elo
 from highsociety.code.common.achievements import WIN_COUNT_MILESTONES
@@ -1074,8 +1074,17 @@ def record_finished_game(*, room_code: str, seats: int, bot_mix: list,
                           participants: list, achievement_unlocks: Optional[dict] = None,
                           host_username: Optional[str] = None, time_control: Optional[int] = None,
                           is_finished_successfully: bool = True,
-                          auction_rounds: Optional[list] = None) -> None:
+                          auction_rounds: Optional[list] = None) -> dict:
     """
+    Returns {rating_key: {"old_rating", "new_rating", "rating_change"}} for
+    every participant whose rating actually changed this game (a human's
+    rating_key is their real username -- see game_username's own docstring
+    below) -- empty on any early-return/no-op/failure path. Used by
+    web_server.py to surface the finished screen's post-game Elo reveal
+    without the caller needing its own copy of the Elo math or a second
+    DB round-trip; every other side effect below still happens regardless
+    of whether the caller reads this.
+
     `participants`: one dict per seat, already reduced to exactly what this
     module needs — see web_server.py's call site for how it's built from
     PlayGame.final_standings/GameRoom.players. Keeping that translation in
@@ -1144,11 +1153,12 @@ def record_finished_game(*, room_code: str, seats: int, bot_mix: list,
     that predates this or a crashed game with no history) just skips that
     entirely; nothing else here depends on it.
     """
+    elo_changes: dict = {}
     if not is_configured():
-        return
+        return elo_changes
     ensure_schema()
     if not _schema_ready:
-        return  # schema setup already failed and logged a warning above
+        return elo_changes  # schema setup already failed and logged a warning above
     achievement_unlocks = achievement_unlocks or {}
     conn = None
     try:
@@ -1320,21 +1330,34 @@ def record_finished_game(*, room_code: str, seats: int, bot_mix: list,
             # per-seat, correctly-audited rating change -- not N times the
             # swing a single seat would have earned alone.
             deltas_by_player_id: dict[int, list[int]] = {}
+            rating_keys_by_player_id: dict[int, list[str]] = {}
             for rating_key, delta in elo.compute_elo_deltas(rated_standings).items():
                 player_id = rated_player_ids[rating_key]
                 deltas_by_player_id.setdefault(player_id, []).append(delta)
+                rating_keys_by_player_id.setdefault(player_id, []).append(rating_key)
             for player_id, seat_deltas in deltas_by_player_id.items():
                 combined_delta = round(sum(seat_deltas) / len(seat_deltas))
                 if combined_delta:
                     old_rating = elo_before_by_player_id[player_id]
+                    new_rating = old_rating + combined_delta
                     cur.execute("UPDATE players SET elo = elo + %s WHERE id = %s", (combined_delta, player_id))
                     cur.execute(
                         """
                         INSERT INTO ratings (user_id, game_id, old_rating, new_rating, rating_change)
                         VALUES (%s, %s, %s, %s, %s)
                         """,
-                        (player_id, game_id, old_rating, old_rating + combined_delta, combined_delta),
+                        (player_id, game_id, old_rating, new_rating, combined_delta),
                     )
+                    # Keyed by rating_key (a human's real username, see
+                    # game_username's own docstring) so the caller
+                    # (web_server.py's post-game reveal) can look a
+                    # specific player up directly by the same username it
+                    # already knows client-side -- see this function's own
+                    # docstring for the full return-value shape.
+                    for rating_key in rating_keys_by_player_id[player_id]:
+                        elo_changes[rating_key] = {
+                            "old_rating": old_rating, "new_rating": new_rating, "rating_change": combined_delta,
+                        }
 
             seat_columns = (seat_player_ids + [None] * 5)[:5]
             cur.execute(
@@ -1350,12 +1373,14 @@ def record_finished_game(*, room_code: str, seats: int, bot_mix: list,
                 _record_auction_rounds(cur, game_id, auction_rounds, player_id_by_game_username)
     except Exception as e:  # noqa: BLE001 — see record_finished_game_async's docstring
         LoggingManager.warning(f"game_history.record_finished_game failed: {e}")
+        return {}
     finally:
         if conn is not None:
             conn.close()
+    return elo_changes
 
 
-def record_finished_game_async(**kwargs) -> None:
+def record_finished_game_async(on_complete: Optional[Callable[[dict], None]] = None, **kwargs) -> None:
     """
     Fire-and-forget wrapper — the only entry point web_server.py's actual
     game-end path calls, since it must never wait on (or fail because of) a
@@ -1363,8 +1388,23 @@ def record_finished_game_async(**kwargs) -> None:
     ever have by this point, so nothing time-sensitive is being raced here:
     worst case, this game's row shows up a moment late or not at all
     (logged), while every player-facing message still goes out on schedule.
+
+    `on_complete`, if given, is called from the background thread with
+    record_finished_game's own return value (or `{}` if there's no
+    database configured at all, matching what record_finished_game itself
+    returns for every other no-op path) once the write actually finishes
+    -- a notification, not something this function waits on. Lets a caller
+    (the post-game Elo reveal) find out the real Elo change without
+    duplicating the Elo math or adding a second DB round-trip of its own.
     """
     if not is_configured():
+        if on_complete:
+            on_complete({})
         return
-    threading.Thread(target=record_finished_game, kwargs=kwargs, daemon=True,
-                      name="GameHistoryWrite").start()
+
+    def _run():
+        result = record_finished_game(**kwargs)
+        if on_complete:
+            on_complete(result)
+
+    threading.Thread(target=_run, daemon=True, name="GameHistoryWrite").start()
