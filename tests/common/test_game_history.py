@@ -430,6 +430,61 @@ def test_record_finished_game_populates_game_rounds_round_players_and_game_actio
     assert action_types == ["BID", "PASS"]
 
 
+def test_record_finished_game_does_not_crash_when_two_same_difficulty_bots_share_a_round(database_url):
+    """Real production bug, confirmed live: two bot seats of the same
+    difficulty resolve to the SAME shared player_id (see the bots table's
+    own design), so round_players' (round_id, player_id) primary key
+    collided the moment a round's money data included both seats --
+    crashing this whole function and rolling back the entire transaction
+    (games/player_games included, since it's all one commit) for any real
+    game with 2+ same-difficulty bots. The ON CONFLICT DO NOTHING fix
+    means both INSERT attempts still happen (this test asserts that), but
+    a real database silently keeps only the first instead of raising."""
+    game_history._schema_ready = True
+    conn, cursor = _fake_connection()
+    cursor.fetchone.side_effect = iter([
+        (1,),              # INSERT INTO games ... RETURNING id
+        (10, None, 1000),  # _upsert_player(alice)
+        (55, 1000),        # bots lookup for "medium bot A"
+        (55, 1000),        # bots lookup for "medium bot B" -- same player_id as A
+        (99,),             # SELECT card_id FROM cards ...
+        (777,),            # INSERT INTO game_rounds ... RETURNING id
+    ])
+    participants = [
+        {"is_bot": False, "username": "alice", "name": "Alice", "game_username": "alice",
+         "points": 12, "money_left": 3, "is_winner": True, "eliminated": False},
+        {"is_bot": True, "username": None, "name": "Medium bot A", "game_username": "medium bot a",
+         "points": 5, "money_left": 0, "is_winner": False, "eliminated": True, "difficulty": "medium"},
+        {"is_bot": True, "username": None, "name": "Medium bot B", "game_username": "medium bot b",
+         "points": 5, "money_left": 0, "is_winner": False, "eliminated": True, "difficulty": "medium"},
+    ]
+    auction_rounds = [{
+        "round_number": 1, "auction_type": "normal",
+        "card": {"type": "Painting", "value": 5, "multiplier": 1, "is_green": False, "description": "x"},
+        "events": [], "recipient": "alice",
+        "money_spent": {"alice": 5, "medium bot a": 0, "medium bot b": 0},
+        "cards_spent": {"alice": [5], "medium bot a": [], "medium bot b": []},
+        "started_at": "2026-01-01T00:00:00+00:00", "ended_at": "2026-01-01T00:00:01+00:00",
+        "starting_money": {"alice": 10, "medium bot a": 10, "medium bot b": 10},
+        "ending_money": {"alice": 5, "medium bot a": 10, "medium bot b": 10},
+    }]
+    with patch.object(game_history, "_connect", return_value=conn):
+        game_history.record_finished_game(  # must not raise
+            room_code="ABCDE", seats=3, bot_mix=["medium", "medium"],
+            started_at=datetime.datetime.now(datetime.timezone.utc),
+            finished_at=datetime.datetime.now(datetime.timezone.utc),
+            participants=participants, auction_rounds=auction_rounds,
+        )
+
+    round_players_calls = [call for call in cursor.execute.call_args_list
+                            if "INSERT INTO round_players" in call.args[0]]
+    assert len(round_players_calls) == 3  # alice + both bot seats, despite the shared player_id
+    for call in round_players_calls:
+        assert "ON CONFLICT (round_id, player_id) DO NOTHING" in call.args[0]
+    bot_player_ids = {call.args[1][2] for call in round_players_calls} - {10}  # exclude alice's player_id
+    assert bot_player_ids == {55}  # both bot seats resolved to the same shared player_id
+
+
 def test_record_finished_game_leaves_winning_bid_null_for_a_disgrace_card(database_url):
     """Per the original request: a disgrace card's "recipient" passed
     first and got stuck with it -- their money_spent is always 0 by

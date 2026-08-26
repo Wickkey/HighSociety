@@ -999,11 +999,22 @@ def _record_auction_rounds(cur, game_id: int, auction_rounds: list, player_id_by
             player_id = player_id_by_username.get(username)
             if player_id is None:
                 continue
+            # Two bot seats of the same difficulty share one player_id (the
+            # bots table's whole design -- see record_finished_game's own
+            # docstring), so this table's (round_id, player_id) primary key
+            # can collide within a single round -- confirmed live: any real
+            # game with 2+ same-difficulty bots crashed this whole function
+            # (and rolled back the games/player_games row along with it,
+            # since it's all one transaction) the instant a round included
+            # both seats. DO NOTHING keeps whichever seat's row landed
+            # first; losing the second seat's per-round money snapshot here
+            # is far cheaper than losing the entire game's history.
             cur.execute(
                 """
                 INSERT INTO round_players
                     (game_id, round_id, player_id, starting_money, ending_money, amount_paid, result)
                 VALUES (%s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (round_id, player_id) DO NOTHING
                 """,
                 (game_id, round_id, player_id, starting_money.get(username), ending_money.get(username),
                  money_spent.get(username), "won" if username == recipient else "lost"),
