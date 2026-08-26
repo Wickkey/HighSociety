@@ -1205,7 +1205,11 @@ def record_finished_game(*, room_code: str, seats: int, bot_mix: list,
 
             rated_standings = []  # {"username", "points", "rating"} -- see elo.compute_elo_deltas
             rated_player_ids = {}  # username -> player_id, for writing the delta back below
-            elo_before_by_username = {}  # username -> rating before this game, for the ratings audit row
+            # player_id (not rating_key) -- every rating_key sharing a
+            # player_id (see the bot-seat-sharing comment below) reads the
+            # exact same elo at this point anyway, so one dict keyed by the
+            # real identity is enough for the ratings audit row.
+            elo_before_by_player_id = {}
             seat_player_ids = []  # in participant order -- becomes player_1..player_5 below
             winner_player_id = None  # first winner only -- see this function's own docstring on ties
             player_id_by_game_username = {}  # real per-game username (bot or human) -> player_id
@@ -1276,7 +1280,7 @@ def record_finished_game(*, room_code: str, seats: int, bot_mix: list,
                     rating_key = p.get("game_username") or p["username"]
                     rated_standings.append({"username": rating_key, "points": p["points"], "rating": elo_before})
                     rated_player_ids[rating_key] = player_id
-                    elo_before_by_username[rating_key] = elo_before
+                    elo_before_by_player_id[player_id] = elo_before
 
                 # Achievements stay strictly human-only -- a bot must never
                 # unlock one, regardless of the elo change above.
@@ -1299,17 +1303,37 @@ def record_finished_game(*, room_code: str, seats: int, bot_mix: list,
                             (player_id, achievement_id),
                         )
 
-            for username, delta in elo.compute_elo_deltas(rated_standings).items():
-                if delta:
-                    player_id = rated_player_ids[username]
-                    old_rating = elo_before_by_username[username]
-                    cur.execute("UPDATE players SET elo = elo + %s WHERE id = %s", (delta, player_id))
+            # Two or more bot seats of the same difficulty share one
+            # player_id (the bots table's whole design), so rated_standings
+            # can carry multiple distinct rating_keys that all resolve to
+            # the same real identity here. compute_elo_deltas has no idea
+            # they're the same player -- it computes each seat's delta as
+            # if it were a genuinely separate participant, which would
+            # double- (or triple-, ...) count that identity's rating swing
+            # if applied as-is: confirmed live, a game with 2 shared-
+            # identity bot seats moved the bot's elo by the SUM of both
+            # seats' independent deltas, and wrote two ratings rows that
+            # both claimed the same stale "before" value despite the first
+            # update having already landed. Grouped by player_id and
+            # averaged (not summed) below so one identity occupying N
+            # seats in one game gets exactly one, roughly-N-times-smaller-
+            # per-seat, correctly-audited rating change -- not N times the
+            # swing a single seat would have earned alone.
+            deltas_by_player_id: dict[int, list[int]] = {}
+            for rating_key, delta in elo.compute_elo_deltas(rated_standings).items():
+                player_id = rated_player_ids[rating_key]
+                deltas_by_player_id.setdefault(player_id, []).append(delta)
+            for player_id, seat_deltas in deltas_by_player_id.items():
+                combined_delta = round(sum(seat_deltas) / len(seat_deltas))
+                if combined_delta:
+                    old_rating = elo_before_by_player_id[player_id]
+                    cur.execute("UPDATE players SET elo = elo + %s WHERE id = %s", (combined_delta, player_id))
                     cur.execute(
                         """
                         INSERT INTO ratings (user_id, game_id, old_rating, new_rating, rating_change)
                         VALUES (%s, %s, %s, %s, %s)
                         """,
-                        (player_id, game_id, old_rating, old_rating + delta, delta),
+                        (player_id, game_id, old_rating, old_rating + combined_delta, combined_delta),
                     )
 
             seat_columns = (seat_player_ids + [None] * 5)[:5]

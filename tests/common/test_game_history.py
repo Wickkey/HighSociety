@@ -3,6 +3,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from highsociety.code.common import elo
 from highsociety.code.common.db import game_history
 
 
@@ -308,6 +309,64 @@ def test_record_finished_game_writes_a_ratings_row_per_rated_participant(databas
     assert by_player[10][3] == by_player[10][2] + by_player[10][4]  # new_rating == old + change
     assert by_player[10][4] > 0  # alice (winner) gains
     assert by_player[11][4] < 0  # bob (loser) loses
+
+
+def test_record_finished_game_averages_elo_deltas_for_same_difficulty_bot_seats(database_url):
+    """Real bug, confirmed live against production (game 469): two bot
+    seats sharing one player_id (same difficulty) each got their own
+    independently-computed delta applied, summing onto the shared
+    identity as if it were two separate players -- inflating its rating
+    swing, and writing two ratings rows that both claimed the same stale
+    "before" value despite the first update having already landed.
+    Deltas are now grouped by player_id and averaged: one identity
+    occupying N seats gets exactly one rating change, worth 1/N of the
+    naive sum, backed by exactly one ratings row."""
+    game_history._schema_ready = True
+    conn, cursor = _fake_connection()
+    cursor.fetchone.side_effect = iter([
+        (1,),                    # INSERT INTO games ... RETURNING id
+        (10, "g-alice", 1000),   # _upsert_player(alice)
+        (55, 1000),               # bots lookup for medium bot A
+        (55, 1000),               # bots lookup for medium bot B -- same shared player_id
+    ])
+    participants = [
+        {"is_bot": False, "username": "alice", "name": "Alice", "game_username": "alice",
+         "points": 8, "money_left": 62, "is_winner": False, "eliminated": False},
+        {"is_bot": True, "username": None, "name": "Medium bot A", "game_username": "medium bot a",
+         "points": 40, "money_left": 66, "is_winner": True, "eliminated": False, "difficulty": "medium"},
+        {"is_bot": True, "username": None, "name": "Medium bot B", "game_username": "medium bot b",
+         "points": 18, "money_left": 27, "is_winner": False, "eliminated": True, "difficulty": "medium"},
+    ]
+    with patch.object(game_history, "_connect", return_value=conn):
+        game_history.record_finished_game(
+            room_code="ABCDE", seats=3, bot_mix=["medium", "medium"],
+            started_at=datetime.datetime.now(datetime.timezone.utc),
+            finished_at=datetime.datetime.now(datetime.timezone.utc),
+            participants=participants,
+        )
+
+    # Ground truth: what each seat's delta would independently be, exactly
+    # matching the rated_standings this call built internally.
+    expected_seat_deltas = elo.compute_elo_deltas([
+        {"username": "alice", "points": 8, "rating": 1000},
+        {"username": "medium bot a", "points": 40, "rating": 1000},
+        {"username": "medium bot b", "points": 18, "rating": 1000},
+    ])
+    expected_bot_delta = round(
+        (expected_seat_deltas["medium bot a"] + expected_seat_deltas["medium bot b"]) / 2
+    )
+
+    ratings_inserts = [call.args[1] for call in cursor.execute.call_args_list
+                       if "INSERT INTO ratings" in call.args[0]]
+    by_player = {row[0]: row for row in ratings_inserts}
+    assert set(by_player) == {10, 55}  # exactly one ratings row per real identity, not per seat
+    assert by_player[55][4] == expected_bot_delta  # averaged, not summed
+    assert by_player[10][4] == expected_seat_deltas["alice"]  # a solo seat is unaffected
+
+    elo_updates = [call.args[1] for call in cursor.execute.call_args_list
+                   if call.args[0].startswith("UPDATE players SET elo")]
+    bot_elo_update = next(p for p in elo_updates if p[1] == 55)
+    assert bot_elo_update[0] == expected_bot_delta  # applied exactly once, not twice
 
 
 def test_record_finished_game_rates_bot_games_but_never_gives_bots_achievements(database_url):
