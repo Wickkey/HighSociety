@@ -11,7 +11,7 @@
 // non-circular static imports.
 import { $, hide, show, showError, showScreen } from '../utils/dom.js';
 import { escapeHtml } from '../utils/formatting.js';
-import { clearRejoinInfo, currentRoomCode, fetchJSON, lastStatus, setGameFinished } from './lobby.js';
+import { clearRejoinInfo, currentRoomCode, fetchJSON, lastStatus, loadRejoinInfo, setGameFinished } from './lobby.js';
 import { openProfileModal } from '../ui/modals.js';
 import { ws } from '../network/websocket.js';
 import { game, resetGameState, seedOpponents, applyRoomDisplaySettings } from '../game/gameState.js';
@@ -32,6 +32,24 @@ let rematchBotSeats = 0;
 let rematchDefaultBotMix = [];
 
 export function renderFinished(status) {
+  if (!game) {
+    // `game` is still its module-level `null` default -- this is a cold
+    // arrival at an already-finished game (a page reload, a mobile browser
+    // reclaiming a backgrounded tab, reopening a saved room link, ...)
+    // where app.js's DOMContentLoaded handler called refreshStatus() from
+    // the URL's ?room= before any onJoin/attemptReconnect ever ran
+    // resetGameState. Every line below (and revealEloChange further down)
+    // assumes `game` exists -- most visibly game.myUsername, read
+    // unconditionally by renderRematchPanel() a few lines down -- so
+    // without this, that read throws on a bare `null` and the whole
+    // reveal never even starts. Recover "my" username the same way
+    // attemptReconnect() does, from this room's stored rejoin info, before
+    // clearRejoinInfo below wipes it; null (no stored info, e.g. arriving
+    // via a bare spectate link) is exactly the existing spectator case
+    // every myUsername check elsewhere already handles.
+    const info = loadRejoinInfo(currentRoomCode());
+    resetGameState(info ? info.username : null, status);
+  }
   clearRejoinInfo(currentRoomCode()); // game's over — nothing left to reconnect to
   setGameFinished(true); // see lobby.js's own comment on why this can't just be inferred from the current screen
   showScreen('screen-finished');
