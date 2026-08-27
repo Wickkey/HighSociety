@@ -32,11 +32,6 @@ let rematchBotSeats = 0;
 let rematchDefaultBotMix = [];
 
 export function renderFinished(status) {
-  // Temporary, see revealEloChange's own comment -- proves (or disproves)
-  // whether this is even being called more than once per real game, and
-  // whether `game` was null (the cold-arrival path) when it happened.
-  // eslint-disable-next-line no-console
-  console.log('[elo-reveal] renderFinished', { gameId: status.game_id, gameWasNull: !game, room: currentRoomCode() });
   if (!game) {
     // `game` is still its module-level `null` default -- this is a cold
     // arrival at an already-finished game (a page reload, a mobile browser
@@ -155,38 +150,27 @@ async function revealEloChange(initialStatus) {
   hide(guestNote);
   showEnter(calculating);
 
-  // Temporary, deliberately left in: two separate live occurrences of "I
-  // saw Calculating, then nothing" have each been fed the *exact* real
-  // elo_changes for that exact game straight into this function on the
-  // deployed code and gotten a correct reveal both times -- so whatever's
-  // wrong only shows up in the real invocation path, not this function's
-  // own logic. Cheap enough to leave running for every real game until it
-  // catches itself; remove once it has.
-  // eslint-disable-next-line no-console
-  console.log('[elo-reveal] start', { room: currentRoomCode(), myUsername: game.myUsername, initialChanges: initialStatus.elo_changes });
-
+  // Up to ~16s, not the original ~5.6s -- confirmed live (see
+  // game_history.py's _record_auction_rounds, batched for exactly this
+  // reason) that the background write's auction-history step alone could
+  // take ~11s under ordinary network conditions to Supabase, well past
+  // the old budget, even though the actual rating write next to it
+  // finishes in ~1s. This is comfortable headroom above that measured
+  // worst case, not a guess.
   let changes = initialStatus.elo_changes;
-  for (let attempt = 0; attempt < 8 && (changes === undefined || changes === null); attempt++) {
-    await new Promise((resolve) => setTimeout(resolve, 700));
-    if (token !== eloRevealToken) {
-      console.log('[elo-reveal] aborted mid-poll: superseded by a newer render', { attempt });
-      return; // superseded by a newer game (e.g. a rematch)
-    }
+  for (let attempt = 0; attempt < 20 && (changes === undefined || changes === null); attempt++) {
+    await new Promise((resolve) => setTimeout(resolve, 800));
+    if (token !== eloRevealToken) return; // superseded by a newer game (e.g. a rematch)
     try {
       const fresh = await fetchJSON(`/api/status?room=${encodeURIComponent(currentRoomCode())}`);
       changes = fresh.elo_changes;
-      console.log('[elo-reveal] poll attempt', attempt, { changes });
-    } catch (e) { console.log('[elo-reveal] poll attempt failed', attempt, String(e)); }
+    } catch (e) { /* transient network hiccup -- next attempt (or the timeout below) handles it */ }
   }
-  if (token !== eloRevealToken) {
-    console.log('[elo-reveal] aborted after poll loop: superseded by a newer render');
-    return;
-  }
+  if (token !== eloRevealToken) return;
   hide(calculating);
 
   const mine = changes && changes[game.myUsername];
   const profile = loadProfile();
-  console.log('[elo-reveal] resolved', { changes, myUsername: game.myUsername, mine, profile });
   if (mine) {
     showEloNumbers(mine.old_rating, mine.new_rating, mine.rating_change);
   } else if (!profile || !profile.google_id) {
