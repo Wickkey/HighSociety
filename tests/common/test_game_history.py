@@ -520,15 +520,78 @@ def test_record_finished_game_populates_game_rounds_round_players_and_game_actio
     assert winning_bid == 5
     assert winner_id is not None  # alice's resolved player_id
 
-    round_players_inserts = [p for q, p in queries_and_params if "INSERT INTO round_players" in q]
-    assert len(round_players_inserts) == 2
-    results = sorted(p[6] for p in round_players_inserts)  # (..., result) -- index 6
+    # round_players/game_actions are now written as one batched multi-row
+    # INSERT each (see _record_auction_rounds's own docstring on why),
+    # rather than one execute() call per row -- unflatten the single
+    # call's flat params list back into per-row tuples to check the same
+    # things as before.
+    round_players_params, = [p for q, p in queries_and_params if "INSERT INTO round_players" in q]
+    round_players_rows = [round_players_params[i:i + 7] for i in range(0, len(round_players_params), 7)]
+    assert len(round_players_rows) == 2
+    results = sorted(row[6] for row in round_players_rows)  # (..., result) -- index 6
     assert results == ["lost", "won"]
 
-    game_actions_inserts = [p for q, p in queries_and_params if "INSERT INTO game_actions" in q]
-    assert len(game_actions_inserts) == 2
-    action_types = sorted(p[2] for p in game_actions_inserts)  # (..., action_type, ...) -- index 2
+    game_actions_params, = [p for q, p in queries_and_params if "INSERT INTO game_actions" in q]
+    game_actions_rows = [game_actions_params[i:i + 6] for i in range(0, len(game_actions_params), 6)]
+    assert len(game_actions_rows) == 2
+    action_types = sorted(row[2] for row in game_actions_rows)  # (..., action_type, ...) -- index 2
     assert action_types == ["BID", "PASS"]
+
+
+def test_record_finished_game_batches_round_players_and_game_actions_into_one_call_each(database_url):
+    """Real production bug, confirmed live: writing one row at a time made
+    an ordinary short game's auction-history recording alone take ~11
+    seconds (100+ sequential round trips to Supabase), which blew straight
+    through the post-game Elo reveal's ~5.6s polling budget even though
+    the actual rating write next to it finishes in ~1s. Rounds/players/
+    events here are sized so a one-call-per-row version would need 5
+    round_players calls and 10 game_actions calls; the fix must produce
+    exactly one of each regardless of how many rounds the game had."""
+    game_history._schema_ready = True
+    conn, cursor = _fake_connection()
+    participants = [
+        {"is_bot": False, "username": "alice", "name": "Alice", "game_username": "alice",
+         "points": 10, "money_left": 5, "is_winner": True, "eliminated": False},
+        {"is_bot": False, "username": "bob", "name": "Bob", "game_username": "bob",
+         "points": 0, "money_left": 20, "is_winner": False, "eliminated": False},
+    ]
+    auction_rounds = [{
+        "round_number": n, "auction_type": "normal",
+        "card": {"type": "Painting", "value": n, "multiplier": 1, "is_green": False, "description": "x"},
+        "events": [
+            {"player": "alice", "action": "bid", "amount": 5, "cards": [5],
+             "timestamp": "2026-01-01T00:00:00+00:00"},
+            {"player": "bob", "action": "pass", "amount": None, "cards": None,
+             "timestamp": "2026-01-01T00:00:01+00:00"},
+        ],
+        "recipient": "alice",
+        "money_spent": {"alice": 5, "bob": 0},
+        "cards_spent": {"alice": [5], "bob": []},
+        "started_at": "2026-01-01T00:00:00+00:00",
+        "ended_at": "2026-01-01T00:00:01+00:00",
+        "starting_money": {"alice": 10, "bob": 20},
+        "ending_money": {"alice": 5, "bob": 20},
+    } for n in range(1, 6)]  # 5 rounds -- 10 round_players rows, 10 game_actions rows total
+    with patch.object(game_history, "_connect", return_value=conn):
+        game_history.record_finished_game(
+            room_code="ABCDE", seats=2, bot_mix=[],
+            started_at=datetime.datetime.now(datetime.timezone.utc),
+            finished_at=datetime.datetime.now(datetime.timezone.utc),
+            participants=participants, auction_rounds=auction_rounds,
+        )
+
+    queries = [call.args[0] for call in cursor.execute.call_args_list]
+    assert sum("INSERT INTO game_rounds" in q for q in queries) == 1
+    assert sum("INSERT INTO round_players" in q for q in queries) == 1
+    assert sum("INSERT INTO game_actions" in q for q in queries) == 1
+
+    round_players_params, = [call.args[1] for call in cursor.execute.call_args_list
+                              if "INSERT INTO round_players" in call.args[0]]
+    assert len(round_players_params) == 5 * 2 * 7  # 5 rounds x 2 players x 7 columns
+
+    game_actions_params, = [call.args[1] for call in cursor.execute.call_args_list
+                             if "INSERT INTO game_actions" in call.args[0]]
+    assert len(game_actions_params) == 5 * 2 * 6  # 5 rounds x 2 events x 6 columns
 
 
 def test_record_finished_game_does_not_crash_when_two_same_difficulty_bots_share_a_round(database_url):
@@ -577,12 +640,18 @@ def test_record_finished_game_does_not_crash_when_two_same_difficulty_bots_share
             participants=participants, auction_rounds=auction_rounds,
         )
 
+    # One batched call for all three seats' rows (see
+    # _record_auction_rounds's own docstring) -- unflatten it back into
+    # per-row tuples to check the same things the one-call-per-row version
+    # used to check directly.
     round_players_calls = [call for call in cursor.execute.call_args_list
                             if "INSERT INTO round_players" in call.args[0]]
-    assert len(round_players_calls) == 3  # alice + both bot seats, despite the shared player_id
-    for call in round_players_calls:
-        assert "ON CONFLICT (round_id, player_id) DO NOTHING" in call.args[0]
-    bot_player_ids = {call.args[1][2] for call in round_players_calls} - {10}  # exclude alice's player_id
+    assert len(round_players_calls) == 1
+    assert "ON CONFLICT (round_id, player_id) DO NOTHING" in round_players_calls[0].args[0]
+    flat_params = round_players_calls[0].args[1]
+    round_players_rows = [flat_params[i:i + 7] for i in range(0, len(flat_params), 7)]
+    assert len(round_players_rows) == 3  # alice + both bot seats, despite the shared player_id
+    bot_player_ids = {row[2] for row in round_players_rows} - {10}  # exclude alice's player_id
     assert bot_player_ids == {55}  # both bot seats resolved to the same shared player_id
 
 

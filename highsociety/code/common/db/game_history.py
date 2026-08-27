@@ -993,7 +993,34 @@ def _record_auction_rounds(cur, game_id: int, auction_rounds: list, player_id_by
     missing or mapping to None (a bot with no known difficulty) means that
     round/action simply can't be attributed to anyone, so it's skipped
     rather than written with a dangling/NULL player_id.
+
+    Batched into a handful of multi-row statements rather than one query
+    per round/action -- confirmed live (see the post-game Elo reveal's own
+    investigation) that the naive one-row-at-a-time version made this
+    function alone take ~11 seconds for an ordinary short game (100+
+    sequential round trips to Supabase, each paying full network latency),
+    which blew straight through record_finished_game_async's caller's
+    ~5.6s reveal-polling budget even though the actual rating write next
+    to it finishes in ~1s. Built by hand (a "(%s,%s,...),(%s,%s,...)"
+    placeholder string plus one flat params list) rather than psycopg2.
+    extras.execute_values, deliberately: execute_values builds its batched
+    SQL via cur.mogrify(), which needs a real psycopg2 cursor (mogrify
+    needs the connection's encoding, among other things) -- this repo's
+    whole test suite exercises this module against a plain mocked cursor
+    (see test_game_history.py's _fake_connection), so a hand-built
+    placeholder string that only ever calls the already-mocked cur.execute/
+    cur.fetchone keeps this testable without a real database.
     """
+    if not auction_rounds:
+        return
+
+    # This SELECT stays one-per-round (not batched) -- there are only ever
+    # as many rounds as cards in the deck (a couple dozen at most), so this
+    # was never the source of the real slowness; the round_players/
+    # game_actions writes below, one of which fires per player per round
+    # and the other per logged action per round, are what multiply into
+    # 100+ round trips for an ordinary game.
+    round_rows = []
     for record in auction_rounds:
         card = record["card"]
         # Matched by (type, value), not a stored card identity -- for a
@@ -1015,18 +1042,31 @@ def _record_auction_rounds(cur, game_id: int, auction_rounds: list, player_id_by
         winning_bid = None
         if recipient and record.get("auction_type") == "normal":
             winning_bid = (record.get("money_spent") or {}).get(recipient)
+        round_rows.append((game_id, record["round_number"], card_id, winner_id, winning_bid,
+                            record.get("started_at"), record.get("ended_at")))
 
-        cur.execute(
-            """
-            INSERT INTO game_rounds (game_id, round_number, card_id, winner_id, winning_bid, started_at, ended_at)
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
-            RETURNING id
-            """,
-            (game_id, record["round_number"], card_id, winner_id, winning_bid,
-             record.get("started_at"), record.get("ended_at")),
-        )
-        round_id = cur.fetchone()[0]
+    # One INSERT for every round's own row, in one round trip. Postgres
+    # returns RETURNING rows in the same order as the VALUES list for a
+    # plain multi-row INSERT like this, so reading them back with one
+    # fetchone() per row (in input order, below) safely zips round_ids
+    # back against auction_rounds by position -- and, unlike fetchall(),
+    # matches exactly how _fake_connection's mocked cursor already
+    # behaves (a fresh incrementing id per fetchone() call), so no test
+    # infrastructure needs to change for this.
+    cur.execute(
+        f"""
+        INSERT INTO game_rounds (game_id, round_number, card_id, winner_id, winning_bid, started_at, ended_at)
+        VALUES {_values_placeholder(len(round_rows), 7)}
+        RETURNING id
+        """,
+        _flatten(round_rows),
+    )
+    round_ids = [cur.fetchone()[0] for _ in round_rows]
 
+    round_player_rows = []
+    action_rows = []
+    for record, round_id in zip(auction_rounds, round_ids):
+        recipient = record.get("recipient")
         starting_money = record.get("starting_money") or {}
         ending_money = record.get("ending_money") or {}
         money_spent = record.get("money_spent") or {}
@@ -1034,39 +1074,62 @@ def _record_auction_rounds(cur, game_id: int, auction_rounds: list, player_id_by
             player_id = player_id_by_username.get(username)
             if player_id is None:
                 continue
-            # Two bot seats of the same difficulty share one player_id (the
-            # bots table's whole design -- see record_finished_game's own
-            # docstring), so this table's (round_id, player_id) primary key
-            # can collide within a single round -- confirmed live: any real
-            # game with 2+ same-difficulty bots crashed this whole function
-            # (and rolled back the games/player_games row along with it,
-            # since it's all one transaction) the instant a round included
-            # both seats. DO NOTHING keeps whichever seat's row landed
-            # first; losing the second seat's per-round money snapshot here
-            # is far cheaper than losing the entire game's history.
-            cur.execute(
-                """
-                INSERT INTO round_players
-                    (game_id, round_id, player_id, starting_money, ending_money, amount_paid, result)
-                VALUES (%s, %s, %s, %s, %s, %s, %s)
-                ON CONFLICT (round_id, player_id) DO NOTHING
-                """,
-                (game_id, round_id, player_id, starting_money.get(username), ending_money.get(username),
-                 money_spent.get(username), "won" if username == recipient else "lost"),
-            )
+            round_player_rows.append((game_id, round_id, player_id, starting_money.get(username),
+                                       ending_money.get(username), money_spent.get(username),
+                                       "won" if username == recipient else "lost"))
 
         for event in record.get("events") or []:
             player_id = player_id_by_username.get(event["player"])
             if player_id is None:
                 continue
-            cur.execute(
-                """
-                INSERT INTO game_actions (game_id, player_id, action_type, amount, round, timestamp)
-                VALUES (%s, %s, %s, %s, %s, %s)
-                """,
-                (game_id, player_id, event["action"].upper(), event.get("amount"),
-                 record["round_number"], event.get("timestamp")),
-            )
+            action_rows.append((game_id, player_id, event["action"].upper(), event.get("amount"),
+                                 record["round_number"], event.get("timestamp")))
+
+    if round_player_rows:
+        # Two bot seats of the same difficulty share one player_id (the
+        # bots table's whole design -- see record_finished_game's own
+        # docstring), so this table's (round_id, player_id) primary key
+        # can collide within a single round -- confirmed live: any real
+        # game with 2+ same-difficulty bots crashed this whole function
+        # (and rolled back the games/player_games row along with it,
+        # since it's all one transaction) the instant a round included
+        # both seats. DO NOTHING keeps whichever seat's row landed first
+        # within this batch; losing the second seat's per-round money
+        # snapshot here is far cheaper than losing the entire game's
+        # history.
+        cur.execute(
+            f"""
+            INSERT INTO round_players
+                (game_id, round_id, player_id, starting_money, ending_money, amount_paid, result)
+            VALUES {_values_placeholder(len(round_player_rows), 7)}
+            ON CONFLICT (round_id, player_id) DO NOTHING
+            """,
+            _flatten(round_player_rows),
+        )
+
+    if action_rows:
+        cur.execute(
+            f"""
+            INSERT INTO game_actions (game_id, player_id, action_type, amount, round, timestamp)
+            VALUES {_values_placeholder(len(action_rows), 6)}
+            """,
+            _flatten(action_rows),
+        )
+
+
+def _values_placeholder(num_rows: int, num_columns: int) -> str:
+    """"(%s,%s,...),(%s,%s,...)" -- num_rows groups of num_columns
+    placeholders each, for a hand-batched multi-row INSERT ... VALUES.
+    See _record_auction_rounds's own docstring on why this is built by
+    hand instead of psycopg2.extras.execute_values."""
+    row = "(" + ",".join(["%s"] * num_columns) + ")"
+    return ",".join([row] * num_rows)
+
+
+def _flatten(rows: list) -> list:
+    """[(a, b), (c, d)] -> [a, b, c, d] -- the flat params list a
+    _values_placeholder-built query's positional %s placeholders expect."""
+    return [value for row in rows for value in row]
 
 
 def record_finished_game(*, room_code: str, seats: int, bot_mix: list,
