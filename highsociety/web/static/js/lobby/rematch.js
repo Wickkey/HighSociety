@@ -320,10 +320,8 @@ export function handleRematchMessage(msg) {
     game.manualSeed = !!msg.data.manual_seed;
     applyRoomDisplaySettings(); // resetGameState already called this once with the stale seed baked in
   }
-  // Resign works anytime once in a game (see gameActions.js's onResign) --
-  // re-enable it for the fresh game immediately rather than waiting for
-  // its first PLAYER_STATE/PLAYER_MOVE.
-  $('btn-resign').disabled = false;
+  // btn-resign's re-enable now lives inside resetGameState itself (see its
+  // own comment) so every fresh game gets it, not just a rematch.
   ensureGameScreenVisible(false);
   fetchJSON(`/api/status?room=${encodeURIComponent(currentRoomCode())}`).then((status) => {
     seedOpponents(status, myUsername);
