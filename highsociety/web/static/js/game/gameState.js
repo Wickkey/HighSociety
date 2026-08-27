@@ -11,7 +11,7 @@
 // point all four modules have finished loading.
 import { $ } from '../utils/dom.js';
 import { clearMoveTimer, renderAuctionPanel, renderMyPanel, renderMoneyChips, renderMovePanel } from './gameRenderer.js';
-import { setHasResigned } from '../lobby/lobby.js';
+import { setHasResigned, setGameFinished } from '../lobby/lobby.js';
 import { resetSelectedDiscard } from './gameActions.js';
 
 export let game = null;
@@ -89,6 +89,7 @@ export function resetGameState(myUsername, status) {
   // close two more of the same shape.
   clearMoveTimer();
   setHasResigned(false);
+  setGameFinished(false); // a fresh game (or rematch) is, by definition, not finished yet
   resetSelectedDiscard();
   // logLine()/appendChatLine() only ever append — without this, a rematch
   // (or any other resetGameState call, e.g. reconnecting into a genuinely

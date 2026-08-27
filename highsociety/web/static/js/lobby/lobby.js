@@ -57,6 +57,22 @@ export function markReconnectAttempted() { reconnectAttempted = true; }
 let hasResigned = false;
 export function setHasResigned(v) { hasResigned = v; }
 
+// Set the moment rematch.js's renderFinished runs -- i.e. the actual game
+// state is finished, independent of which *screen* happens to be showing
+// right now. isActivelyPlayingLiveGame() used to infer this from
+// `#screen-finished` being the visible screen, which broke the instant a
+// player left the finished screen for anywhere else (Account, a rematch's
+// own fresh lobby-less restart aside) while the socket from the just-ended
+// game was still open (the server deliberately keeps a player's socket
+// alive after the game ends, unlike a spectator's -- see websocket.js's
+// connectSpectatorSocket comment -- so the rematch panel keeps working):
+// clicking the "High Society" home link from, say, the game-history list
+// right after a game wrongly showed the mid-game "Leave the game?" confirm,
+// because `#screen-finished` was hidden (some *other* screen was showing)
+// even though the game itself was long over.
+let gameFinished = false;
+export function setGameFinished(v) { gameFinished = v; }
+
 // Whether the join/spectate screens' "not you?" link has been clicked since
 // the last time we landed on a fresh room — guards applyJoinIdentityDefaults
 // (called on every lobby status poll, not just once) from stomping over
@@ -164,6 +180,7 @@ export function leaveToHome(clearRejoin = true) {
   currentRoomCodeValue = null;
   reconnectAttempted = false;
   hasResigned = false;
+  gameFinished = false;
   joinIdentityOverridden = false;
   history.replaceState(null, '', location.pathname);
   stopPolling();
@@ -178,8 +195,7 @@ export function leaveToHome(clearRejoin = true) {
 // leaving should warn first, shared by the tab-close warning and the
 // "High Society" home-link click.
 export function isActivelyPlayingLiveGame() {
-  const gameIsOver = !$('screen-finished').classList.contains('hidden');
-  return !!(ws && ws.readyState === WebSocket.OPEN && game && game.round > 0 && !gameIsOver);
+  return !!(ws && ws.readyState === WebSocket.OPEN && game && game.round > 0 && !gameFinished);
 }
 
 // The "High Society" wordmark doubles as a home link (most sites' logos

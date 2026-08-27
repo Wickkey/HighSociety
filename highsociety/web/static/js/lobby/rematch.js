@@ -11,7 +11,7 @@
 // non-circular static imports.
 import { $, hide, show, showError, showScreen } from '../utils/dom.js';
 import { escapeHtml } from '../utils/formatting.js';
-import { clearRejoinInfo, currentRoomCode, fetchJSON, lastStatus } from './lobby.js';
+import { clearRejoinInfo, currentRoomCode, fetchJSON, lastStatus, setGameFinished } from './lobby.js';
 import { openProfileModal } from '../ui/modals.js';
 import { ws } from '../network/websocket.js';
 import { game, resetGameState, seedOpponents, applyRoomDisplaySettings } from '../game/gameState.js';
@@ -33,6 +33,7 @@ let rematchDefaultBotMix = [];
 
 export function renderFinished(status) {
   clearRejoinInfo(currentRoomCode()); // game's over — nothing left to reconnect to
+  setGameFinished(true); // see lobby.js's own comment on why this can't just be inferred from the current screen
   showScreen('screen-finished');
   // The money-eliminated player (see gameplay.py's determine_winner —
   // distinct from simply "didn't have the highest score") was never in
