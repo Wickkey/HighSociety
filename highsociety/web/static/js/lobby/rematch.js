@@ -101,8 +101,30 @@ export function renderFinished(status) {
   rematchDefaultBotMix = status.rematch_default_bot_mix || [];
   renderRematchPanel();
 
-  if (game.myUsername) revealEloChange(status);
+  // Guarded by game_id, not just game.myUsername -- renderFinished itself
+  // can legitimately run more than once for the exact same finished game
+  // (a stray status poll, or a reconnect blip around game-end independently
+  // triggering its own refreshStatus() -- see websocket.js's onclose and
+  // gameEvents.js's game_over handler, both of which can call it). Every
+  // repeat call used to restart revealEloChange from scratch: hiding
+  // whatever it had just shown, bumping eloRevealToken, and racing a brand
+  // new poll against whichever call happens to finish last -- if that last
+  // one loses the race (e.g. its own poll hasn't reached the DB write yet
+  // even though an earlier call already had the answer), the token guard
+  // makes it silently discard the earlier call's good result and the card
+  // never gets a chance to show anything. Only the first call for a given
+  // game_id may ever start the cycle; later ones for that same game are a
+  // no-op here (whatever the first call already resolved to stays showing).
+  if (game.myUsername && status.game_id !== revealedGameId) {
+    revealedGameId = status.game_id;
+    revealEloChange(status);
+  }
 }
+
+// The game_id revealEloChange has already been started for -- see
+// renderFinished's own comment on why a repeat call for the same game must
+// never restart it. null until the first finished render of any game.
+let revealedGameId = null;
 
 // A per-game token, bumped every time revealEloChange starts -- so a
 // rematch (which calls renderFinished again for a brand new game) can't
