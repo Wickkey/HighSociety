@@ -1,0 +1,57 @@
+.panel { text-align: center; border-top: 3px solid var(--accent); }
+.panel h2 { margin-bottom: 1.4rem; }
+
+.googleSigninContainer {
+  display: flex;
+  justify-content: center;
+  min-height: 44px; /* reserves the real button's own footprint so nothing shifts once GIS actually renders it in */
+}
+.googleSigninContainer:empty { min-height: 0; }
+
+.divider {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  margin: 1.2rem 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.divider::before, .divider::after {
+  content: '';
+  flex: 1 1 auto;
+  height: 1px;
+  background: var(--panel-border);
+}
+
+/* Gold-accented rather than the generic grey .secondary treatment -- on
+   this screen it's a real, equally-weighted choice next to Google, not a
+   de-emphasized fallback action. */
+.guestButton {
+  width: 100%;
+  border-color: var(--accent-light);
+  color: var(--accent-strong);
+  font-weight: 600;
+  background: transparent;
+  border-width: 1px;
+  border-style: solid;
+}
+.guestButton:hover { background: var(--accent-soft); }
+
+.usernameForm { margin-top: 1.1rem; text-align: left; }
+
+.usernameRow { display: flex; gap: 0.5rem; margin-top: 0.3rem; }
+.usernameRow input { flex: 1 1 auto; margin-top: 0; }
+.shuffleButton {
+  flex: 0 0 auto;
+  width: auto;
+  margin-top: 0;
+  padding: 0.5rem 0.7rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.shuffleButton svg { width: 17px; height: 17px; }
+
+.continueButton { width: 100%; margin-top: 0.5rem; }

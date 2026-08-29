@@ -1,0 +1,138 @@
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1.1rem;
+  max-width: 780px;
+  margin: 4rem auto 0;
+}
+@media (max-width: 700px) {
+  .tiles { grid-template-columns: 1fr; max-width: 420px; }
+}
+.tile {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  text-align: center;
+  padding: 2rem 1.2rem;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+  border: 1px solid var(--panel-border);
+}
+.tile:hover, .tile:focus-visible { transform: translateY(-2px); border-color: var(--accent-light); box-shadow: var(--shadow); outline: none; }
+.tileIcon {
+  width: 56px;
+  height: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-light);
+  color: var(--accent-strong);
+  margin-bottom: 0.2rem;
+}
+.tileIcon svg { width: 27px; height: 27px; }
+.tileIconLarge svg { width: 33px; height: 33px; }
+.tileTitle { font-weight: 700; font-size: 1.05rem; }
+.tileSub { color: var(--muted); font-size: 0.82rem; }
+
+.recentGames { max-width: 780px; margin: 2rem auto 0; text-align: left; width: 100%; opacity: 0; transform: translateY(8px); }
+.recentGames.enter { animation: recentGamesIn 0.4s ease forwards; opacity: 1; transform: translateY(0); }
+@keyframes recentGamesIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+.recentGames h3 { margin: 0 0 0.8rem; }
+
+.globalStats {
+  display: flex;
+  justify-content: center;
+  gap: 2.5rem;
+  position: fixed;
+  left: 96px;
+  right: 0;
+  bottom: 0;
+  padding: 0.9rem 1.5rem;
+  background: rgba(0, 0, 0, 0.22);
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(6px);
+  z-index: 20;
+}
+.globalStat { display: flex; flex-direction: column; align-items: center; gap: 0.15rem; }
+.globalStatValue { font-size: 1.5rem; font-weight: 800; color: var(--accent-strong); }
+.globalStatLabel { font-size: 0.78rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+
+.backButton {
+  display: block;
+  width: auto;
+  margin: 0 0 0.9rem;
+  padding: 0.3rem 0;
+  background: none;
+  border: none;
+  color: var(--muted);
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.backButton:hover { color: var(--text); }
+
+.roomsList { margin-bottom: 1.1rem; }
+.roomRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  padding: 0.6rem 0.8rem;
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-sm);
+  margin-bottom: 0.5rem;
+}
+.roomRow button { margin: 0; }
+
+.fieldBlock { display: block; margin-bottom: 0.85rem; font-size: 0.9rem; font-weight: 500; }
+.fieldBlockLabel { display: block; margin-bottom: 0.4rem; }
+.timeLimitButtons { display: flex; flex-direction: column; gap: 0.5rem; }
+.timeLimitRow { display: flex; gap: 0.5rem; }
+.timeLimitButton {
+  flex: 1;
+  margin: 0;
+  padding: 0.5rem 0.4rem;
+  font-size: 0.9rem;
+  font-weight: 500;
+  background: var(--panel-bg-soft);
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  cursor: pointer;
+}
+.timeLimitButton:hover { border-color: var(--accent-light); }
+.timeLimitButtonSelected { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+.fieldset { border: 1px solid var(--panel-border); border-radius: var(--radius-sm); margin: 0 0 1rem; padding: 0.9rem 1rem 0.3rem; }
+.fieldset legend { padding: 0 0.4rem; font-weight: 600; font-size: 0.9rem; }
+.row { display: flex; gap: 0.75rem; flex-wrap: wrap; align-items: stretch; }
+.row label { flex: 1 1 100px; display: flex; flex-direction: column; }
+.row label input { margin-top: auto; }
+
+.radioLabel {
+  flex: 1 1 140px;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.7rem 0.8rem;
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.radioLabel:hover { background: var(--panel-bg-soft); }
+.radioLabelChecked { background: var(--accent-soft); border-color: var(--accent-light); }
+.radioLabel input { width: auto; margin: 0; }
+.radioLabelText { display: flex; flex-direction: column; line-height: 1.35; }
+.radioLabelText strong { font-weight: 600; font-size: 0.92rem; }
+
+.advanced { margin-bottom: 1.1rem; }
+.advanced summary { cursor: pointer; color: var(--muted); margin-bottom: 0.5rem; font-size: 0.85rem; font-weight: 600; }
+
+.hint { color: var(--muted); font-size: 0.8rem; }
+.hostGameButton { width: 100%; margin-top: 0.5rem; }

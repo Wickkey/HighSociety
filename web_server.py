@@ -29,7 +29,7 @@ import uuid
 from typing import Optional
 
 from dotenv import load_dotenv
-from flask import Flask, Response, jsonify, render_template, request
+from flask import Flask, Response, jsonify, render_template, request, send_from_directory
 from flask_sock import Sock
 
 from highsociety.code.ai import BOT_TYPES, create_bot_players
@@ -54,6 +54,13 @@ from highsociety.code.gamecore.player.networkplayer import NetworkPlayer
 from highsociety.code.gamecore.player.networkspectator import NetworkSpectator
 
 WEB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "highsociety", "web")
+# `frontend/`'s own `npm run build` output (see frontend/vite.config.ts's
+# fixed, non-hashed build.rollupOptions.output) -- a plain static asset
+# folder, no Jinja templating of app code at all. The app shell fetches
+# GA_MEASUREMENT_ID/GOOGLE_CLIENT_ID from /api/app_config at boot instead of
+# having them baked in server-side (see api_app_config below), which is what
+# lets index() below just hand back a static file unchanged.
+FRONTEND_DIST_DIR = os.path.join(WEB_DIR, "static", "dist")
 
 app = Flask(__name__, template_folder=os.path.join(WEB_DIR, "templates"),
             static_folder=os.path.join(WEB_DIR, "static"))
@@ -890,15 +897,31 @@ def api_rating_history(username):
     return jsonify({"history": game_history.get_rating_history(username)})
 
 
+@app.route("/api/app_config")
+def api_app_config():
+    """The two values index.html used to get server-side via Jinja
+    (ga_measurement_id/google_client_id) -- the React app fetches this
+    once at boot instead, so the built app shell itself is a plain
+    static file with no server templating of app code at all. Deliberately
+    NOT named /api/config -- that name was already taken by an unrelated,
+    pre-existing endpoint (game rules config, from HSConfig.json) that
+    something else may still depend on; confirmed the old web frontend
+    never called it itself, but that's not the same as confirming nothing
+    does."""
+    return jsonify({
+        "gaMeasurementId": GA_MEASUREMENT_ID,
+        "googleClientId": GOOGLE_CLIENT_ID if GOOGLE_SIGN_IN_ENABLED else None,
+    })
+
+
 @app.route("/")
-# The 7 top-level, sidebar-navigable screens (see app.js's SCREEN_PATHS)
-# each get a real, shareable/refreshable URL -- all served by this exact
-# same view, since it's a single-page app: the client reads
-# location.pathname on boot and jumps straight to the matching screen
-# (dom.js's showScreen already updates the URL bar to match via
-# pushState whenever one of these becomes the visible screen). Deep
-# room/game state deliberately isn't included here -- that's still the
-# existing ?room=<code> query-param mechanism, unchanged.
+# The 8 top-level, sidebar-navigable screens (see frontend/src/App.tsx's
+# route table) each get a real, shareable/refreshable URL -- all served
+# by this exact same static file, since it's a single-page app: the
+# client's router reads location.pathname on boot and jumps straight to
+# the matching screen. Deep room/game state deliberately isn't included
+# here -- that's still the existing ?room=<code> query-param mechanism,
+# unchanged.
 @app.route("/play")
 @app.route("/join")
 @app.route("/host")
@@ -908,10 +931,7 @@ def api_rating_history(username):
 @app.route("/achievements")
 @app.route("/my-games")
 def index():
-    return render_template(
-        "index.html", ga_measurement_id=GA_MEASUREMENT_ID,
-        google_client_id=GOOGLE_CLIENT_ID if GOOGLE_SIGN_IN_ENABLED else None,
-    )
+    return send_from_directory(FRONTEND_DIST_DIR, "index.html")
 
 
 @app.route("/robots.txt")

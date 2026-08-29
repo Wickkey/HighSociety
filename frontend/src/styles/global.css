@@ -1,0 +1,131 @@
+/* Genuinely global styles: CSS custom properties (the whole palette) and
+   the base element reset/body background. Ported verbatim from the old
+   frontend's main.css :root block -- these aren't scoped to any one
+   component by nature, so they stay a plain global stylesheet rather
+   than a CSS Module, imported once in main.tsx. */
+:root {
+  /* Luxury-casino palette: dark felt green behind cream/parchment panels,
+     muted gold accents, muted (not primary-color-wheel) card hues. Kept as
+     one deliberate look rather than a light/dark adaptive theme -- a casino
+     table doesn't re-skin itself for your OS setting. */
+  --felt-1: #114430;
+  --felt-2: #0b3427;
+  --panel-bg: #f2ece2;
+  --panel-bg-soft: #ece4d8;
+  --panel-bg-alt: #f5f0e8;
+  --panel-bg-auction: #f3eee6;
+  --panel-bg-log: #ede5d8;
+  --panel-border: #d7cebf;
+  --text: #342c23;
+  --muted: #766a5b;
+  --accent: #b98a2f;
+  --accent-light: #c8a04d;
+  --accent-highlight: #d9b15f;
+  --accent-strong: #8f6a22;
+  --accent-soft: rgba(185, 138, 47, 0.16);
+  --danger: #a3302a;
+  --danger-soft: rgba(163, 48, 42, 0.12);
+  --chip-money: #1f7a4d;
+  --chip-money-selected: var(--accent);
+  --card-green: var(--green-dot);
+  --card-green-2: #1c7a3c;
+  --card-neutral: #8c8171;
+  --card-neutral-2: #5b5346;
+  --green-dot: #2fa84f;
+  --toast-start: #8570bf;
+  --radius: 18px;
+  --radius-card: 14px;
+  --radius-sm: 12px;
+  --shadow: 0 14px 34px rgba(0, 0, 0, 0.24);
+  --shadow-sm: 0 8px 24px rgba(0, 0, 0, 0.1);
+}
+
+* { box-sizing: border-box; }
+
+html, body, #root { height: 100%; }
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  background:
+    repeating-linear-gradient(45deg, rgba(255, 255, 255, 0.015) 0 2px, transparent 2px 4px),
+    linear-gradient(180deg, var(--felt-1) 0%, var(--felt-2) 100%);
+  background-attachment: fixed;
+  color: var(--text);
+  -webkit-font-smoothing: antialiased;
+}
+
+h2, h3 { margin: 0 0 0.6rem; }
+p { line-height: 1.5; }
+.muted { color: var(--muted); }
+.error { color: var(--danger); font-size: 0.9rem; margin: 0.4rem 0 0; }
+
+label {
+  display: block;
+  margin-bottom: 0.85rem;
+  font-size: 0.9rem;
+  font-weight: 500;
+}
+label input, label select {
+  display: block;
+  width: 100%;
+  margin-top: 0.3rem;
+  padding: 0.5rem 0.65rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--panel-border);
+  background: var(--panel-bg-soft);
+  color: var(--text);
+  font-size: 1rem;
+  font-weight: 400;
+  transition: border-color 0.15s ease;
+}
+label input:focus, label select:focus { outline: none; border-color: var(--accent); }
+
+button {
+  font-size: 0.95rem;
+  padding: 0.65rem 1.3rem;
+  border-radius: var(--radius-sm);
+  border: none;
+  cursor: pointer;
+  font-weight: 600;
+  transition: transform 0.08s ease, filter 0.15s ease, opacity 0.15s ease;
+  line-height: 1.2;
+}
+button:active { transform: translateY(1px); }
+button:disabled { opacity: 0.5; cursor: default; transform: none; }
+button.primary { background: var(--accent); color: #fff; }
+button.primary:hover:not(:disabled) { filter: brightness(1.08); }
+button.secondary { background: transparent; border: 1px solid var(--panel-border); color: var(--text); }
+button.secondary:hover:not(:disabled) { background: var(--panel-bg-soft); }
+button.danger { background: var(--danger); color: #fff; }
+button.danger:hover:not(:disabled) { filter: brightness(1.1); }
+
+/* .card/.panel/.panel--centered(-wide) are the one deliberately-global
+   layer of "shared visual treatment across many screens" (the old
+   frontend expressed the same idea as ID-selector overrides like
+   `#screen-login .panel`, which don't translate to per-component CSS
+   Modules) -- everything screen/component-*specific* still lives in that
+   component's own *.module.css. */
+.card {
+  --panel-tint: var(--panel-bg);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.35), rgba(255, 255, 255, 0) 40%), var(--panel-tint);
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+}
+.panel { padding: 1.4rem 1.6rem; margin-bottom: 1.1rem; }
+.panel--centered { max-width: 460px; width: 100%; margin: 3rem auto; box-shadow: var(--shadow); }
+.panel--centered-wide { max-width: 560px; width: 100%; margin: 3rem auto; box-shadow: var(--shadow); }
+
+/* Login has no sidebar/topbar (no identity yet to act on) -- just center
+   the panel in the viewport on its own. */
+.content-only {
+  min-height: 100vh;
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 0 1.25rem;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
