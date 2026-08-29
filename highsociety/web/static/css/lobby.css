@@ -684,5 +684,8 @@ button.secondary.standalone { margin-top: 0.9rem; display: inline-block; }
   border-radius: var(--radius-sm);
 }
 .leaderboard-my-rating-label { font-size: 0.78rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.03em; }
-.sparkline-svg { width: 100%; height: 48px; display: block; margin-top: 0.4rem; }
-.sparkline-range { display: flex; justify-content: space-between; font-size: 0.72rem; color: var(--muted); }
+/* Real axes/gridlines/tooltips via Chart.js now (see leaderboard.js) --
+   replacing the old hand-rolled <polyline> sparkline, which had no room
+   to grow into any of that. Fixed height keeps the panel from jumping as
+   the chart (re)renders; width is still fluid. */
+.leaderboard-sparkline { width: 100%; height: 160px; margin-top: 0.4rem; }
