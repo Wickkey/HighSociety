@@ -30,6 +30,23 @@ def reset_player_sessions():
     game_history._player_sessions = {}
 
 
+@pytest.fixture(autouse=True)
+def mock_release_connection(monkeypatch):
+    """_connect() now borrows from a real connection pool (see game_
+    history's own module docstring on why), and every call site's release
+    counterpart -- _release_connection -- expects a real pooled
+    connection object, not the bare MagicMock these tests hand _connect
+    in its place. Neutralized by default so a tested function's own
+    `finally` block doesn't try to build (and connect) a real
+    ThreadedConnectionPool against this file's fake DATABASE_URL. Tests
+    that specifically want to assert release happened take this fixture
+    as a parameter and assert on the mock directly, in place of the old
+    conn.close.assert_called_once()."""
+    mock = MagicMock()
+    monkeypatch.setattr(game_history, "_release_connection", mock)
+    return mock
+
+
 @pytest.fixture
 def no_database_url(monkeypatch):
     monkeypatch.delenv("DATABASE_URL", raising=False)
@@ -115,13 +132,13 @@ def _fake_connection():
     return conn, cursor
 
 
-def test_ensure_schema_runs_every_ddl_statement_once(database_url):
+def test_ensure_schema_runs_every_ddl_statement_once(database_url, mock_release_connection):
     conn, cursor = _fake_connection()
     with patch.object(game_history, "_connect", return_value=conn):
         game_history.ensure_schema()
     assert cursor.execute.call_count == len(game_history._SCHEMA_STATEMENTS)
     assert game_history._schema_ready is True
-    conn.close.assert_called_once()
+    mock_release_connection.assert_called_once_with(conn)
 
 
 def test_ensure_schema_failure_is_caught_and_leaves_schema_not_ready(database_url):
@@ -130,7 +147,7 @@ def test_ensure_schema_failure_is_caught_and_leaves_schema_not_ready(database_ur
     assert game_history._schema_ready is False
 
 
-def test_record_finished_game_writes_one_row_per_human_and_bot_participant(database_url):
+def test_record_finished_game_writes_one_row_per_human_and_bot_participant(database_url, mock_release_connection):
     game_history._schema_ready = True  # skip ensure_schema's own DDL round-trip for this test
     conn, cursor = _fake_connection()
     participants = [
@@ -160,7 +177,7 @@ def test_record_finished_game_writes_one_row_per_human_and_bot_participant(datab
     game_id, player_id, bot_name = bot_row_params[0], bot_row_params[1], bot_row_params[2]
     assert player_id is None
     assert bot_name == "Marble"
-    conn.close.assert_called_once()
+    mock_release_connection.assert_called_once_with(conn)
 
 
 def test_record_finished_game_gives_a_bot_with_known_difficulty_a_real_player_id(database_url):
@@ -767,7 +784,7 @@ def test_find_player_by_google_id_is_none_without_a_database(no_database_url):
     assert game_history.find_player_by_google_id("g-123") is None
 
 
-def test_find_player_by_google_id_returns_the_row_when_found(database_url):
+def test_find_player_by_google_id_returns_the_row_when_found(database_url, mock_release_connection):
     game_history._schema_ready = True
     conn, cursor = _fake_connection()
     cursor.fetchone.side_effect = None
@@ -778,7 +795,7 @@ def test_find_player_by_google_id_returns_the_row_when_found(database_url):
     query, params = cursor.execute.call_args.args
     assert "google_id" in query
     assert params == ("g-123",)
-    conn.close.assert_called_once()
+    mock_release_connection.assert_called_once_with(conn)
 
 
 def test_find_player_by_google_id_returns_none_when_not_found(database_url):
@@ -922,7 +939,7 @@ def test_create_google_player_is_a_no_op_without_a_database(no_database_url):
     assert game_history.create_google_player("g-123", "a@example.com", "alice", "Alice") is False
 
 
-def test_create_google_player_inserts_a_row_and_returns_true(database_url):
+def test_create_google_player_inserts_a_row_and_returns_true(database_url, mock_release_connection):
     game_history._schema_ready = True
     conn, cursor = _fake_connection()
     with patch.object(game_history, "_connect", return_value=conn):
@@ -931,7 +948,7 @@ def test_create_google_player_inserts_a_row_and_returns_true(database_url):
     query, params = cursor.execute.call_args.args
     assert "INSERT INTO players" in query
     assert params == ("alice", "Alice", "g-123", "a@example.com")
-    conn.close.assert_called_once()
+    mock_release_connection.assert_called_once_with(conn)
 
 
 def test_create_google_player_returns_false_instead_of_raising_on_a_uniqueness_race(database_url):
@@ -954,7 +971,7 @@ def test_create_guest_player_is_a_no_op_without_a_database(no_database_url):
     assert game_history.create_guest_player("alice") is False
 
 
-def test_create_guest_player_inserts_a_row_with_no_google_id_or_email(database_url):
+def test_create_guest_player_inserts_a_row_with_no_google_id_or_email(database_url, mock_release_connection):
     game_history._schema_ready = True
     conn, cursor = _fake_connection()
     with patch.object(game_history, "_connect", return_value=conn):
@@ -963,7 +980,7 @@ def test_create_guest_player_inserts_a_row_with_no_google_id_or_email(database_u
     query, params = cursor.execute.call_args.args
     assert "INSERT INTO players" in query
     assert params == ("CrimsonNaruto482", "CrimsonNaruto482")
-    conn.close.assert_called_once()
+    mock_release_connection.assert_called_once_with(conn)
 
 
 def test_create_guest_player_returns_false_instead_of_raising_on_a_uniqueness_race(database_url):
@@ -983,7 +1000,7 @@ def test_rename_player_refuses_when_the_new_username_is_taken(database_url):
         assert game_history.rename_player("alice", "bob") is False
 
 
-def test_rename_player_updates_the_existing_row(database_url):
+def test_rename_player_updates_the_existing_row(database_url, mock_release_connection):
     game_history._schema_ready = True
     conn, cursor = _fake_connection()
     cursor.rowcount = 1
@@ -994,7 +1011,7 @@ def test_rename_player_updates_the_existing_row(database_url):
     query, params = cursor.execute.call_args_list[0].args
     assert "UPDATE players" in query
     assert params == ("bob", "bob", "alice")
-    conn.close.assert_called_once()
+    mock_release_connection.assert_called_once_with(conn)
 
 
 def test_rename_player_falls_back_to_inserting_when_the_old_username_never_existed(database_url):

@@ -427,6 +427,7 @@ def test_finished_game_is_recorded_when_a_database_is_configured(running_web_ser
     conn.cursor.return_value.__enter__.return_value = cursor
     conn.__enter__.return_value = conn
     monkeypatch.setattr(game_history, "_connect", lambda: conn)
+    monkeypatch.setattr(game_history, "_release_connection", lambda c: None)
     # Run synchronously so the test doesn't have to race a background thread
     # for a database write that, in production, is deliberately fire-and-forget.
     def _synchronous_record(on_complete=None, **kwargs):
@@ -481,6 +482,7 @@ def test_status_payload_exposes_elo_changes_once_the_async_write_completes(runni
     conn.cursor.return_value.__enter__.return_value = cursor
     conn.__enter__.return_value = conn
     monkeypatch.setattr(game_history, "_connect", lambda: conn)
+    monkeypatch.setattr(game_history, "_release_connection", lambda c: None)
     # Deliberately NOT monkeypatched to run synchronously here (unlike the
     # test above) -- the whole point is to exercise the real async
     # on_complete wiring, including the brief window where it's still null.

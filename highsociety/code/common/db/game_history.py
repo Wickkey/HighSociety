@@ -365,12 +365,64 @@ def is_configured() -> bool:
     return bool(os.environ.get(_DATABASE_URL_ENV))
 
 
+# Every one of this module's DB-touching functions used to open a brand
+# new psycopg2.connect() and close() it when done -- correct, but a full
+# TCP+TLS handshake to a remote Supabase Postgres instance on every
+# single call. Measured live: ~400ms just for that handshake, vs ~150ms
+# for the same query on a connection that's already open -- roughly 3.5x
+# slower than it needs to be, on every request. A small pool of already-
+# established connections, reused across calls, removes that handshake
+# from the common case entirely. minconn/maxconn are deliberately modest
+# (not "as many as this process could use") -- this app still uses
+# DATABASE_URL's *direct* connection (not Supabase's own pooler), which
+# has its own real ceiling on live connections that a future move to
+# their pooler endpoint would raise independently of this.
+_MIN_POOL_CONNECTIONS = 1
+_MAX_POOL_CONNECTIONS = 10
+_pool = None
+_pool_lock = threading.Lock()
+
+
+def _get_pool():
+    global _pool
+    if _pool is None:
+        with _pool_lock:
+            if _pool is None:
+                # Imported lazily (same reasoning as psycopg2 itself
+                # below): only actually needed once DATABASE_URL is set.
+                from psycopg2.pool import ThreadedConnectionPool
+                _pool = ThreadedConnectionPool(
+                    _MIN_POOL_CONNECTIONS, _MAX_POOL_CONNECTIONS, os.environ[_DATABASE_URL_ENV],
+                )
+    return _pool
+
+
 def _connect():
     # Imported lazily so merely importing this module (which web_server.py
     # does unconditionally) never fails for a dev/test setup that hasn't
     # installed psycopg2 — only actually needed once DATABASE_URL is set.
-    import psycopg2
-    return psycopg2.connect(os.environ[_DATABASE_URL_ENV])
+    import psycopg2  # noqa: F401 -- see _get_pool's own lazy psycopg2.pool import
+    return _get_pool().getconn()
+
+
+def _release_connection(conn) -> None:
+    """Returns `conn` to the pool instead of actually closing the
+    TCP+TLS connection -- every _connect() call site's own `finally`
+    block calls this now, in place of the plain conn.close() it used to
+    call before this module pooled connections. Every caller already
+    runs its queries inside a `with conn, conn.cursor() as cur:` block,
+    which commits (or rolls back, on an exception) before this ever
+    runs -- so the connection handed back here is always already in a
+    clean, reusable state, never mid-transaction.
+    """
+    pool = _get_pool()
+    if conn.closed:
+        # Already dead (e.g. the network dropped mid-query) -- tell the
+        # pool to discard it outright rather than recycling a connection
+        # nothing could actually use.
+        pool.putconn(conn, close=True)
+    else:
+        pool.putconn(conn)
 
 
 def ensure_schema() -> None:
@@ -416,7 +468,7 @@ def ensure_schema() -> None:
             LoggingManager.warning(f"game_history.ensure_schema failed, game history disabled: {e}")
         finally:
             if conn is not None:
-                conn.close()
+                _release_connection(conn)
 
 
 def _upsert_player(cur, username: str, display_name: str) -> tuple:
@@ -467,7 +519,7 @@ def find_player_by_google_id(google_id: str) -> Optional[dict]:
         return None
     finally:
         if conn is not None:
-            conn.close()
+            _release_connection(conn)
 
 
 def username_is_taken(username: str) -> bool:
@@ -500,7 +552,7 @@ def username_is_taken(username: str) -> bool:
         return True
     finally:
         if conn is not None:
-            conn.close()
+            _release_connection(conn)
 
 
 _DEFAULT_ELO = 1000
@@ -601,7 +653,7 @@ def get_player_session(username: str) -> Optional[PlayerSession]:
         return None
     finally:
         if conn is not None:
-            conn.close()
+            _release_connection(conn)
 
 
 def get_player_elo(username: str) -> int:
@@ -653,7 +705,7 @@ def get_player_achievements(username: str) -> list:
         return []
     finally:
         if conn is not None:
-            conn.close()
+            _release_connection(conn)
 
 
 def get_player_profile_stats(username: str) -> Optional[dict]:
@@ -727,7 +779,7 @@ def get_player_profile_stats(username: str) -> Optional[dict]:
         return None
     finally:
         if conn is not None:
-            conn.close()
+            _release_connection(conn)
 
 
 def get_global_stats() -> Optional[dict]:
@@ -762,7 +814,7 @@ def get_global_stats() -> Optional[dict]:
         return None
     finally:
         if conn is not None:
-            conn.close()
+            _release_connection(conn)
 
 
 def get_recent_games(username: str, limit: int = 20, offset: int = 0) -> dict:
@@ -839,7 +891,7 @@ def get_recent_games(username: str, limit: int = 20, offset: int = 0) -> dict:
         return empty
     finally:
         if conn is not None:
-            conn.close()
+            _release_connection(conn)
 
 
 def get_game_detail(game_id: int) -> Optional[dict]:
@@ -895,7 +947,7 @@ def get_game_detail(game_id: int) -> Optional[dict]:
         return None
     finally:
         if conn is not None:
-            conn.close()
+            _release_connection(conn)
 
 
 def get_leaderboard(limit: int = 50) -> list:
@@ -937,7 +989,7 @@ def get_leaderboard(limit: int = 50) -> list:
         return []
     finally:
         if conn is not None:
-            conn.close()
+            _release_connection(conn)
 
 
 def get_rating_history(username: str) -> list:
@@ -973,7 +1025,7 @@ def get_rating_history(username: str) -> list:
         return []
     finally:
         if conn is not None:
-            conn.close()
+            _release_connection(conn)
 
 
 def create_google_player(google_id: str, email: str, username: str, display_name: str) -> bool:
@@ -1011,7 +1063,7 @@ def create_google_player(google_id: str, email: str, username: str, display_name
         return False
     finally:
         if conn is not None:
-            conn.close()
+            _release_connection(conn)
 
 
 def create_guest_player(username: str) -> bool:
@@ -1039,7 +1091,7 @@ def create_guest_player(username: str) -> bool:
         return False
     finally:
         if conn is not None:
-            conn.close()
+            _release_connection(conn)
 
 
 def rename_player(old_username: str, new_username: str) -> bool:
@@ -1080,7 +1132,7 @@ def rename_player(old_username: str, new_username: str) -> bool:
         return False
     finally:
         if conn is not None:
-            conn.close()
+            _release_connection(conn)
 
 
 def _record_auction_rounds(cur, game_id: int, auction_rounds: list, player_id_by_username: dict) -> None:
@@ -1561,7 +1613,7 @@ def record_finished_game(*, room_code: str, seats: int, bot_mix: list,
         return {}
     finally:
         if conn is not None:
-            conn.close()
+            _release_connection(conn)
     # Only reached once the transaction above has actually committed
     # (the `with conn` block's own clean exit) -- see cache_refreshes'
     # own comment on why this can't happen any earlier.
