@@ -6,17 +6,34 @@
 // (handlePlayerMessage/respondIdentify/beginReconnectAttempt).
 //
 // Deliberately stops interpreting messages once the handshake resolves --
-// anything else (auctions, moves, chat, ...) comes back as `phase: 'game'`
-// with the raw message attached, for Phase 3's GameContext to take over.
-// This hook only owns getting a seat *connected*, not what happens at the
-// table once it is.
+// anything else (auctions, moves, chat, ...) is handed to `onGameMessage`
+// (Phase 3's GameContext reducer) via a direct callback, NOT folded into
+// this hook's own `state`. That matters: React 18 batches state updates
+// scheduled from outside React's own event system (a WebSocket's onmessage
+// included), so if several messages arrived close together and each just
+// called setState(latestMessage), React could coalesce two `setState`
+// calls into one render and silently drop the earlier message before
+// anything ever saw it -- a real correctness risk for a card game where
+// every auction event must be applied in order. A reducer's `dispatch`
+// doesn't have this problem (React guarantees the reducer runs once per
+// dispatched action, in order, regardless of how the resulting renders get
+// batched), so the message stream is handed to one via a plain callback
+// invoked synchronously from the socket handler, never through this hook's
+// own state.
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { clearRejoinInfo, loadRejoinInfo, saveRejoinInfo } from '../state/rejoin';
 import { connectSocket, type SocketConnection } from '../ws/socket';
 import {
-  resolveIdentifyAnswer, type IdentifyErrorMessage, type IdentifyMessage, type IdentifySuccessMessage,
-  type JoinIdentity, type PlayerSocketMessage,
+  resolveIdentifyAnswer, type GenericGameMessage, type IdentifyErrorMessage, type IdentifyMessage, type IdentifySuccessMessage,
+  type JoinIdentity, type PlayerSocketMessage, type RematchMessage,
 } from '../ws/protocol';
+
+/** Any phase past a successful identify -- the connection is live and
+ * (once past 'waiting', which only applies pre-game-start) receiving real
+ * game messages. Shared by every component that needs to tell "connected"
+ * apart from "still working on it"/"failed", so that definition lives in
+ * exactly one place. */
+export const PLAYER_CONNECTED_PHASES = new Set(['waiting', 'reconnected', 'game']);
 
 export type PlayerConnectionState =
   | { phase: 'idle' }
@@ -30,31 +47,51 @@ export type PlayerConnectionState =
   /** A reconnect attempt's IDENTIFY_ERROR -- the token was invalid/expired
    * (resigned, game over, or someone else already reconnected with it). */
   | { phase: 'unavailable'; message: string }
-  /** Anything past the handshake -- Phase 3's concern. */
-  | { phase: 'game'; message: PlayerSocketMessage };
+  /** Past the handshake, receiving real messages -- see `onGameMessage`
+   * for the messages themselves; this is purely a one-time UI transition
+   * ("stop showing a waiting/reconnecting stub, Phase 3's screen takes
+   * over now"), not updated again per message. */
+  | { phase: 'game' };
+
+export interface UsePlayerConnectionOptions {
+  /** Fires whenever the socket closes for any reason (server closed it,
+   * network drop) -- NOT when the caller itself calls disconnect(). The
+   * Room screen uses this to trigger an immediate status re-check rather
+   * than waiting for its next poll tick, matching the old app's onclose ->
+   * refreshStatus(). */
+  onDisconnected?: () => void;
+  /** Called synchronously, once per message, for every message after the
+   * IDENTIFY handshake resolves (i.e. never for IDENTIFY/IDENTIFY_ERROR/
+   * IDENTIFY_SUCCESS themselves, which this hook already fully owns) --
+   * see this module's own top comment for why that's a callback and not
+   * part of `state`. */
+  onGameMessage?: (message: GenericGameMessage | RematchMessage) => void;
+}
 
 export interface UsePlayerConnectionResult {
   state: PlayerConnectionState;
   /** Connects fresh and identifies as `identity`. */
   join: (identity: JoinIdentity) => void;
   /** Connects using a stored rejoin token for this room, if one exists.
-   * Returns whether an attempt was actually started. */
-  attemptReconnectIfPossible: () => boolean;
+   * Returns the identity it's reconnecting as (so a caller resetting its
+   * own game state -- see usePlayerGameSession.ts -- knows whose seat this
+   * is), or null if there was no token to try. */
+  attemptReconnectIfPossible: () => JoinIdentity | null;
+  /** Sends a player action (bid/pass/discard/resign/reaction) once
+   * connected -- a no-op if there's no live socket, since every real
+   * caller (gameReducer's action-sending side) already checks `state.phase`
+   * first and has its own "connection lost" handling for that case. */
+  send: (data: unknown) => void;
   disconnect: () => void;
 }
 
-/** `onDisconnected` fires whenever the socket closes for any reason (server
- * closed it, network drop) -- NOT when the caller itself calls disconnect().
- * The Room screen uses this to trigger an immediate status re-check rather
- * than waiting for its next poll tick, matching the old app's onclose ->
- * refreshStatus(). */
-export function usePlayerConnection(roomCode: string, onDisconnected?: () => void): UsePlayerConnectionResult {
+export function usePlayerConnection(roomCode: string, options: UsePlayerConnectionOptions = {}): UsePlayerConnectionResult {
   const [state, setState] = useState<PlayerConnectionState>({ phase: 'idle' });
   const connectionRef = useRef<SocketConnection | null>(null);
   const identityRef = useRef<JoinIdentity | null>(null);
   const reconnectingRef = useRef(false);
-  const onDisconnectedRef = useRef(onDisconnected);
-  onDisconnectedRef.current = onDisconnected;
+  const optionsRef = useRef(options);
+  optionsRef.current = options;
 
   const teardown = useCallback(() => {
     connectionRef.current?.dispose();
@@ -108,12 +145,18 @@ export function usePlayerConnection(roomCode: string, onDisconnected?: () => voi
             break;
           }
           default:
-            setState({ phase: 'game', message: msg });
+            // Functional update bails out of a re-render entirely once
+            // already 'game' (returning the same `prev` reference is
+            // React's own signal to skip it) -- after the very first
+            // in-game message, this line becomes a no-op and every
+            // subsequent message flows purely through onGameMessage below.
+            setState((prev) => (prev.phase === 'game' ? prev : { phase: 'game' }));
+            optionsRef.current.onGameMessage?.(msg as GenericGameMessage | RematchMessage);
         }
       },
       onClose: () => {
         connectionRef.current = null;
-        onDisconnectedRef.current?.();
+        optionsRef.current.onDisconnected?.();
       },
     });
   }, [roomCode, teardown]);
@@ -124,14 +167,19 @@ export function usePlayerConnection(roomCode: string, onDisconnected?: () => voi
     open(`/ws?room=${encodeURIComponent(roomCode)}`);
   }, [roomCode, open]);
 
-  const attemptReconnectIfPossible = useCallback((): boolean => {
+  const attemptReconnectIfPossible = useCallback((): JoinIdentity | null => {
     const info = loadRejoinInfo(roomCode);
-    if (!info) return false;
-    identityRef.current = { username: info.username, name: info.name };
+    if (!info) return null;
+    const identity: JoinIdentity = { username: info.username, name: info.name };
+    identityRef.current = identity;
     reconnectingRef.current = true;
     open(`/ws?room=${encodeURIComponent(roomCode)}&rejoin_token=${encodeURIComponent(info.token)}`);
-    return true;
+    return identity;
   }, [roomCode, open]);
 
-  return { state, join, attemptReconnectIfPossible, disconnect: teardown };
+  const send = useCallback((data: unknown) => {
+    connectionRef.current?.send(data);
+  }, []);
+
+  return { state, join, attemptReconnectIfPossible, send, disconnect: teardown };
 }

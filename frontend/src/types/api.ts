@@ -70,6 +70,7 @@ export interface CreateGameRequest {
 }
 
 export interface RoomPlayer {
+  username: string;
   name: string;
   is_bot: boolean;
 }

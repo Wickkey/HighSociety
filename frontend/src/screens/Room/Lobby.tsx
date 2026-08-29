@@ -18,7 +18,7 @@ export function Lobby({ roomCode, status, autoJoin = false }: { roomCode: string
       <RoomCodeCard status={status} />
       {mode === 'join'
         ? <PlayerPanel roomCode={roomCode} status={status} autoJoin={autoJoin} onWatchInstead={() => setMode('spectate')} />
-        : <SpectatorPanel roomCode={roomCode} onBack={() => setMode('join')} />}
+        : <SpectatorPanel roomCode={roomCode} status={status} onBack={() => setMode('join')} />}
     </div>
   );
 }

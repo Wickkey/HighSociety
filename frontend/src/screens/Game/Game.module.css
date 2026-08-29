@@ -1,0 +1,131 @@
+.wrap {
+  display: grid;
+  grid-template-columns: 1fr 300px;
+  gap: 1rem;
+  max-width: 1100px;
+  margin: 0 auto;
+  align-items: start;
+}
+@media (max-width: 900px) {
+  .wrap { grid-template-columns: 1fr; }
+}
+
+.main { display: flex; flex-direction: column; gap: 1rem; }
+.side { display: flex; flex-direction: column; gap: 1rem; }
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+.turnLabel { display: flex; align-items: center; gap: 0.4rem; font-weight: 600; }
+.turnDot {
+  width: 9px; height: 9px; border-radius: 50%; background: var(--accent);
+  box-shadow: 0 0 0 4px var(--accent-soft);
+}
+
+.auctionCard {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 1.2rem;
+}
+.cardTypeLabel { color: var(--muted); font-size: 0.9rem; }
+.bidRow { display: flex; align-items: baseline; gap: 0.4rem; font-size: 1.1rem; }
+.bidValue { font-size: 1.8rem; font-weight: 700; color: var(--accent-strong); transition: transform 0.15s ease; }
+.bidValue.bump { animation: bump 0.25s ease; }
+@keyframes bump { 0% { transform: scale(1.3); } 100% { transform: scale(1); } }
+
+.card {
+  width: 92px;
+  height: 128px;
+  border-radius: var(--radius-card);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 1.3rem;
+  background: var(--card-neutral);
+  color: #fff;
+  position: relative;
+}
+.card.big { width: 120px; height: 168px; font-size: 1.7rem; }
+.card.green { background: var(--card-green-2); }
+.card.small { width: 44px; height: 60px; font-size: 0.85rem; }
+.cardBack {
+  width: 44px; height: 60px; border-radius: var(--radius-card);
+  background: repeating-linear-gradient(45deg, var(--felt-2), var(--felt-2) 4px, var(--felt-1) 4px, var(--felt-1) 8px);
+  border: 1px solid var(--panel-border);
+}
+.greenDot { position: absolute; top: 4px; right: 4px; width: 8px; height: 8px; border-radius: 50%; background: var(--green-dot); }
+
+.chipRow { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+
+.opponentsList { display: flex; flex-direction: column; gap: 0.5rem; }
+.opponentRow {
+  padding: 0.6rem 0.75rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--panel-border);
+  background: var(--panel-bg-soft);
+  transition: background 0.2s ease, box-shadow 0.2s ease;
+}
+.opponentRow.currentTurn { background: var(--accent-soft); box-shadow: 0 0 0 2px var(--accent-highlight) inset; }
+.opponentRow.outOfAuction { opacity: 0.55; }
+.opponentRow.inactive { opacity: 0.4; filter: grayscale(1); }
+.opponentHeader { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.35rem; }
+.opponentHeaderLeft { display: flex; align-items: center; gap: 0.4rem; font-weight: 600; }
+.opponentHeaderRight { display: flex; align-items: center; gap: 0.5rem; font-size: 0.85rem; color: var(--muted); }
+.bidBadge { font-size: 0.78rem; color: var(--accent-strong); font-weight: 600; }
+.oppTimer { font-variant-numeric: tabular-nums; }
+.oppTimer.urgent { color: var(--danger); font-weight: 700; }
+
+.myPanel { display: flex; flex-direction: column; gap: 0.6rem; }
+.myPanelHeader { display: flex; justify-content: space-between; align-items: center; }
+
+.moneyChip {
+  padding: 0.4rem 0.75rem;
+  border-radius: 999px;
+  border: 1px solid var(--panel-border);
+  background: var(--panel-bg-soft);
+  font-weight: 700;
+  cursor: pointer;
+}
+.moneyChip.selected { background: var(--chip-money-selected); color: #fff; border-color: transparent; }
+.moneyChip:disabled { cursor: default; opacity: 0.5; }
+
+.movePanel { display: flex; flex-direction: column; gap: 0.6rem; }
+.movePanel.pending { opacity: 0.6; pointer-events: none; }
+.bidStatus { font-size: 0.9rem; color: var(--muted); }
+.moveTimer {
+  display: inline-flex; align-items: center; gap: 0.3rem;
+  font-variant-numeric: tabular-nums; font-weight: 600;
+  padding: 0.2rem 0.6rem; border-radius: 999px; background: var(--panel-bg-soft);
+}
+.moveTimer.urgent { background: var(--danger-soft); color: var(--danger); }
+
+.log {
+  max-height: 220px;
+  overflow-y: auto;
+  font-size: 0.85rem;
+  color: var(--muted);
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.chatLog {
+  max-height: 160px;
+  overflow-y: auto;
+  font-size: 0.85rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  margin-bottom: 0.5rem;
+}
+.chatInputRow { display: flex; gap: 0.4rem; }
+.chatInputRow input { flex: 1; margin: 0; padding: 0.4rem 0.6rem; border-radius: var(--radius-sm); border: 1px solid var(--panel-border); background: var(--panel-bg-soft); }
+
+.warning { color: var(--danger); font-size: 0.9rem; }

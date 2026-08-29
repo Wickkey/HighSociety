@@ -61,5 +61,5 @@ export function Room() {
   }
 
   if (status.state === 'lobby') return <Lobby roomCode={code!} status={status} autoJoin={autoJoin} />;
-  return <LiveGamePlaceholder roomCode={code!} />;
+  return <LiveGamePlaceholder roomCode={code!} status={status} />;
 }

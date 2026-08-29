@@ -1,10 +1,14 @@
-// The "watch this room as a spectator" form, and (once connected) a
-// Phase-3 stub -- the read-only counterpart to PlayerPanel. Ported from the
-// old frontend's lobby.js (onSpectateJoin/applySpectateIdentityDefaults).
+// The "watch this room as a spectator" form, and (once connected) the
+// live spectator view -- the read-only counterpart to PlayerPanel. Ported
+// from the old frontend's lobby.js (onSpectateJoin/
+// applySpectateIdentityDefaults).
 import { useEffect, useState } from 'react';
-import { useSpectatorConnection } from '../../hooks/useSpectatorConnection';
+import { useSpectatorGameSession } from '../../hooks/useSpectatorGameSession';
 import { useProfile } from '../../state/ProfileContext';
 import { useRoom } from '../../state/RoomContext';
+import type { RoomStatus } from '../../types/api';
+import { SpectateScreen } from '../Game/SpectateScreen';
+import { roomSettingsFromStatus } from './roomSettings';
 import styles from './Room.module.css';
 
 // See PlayerPanel's identical CONNECTED_PHASES comment -- real game
@@ -12,33 +16,29 @@ import styles from './Room.module.css';
 // resolves, well before this component would otherwise call it settled.
 const CONNECTED_PHASES = new Set(['connected', 'game']);
 
-export function SpectatorPanel({ roomCode, onBack }: { roomCode: string; onBack?: () => void }) {
+export function SpectatorPanel({
+  roomCode, status, onBack,
+}: { roomCode: string; status: RoomStatus; onBack?: () => void }) {
   const { profile } = useProfile();
   const { setConnectionRole } = useRoom();
-  const spectator = useSpectatorConnection(roomCode);
+  const session = useSpectatorGameSession(roomCode, roomSettingsFromStatus(status));
   const [editingIdentity, setEditingIdentity] = useState(!profile);
   const [username, setUsername] = useState(profile?.username ?? '');
 
   useEffect(() => {
-    setConnectionRole(CONNECTED_PHASES.has(spectator.state.phase) ? 'spectator' : 'none');
-  }, [spectator.state.phase, setConnectionRole]);
+    setConnectionRole(CONNECTED_PHASES.has(session.connectionState.phase) ? 'spectator' : 'none');
+  }, [session.connectionState.phase, setConnectionRole]);
 
-  if (CONNECTED_PHASES.has(spectator.state.phase)) {
-    return (
-      <div className="card panel">
-        <h2>Spectating room {roomCode}</h2>
-        <p className="muted">The live board lands in Phase 3 -- for now, this just confirms the spectator connection works.</p>
-      </div>
-    );
-  }
+  if (CONNECTED_PHASES.has(session.connectionState.phase)) return <SpectateScreen session={session} />;
 
   function onJoin() {
     const name = username.trim();
     if (!name) return;
-    spectator.join({ username: name, name });
+    session.join({ username: name, name });
+    session.seedOpponents(status.joined ?? []);
   }
 
-  const connecting = spectator.state.phase === 'connecting';
+  const connecting = session.connectionState.phase === 'connecting';
 
   return (
     <div className="card panel">
@@ -57,7 +57,7 @@ export function SpectatorPanel({ roomCode, onBack }: { roomCode: string; onBack?
       <button type="button" className="primary" onClick={onJoin} disabled={connecting || !username.trim()}>
         {connecting ? 'Connecting…' : 'Watch'}
       </button>
-      {spectator.state.phase === 'rejected' && <p className="error">{spectator.state.message}</p>}
+      {session.connectionState.phase === 'rejected' && <p className="error">{session.connectionState.message}</p>}
       {onBack && (
         <p className={styles.hint}>
           <button type="button" className={styles.linkButton} onClick={onBack}>Back to joining instead</button>

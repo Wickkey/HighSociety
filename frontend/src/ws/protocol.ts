@@ -28,6 +28,10 @@ export interface RematchMessage {
 
 export interface GenericGameMessage {
   message_type: string;
+  /** Every _send() on the server side includes this (see web_server.py) --
+   * plain narration text, sometimes empty, always present as a field. */
+  prompt?: string;
+  data?: Record<string, unknown>;
   [key: string]: unknown;
 }
 

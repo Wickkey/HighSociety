@@ -3,18 +3,19 @@
 // starting/in_progress branch: try a stored rejoin token first (a refresh
 // or dropped connection mid-game should silently resume the same seat),
 // falling back to "already in progress, watch as a spectator" when there's
-// no token or it's no longer valid. The live board itself is Phase 3 --
-// both outcomes here are stubs confirming the *connection* succeeded.
+// no token or it's no longer valid.
 import { useEffect, useState } from 'react';
-import { usePlayerConnection } from '../../hooks/usePlayerConnection';
+import { usePlayerGameSession } from '../../hooks/usePlayerGameSession';
 import { useRoom } from '../../state/RoomContext';
-import { ConnectedStub } from './ConnectedStub';
+import type { RoomStatus } from '../../types/api';
+import { GameScreen } from '../Game/GameScreen';
+import { roomSettingsFromStatus } from './roomSettings';
 import { SpectatorPanel } from './SpectatorPanel';
 import styles from './Room.module.css';
 
-export function LiveGamePlaceholder({ roomCode }: { roomCode: string }) {
+export function LiveGamePlaceholder({ roomCode, status }: { roomCode: string; status: RoomStatus }) {
   const { setConnectionRole } = useRoom();
-  const player = usePlayerConnection(roomCode);
+  const session = usePlayerGameSession(roomCode, roomSettingsFromStatus(status));
   const [hadToken, setHadToken] = useState<boolean | null>(null);
 
   // Deliberately unconditional (no "have we already tried" ref guard) --
@@ -27,7 +28,9 @@ export function LiveGamePlaceholder({ roomCode }: { roomCode: string }) {
   // a second one, leaving this screen stuck on "Reconnecting..." forever in
   // dev. Production builds run this effect exactly once, as intended.
   useEffect(() => {
-    setHadToken(player.attemptReconnectIfPossible());
+    const reconnected = session.attemptReconnectIfPossible();
+    setHadToken(reconnected);
+    if (reconnected) session.seedOpponents(status.joined ?? []);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [roomCode]);
 
@@ -36,12 +39,12 @@ export function LiveGamePlaceholder({ roomCode }: { roomCode: string }) {
   // this socket the instant the reconnect handshake succeeds, well before
   // this component would otherwise call it "reconnected".
   useEffect(() => {
-    setConnectionRole(player.state.phase === 'reconnected' || player.state.phase === 'game' ? 'player' : 'none');
-  }, [player.state.phase, setConnectionRole]);
+    setConnectionRole(session.connectionState.phase === 'reconnected' || session.connectionState.phase === 'game' ? 'player' : 'none');
+  }, [session.connectionState.phase, setConnectionRole]);
 
   if (hadToken === null) return null;
 
-  if (hadToken && (player.state.phase === 'idle' || player.state.phase === 'connecting')) {
+  if (hadToken && (session.connectionState.phase === 'idle' || session.connectionState.phase === 'connecting')) {
     return (
       <div className={styles.roomWrap}>
         <div className="card panel"><p className="muted">Reconnecting…</p></div>
@@ -49,20 +52,20 @@ export function LiveGamePlaceholder({ roomCode }: { roomCode: string }) {
     );
   }
 
-  if (player.state.phase === 'reconnected' || player.state.phase === 'game') {
-    return <div className={styles.roomWrap}><ConnectedStub /></div>;
+  if (session.connectionState.phase === 'reconnected' || session.connectionState.phase === 'game') {
+    return <GameScreen session={session} />;
   }
 
   // No token existed at all, or the reconnect attempt was rejected
   // (phase 'unavailable') -- either way, fall back to offering to spectate.
-  const message = player.state.phase === 'unavailable'
-    ? player.state.message
+  const message = session.connectionState.phase === 'unavailable'
+    ? session.connectionState.message
     : 'A game is already in progress. You can watch as a spectator.';
 
   return (
     <div className={styles.roomWrap}>
       <div className="card panel"><p>{message}</p></div>
-      <SpectatorPanel roomCode={roomCode} />
+      <SpectatorPanel roomCode={roomCode} status={status} />
     </div>
   );
 }

@@ -4,10 +4,14 @@
 // network/messages.js (handleSpectatorMessage). No rejoin-token handling:
 // spectating has no seat to resume, you just watch again from wherever the
 // game currently is.
+//
+// See usePlayerConnection's identical top comment for why in-game messages
+// go through `onGameMessage` (a plain callback) rather than this hook's own
+// `state` -- same batching-loss risk, same fix.
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { connectSocket, type SocketConnection } from '../ws/socket';
 import {
-  resolveIdentifyAnswer, type IdentifyErrorMessage, type IdentifyMessage,
+  resolveIdentifyAnswer, type GenericGameMessage, type IdentifyErrorMessage, type IdentifyMessage,
   type JoinIdentity, type SpectatorSocketMessage,
 } from '../ws/protocol';
 
@@ -16,23 +20,31 @@ export type SpectatorConnectionState =
   | { phase: 'connecting' }
   | { phase: 'connected' }
   | { phase: 'rejected'; message: string }
-  | { phase: 'game'; message: SpectatorSocketMessage };
+  | { phase: 'game' };
+
+export interface UseSpectatorConnectionOptions {
+  /** See usePlayerConnection's identical option. */
+  onDisconnected?: () => void;
+  /** See usePlayerConnection's identical option -- never fires for
+   * IDENTIFY/IDENTIFY_ERROR/IDENTIFY_SUCCESS, which this hook already
+   * fully owns. */
+  onGameMessage?: (message: GenericGameMessage) => void;
+}
 
 export interface UseSpectatorConnectionResult {
   state: SpectatorConnectionState;
   join: (identity: JoinIdentity) => void;
+  /** Sends a message once connected (chat) -- a no-op with no live socket. */
+  send: (data: unknown) => void;
   disconnect: () => void;
 }
 
-/** `onDisconnected`: see usePlayerConnection's identical parameter -- the
- * server closes every spectator socket right after the game ends, which is
- * how the Room screen notices results are ready without its own poll tick. */
-export function useSpectatorConnection(roomCode: string, onDisconnected?: () => void): UseSpectatorConnectionResult {
+export function useSpectatorConnection(roomCode: string, options: UseSpectatorConnectionOptions = {}): UseSpectatorConnectionResult {
   const [state, setState] = useState<SpectatorConnectionState>({ phase: 'idle' });
   const connectionRef = useRef<SocketConnection | null>(null);
   const identityRef = useRef<JoinIdentity | null>(null);
-  const onDisconnectedRef = useRef(onDisconnected);
-  onDisconnectedRef.current = onDisconnected;
+  const optionsRef = useRef(options);
+  optionsRef.current = options;
 
   const teardown = useCallback(() => {
     connectionRef.current?.dispose();
@@ -64,15 +76,20 @@ export function useSpectatorConnection(roomCode: string, onDisconnected?: () => 
             setState({ phase: 'connected' });
             break;
           default:
-            setState({ phase: 'game', message: msg });
+            setState((prev) => (prev.phase === 'game' ? prev : { phase: 'game' }));
+            optionsRef.current.onGameMessage?.(msg as GenericGameMessage);
         }
       },
       onClose: () => {
         connectionRef.current = null;
-        onDisconnectedRef.current?.();
+        optionsRef.current.onDisconnected?.();
       },
     });
   }, [roomCode, teardown]);
 
-  return { state, join, disconnect: teardown };
+  const send = useCallback((data: unknown) => {
+    connectionRef.current?.send(data);
+  }, []);
+
+  return { state, join, send, disconnect: teardown };
 }
