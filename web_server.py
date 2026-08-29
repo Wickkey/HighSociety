@@ -842,10 +842,17 @@ def api_global_stats():
 
 @app.route("/api/games/<username>")
 def api_recent_games(username):
-    """'My Games' list + the home screen's Recent Games widget -- same
-    data, different caller. Always 200 with a (possibly empty) list, no
-    404: an empty list already means "nothing to show" to both callers."""
-    return jsonify({"games": game_history.get_recent_games(username)})
+    """'My Games' list (paginated -- see ?limit/?offset) + the home
+    screen's Recent Games widget (always just the first page, default
+    limit). Same data, different caller. Always 200 with a (possibly
+    empty) list, no 404: an empty list already means "nothing to show"
+    to both callers."""
+    try:
+        limit = int(request.args.get("limit", 20))
+        offset = int(request.args.get("offset", 0))
+    except (TypeError, ValueError):
+        return jsonify({"error": "limit/offset must be integers"}), 400
+    return jsonify(game_history.get_recent_games(username, limit=limit, offset=offset))
 
 
 @app.route("/api/games/detail/<int:game_id>")

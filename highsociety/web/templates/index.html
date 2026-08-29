@@ -77,7 +77,7 @@
       </button>
       <button type="button" class="sidebar-item" id="sidebar-host" title="Host a New Game">
         <svg class="sidebar-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <path d="M4 18h16l-1.3-7.5-4.2 3.5L12 8l-2.5 6-4.2-3.5L4 18z"/>
+          <path d="M4 18 L5 10 L8.5 13.5 L12 6.5 L15.5 13.5 L19 10 L20 18 Z"/>
           <path d="M6 21h12"/>
         </svg>
         <span class="sidebar-label">Host</span>
@@ -317,6 +317,7 @@
         <h2>My Games</h2>
         <div id="game-history-list" class="recent-games-list"></div>
         <p id="game-history-empty" class="muted hidden">No games recorded yet.</p>
+        <button type="button" id="btn-game-history-load-more" class="secondary standalone hidden">Load more</button>
       </div>
     </section>
 
@@ -420,7 +421,7 @@
         <button type="button" class="home-tile" data-home-target="host">
           <span class="home-tile-icon">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <path d="M4 18h16l-1.3-7.5-4.2 3.5L12 8l-2.5 6-4.2-3.5L4 18z"/>
+              <path d="M4 18 L5 10 L8.5 13.5 L12 6.5 L15.5 13.5 L19 10 L20 18 Z"/>
               <path d="M6 21h12"/>
             </svg>
           </span>
@@ -475,16 +476,30 @@
           <input type="number" id="host-seats" min="2" max="5" value="3">
         </label>
 
-        <label>Time per move
-          <select id="host-turn-time">
-            <option value="">No limit</option>
-            <option value="15">15 seconds</option>
-            <option value="30">30 seconds</option>
-            <option value="60">60 seconds</option>
-            <option value="90">90 seconds</option>
-            <option value="120">2 minutes</option>
-          </select>
-        </label>
+        <div class="field-block">
+          <span class="field-block-label">Time per move</span>
+          <!-- Replaces a <select> dropdown (chess.com-style button rows,
+               per FRONTEND_FIXES.MD) -- #host-turn-time stays a real,
+               unchanged hidden input underneath so onCreateGame's own
+               reading of "$('host-turn-time').value" needs no change at
+               all; onTimeLimitButtonClick (app.js) is the only thing new
+               that writes to it. -->
+          <div id="host-turn-time-buttons" class="time-limit-buttons">
+            <div class="time-limit-row">
+              <button type="button" class="time-limit-btn selected" data-value="">No limit</button>
+            </div>
+            <div class="time-limit-row">
+              <button type="button" class="time-limit-btn" data-value="15">15s</button>
+              <button type="button" class="time-limit-btn" data-value="30">30s</button>
+              <button type="button" class="time-limit-btn" data-value="60">60s</button>
+            </div>
+            <div class="time-limit-row">
+              <button type="button" class="time-limit-btn" data-value="90">90s</button>
+              <button type="button" class="time-limit-btn" data-value="120">2 min</button>
+            </div>
+          </div>
+          <input type="hidden" id="host-turn-time" value="">
+        </div>
         <p class="hint">If set, each player gets this many seconds per bid/pass before they're auto-passed.</p>
 
         <fieldset class="bot-mix">
@@ -511,17 +526,21 @@
           <p class="hint">At least one seat must be left for a human (you).</p>
         </fieldset>
 
-        <fieldset class="bot-mix">
-          <legend>Table settings</legend>
-          <div class="bot-row">
-            <label class="radio-label"><input type="checkbox" id="host-reveal-cards" checked> Show opponents' paintings</label>
-            <label class="radio-label"><input type="checkbox" id="host-show-logs" checked> Show game log</label>
-          </div>
-          <p class="hint">Fixed for the whole table once the game starts. Not adjustable mid-game.</p>
-        </fieldset>
-
         <details class="advanced">
           <summary>Advanced</summary>
+          <!-- Moved back into Advanced per FRONTEND_FIXES.MD (an earlier
+               round had promoted these out of Advanced specifically
+               because they're irreversible once the game starts -- see
+               issue #9's own history; the user's revisited call this
+               round is to fold them back in, defaults unchanged). -->
+          <fieldset class="bot-mix">
+            <legend>Table settings</legend>
+            <div class="bot-row">
+              <label class="radio-label"><input type="checkbox" id="host-reveal-cards" checked> Show opponents' paintings</label>
+              <label class="radio-label"><input type="checkbox" id="host-show-logs" checked> Show game log</label>
+            </div>
+            <p class="hint">Fixed for the whole table once the game starts. Not adjustable mid-game.</p>
+          </fieldset>
           <label>Bot think time (seconds)
             <input type="number" id="host-think-time" min="0" step="0.1" value="1.5">
           </label>

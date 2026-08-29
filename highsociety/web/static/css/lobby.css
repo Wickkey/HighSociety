@@ -286,7 +286,14 @@
 @media (max-width: 700px) {
   .home-tiles { grid-template-columns: 1fr; max-width: 420px; }
 }
-.home-recent-games { max-width: 780px; margin: 2rem auto 0; text-align: left; width: 100%; }
+/* Fades/rises in on appearing (same gentle vocabulary as the finished
+   screen's .standing-row -- not the bouncier .elo-reveal-pop, since this
+   isn't a celebratory moment) instead of the abrupt instant pop-in a
+   plain hidden->visible toggle gave it before -- reported as jarring
+   when navigating back to the home tile picker from Host/Join/Rules. */
+.home-recent-games { max-width: 780px; margin: 2rem auto 0; text-align: left; width: 100%; opacity: 0; transform: translateY(8px); }
+.home-recent-games.enter { animation: home-recent-games-in 0.4s ease forwards; }
+@keyframes home-recent-games-in { to { opacity: 1; transform: translateY(0); } }
 .home-recent-games h3 { margin: 0 0 0.8rem; }
 /* A real sticky footer -- position:fixed rather than a flex/margin-auto
    trick tied to one screen's internal layout, so it can never misalign
@@ -458,6 +465,14 @@ button.secondary.standalone { margin-top: 0.9rem; display: inline-block; }
   flex-wrap: wrap;
   margin-top: 0.9rem;
 }
+/* Root cause of the reported "Add" button sitting slightly low (see
+   .button-row's own identical override elsewhere for the same class of
+   bug): the generic `button { margin-top: 0.5rem }` rule is meant for
+   buttons stacked vertically, but bleeds into any button sitting inline
+   in a flex row -- align-items:center still centers the button's full
+   margin box, so that top margin visibly nudges it down relative to its
+   un-margined label sibling. */
+.bot-add-row button { margin-top: 0; }
 .bot-add-label {
   display: inline-flex;
   align-items: center;

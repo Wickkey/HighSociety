@@ -411,6 +411,19 @@ export function onChangeSpectateIdentity() {
   show($('spectate-identity-fields'));
 }
 
+// Chess.com-style button rows replacing the old <select> (see
+// FRONTEND_FIXES.MD) -- one click toggles which button carries
+// .selected and writes its value into the hidden #host-turn-time input
+// underneath, which onCreateGame already reads unchanged.
+export function onTimeLimitButtonClick(e) {
+  const btn = e.target.closest('.time-limit-btn');
+  if (!btn) return;
+  document.querySelectorAll('#host-turn-time-buttons .time-limit-btn').forEach((b) => {
+    b.classList.toggle('selected', b === btn);
+  });
+  $('host-turn-time').value = btn.dataset.value;
+}
+
 export async function onCreateGame() {
   if (ensureProfileSet()) return;
   hide($('host-error'));

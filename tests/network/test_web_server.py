@@ -1811,10 +1811,28 @@ def test_global_stats_endpoint_returns_counts(monkeypatch):
 
 
 def test_recent_games_endpoint_always_200s_with_a_list(monkeypatch):
-    monkeypatch.setattr(game_history, "get_recent_games", lambda username, **kw: [])
+    monkeypatch.setattr(game_history, "get_recent_games", lambda username, **kw: {"games": [], "has_more": False})
     resp = web_server.app.test_client().get("/api/games/nobody")
     assert resp.status_code == 200
-    assert resp.get_json() == {"games": []}
+    assert resp.get_json() == {"games": [], "has_more": False}
+
+
+def test_recent_games_endpoint_passes_through_limit_and_offset(monkeypatch):
+    seen = {}
+
+    def fake_get_recent_games(username, limit=20, offset=0):
+        seen["args"] = (username, limit, offset)
+        return {"games": [], "has_more": False}
+
+    monkeypatch.setattr(game_history, "get_recent_games", fake_get_recent_games)
+    resp = web_server.app.test_client().get("/api/games/alice?limit=10&offset=10")
+    assert resp.status_code == 200
+    assert seen["args"] == ("alice", 10, 10)
+
+
+def test_recent_games_endpoint_rejects_non_integer_pagination_params(monkeypatch):
+    resp = web_server.app.test_client().get("/api/games/alice?limit=abc")
+    assert resp.status_code == 400
 
 
 def test_game_detail_endpoint_404s_for_an_unknown_game(monkeypatch):

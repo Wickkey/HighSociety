@@ -765,22 +765,29 @@ def get_global_stats() -> Optional[dict]:
             conn.close()
 
 
-def get_recent_games(username: str, limit: int = 20) -> list:
+def get_recent_games(username: str, limit: int = 20, offset: int = 0) -> dict:
     """
-    This player's most recent games, newest first -- {"game_id",
+    This player's most recent games, newest first -- {"games": [{"game_id",
     "finished_at", "placement", "opponents": [{"name", "is_bot",
-    "is_winner"}, ...]} per game. `opponents` includes every seat at the
-    table (not just non-`username` ones) since the caller (the "My Games"
-    list, and the home screen's Recent Games widget) wants to show who
-    was actually at the table, this player included. [] on any failure or
-    no database -- an empty list renders as "no games yet", never an
-    error, for what's a purely supplementary view.
+    "is_winner"}, ...]}, ...], "has_more": bool}. `opponents` includes
+    every seat at the table (not just non-`username` ones) since the
+    caller (the "My Games" list, and the home screen's Recent Games
+    widget) wants to show who was actually at the table, this player
+    included. {"games": [], "has_more": False} on any failure or no
+    database -- an empty list renders as "no games yet", never an error,
+    for what's a purely supplementary view.
+
+    `offset`/`has_more` back "My Games"' pagination (see FRONTEND_FIXES.MD --
+    10 at a time rather than loading a player's whole history in one
+    shot): fetches one extra row beyond `limit` to know whether another
+    page exists, without a separate COUNT(*) query.
     """
+    empty = {"games": [], "has_more": False}
     if not is_configured():
-        return []
+        return empty
     ensure_schema()
     if not _schema_ready:
-        return []
+        return empty
     conn = None
     try:
         conn = _connect()
@@ -788,7 +795,7 @@ def get_recent_games(username: str, limit: int = 20) -> list:
             cur.execute("SELECT id FROM players WHERE username = %s", (username,))
             row = cur.fetchone()
             if row is None:
-                return []
+                return empty
             player_id = row[0]
             cur.execute(
                 """
@@ -797,13 +804,16 @@ def get_recent_games(username: str, limit: int = 20) -> list:
                 JOIN games g ON g.id = gr.game_id
                 WHERE gr.user_id = %s
                 ORDER BY g.finished_at DESC
-                LIMIT %s
+                LIMIT %s OFFSET %s
                 """,
-                (player_id, limit),
+                (player_id, limit + 1, offset),
             )
-            games = [{"game_id": r[0], "finished_at": r[1].isoformat(), "placement": r[2]} for r in cur.fetchall()]
+            rows = cur.fetchall()
+            has_more = len(rows) > limit
+            rows = rows[:limit]
+            games = [{"game_id": r[0], "finished_at": r[1].isoformat(), "placement": r[2]} for r in rows]
             if not games:
-                return []
+                return {"games": [], "has_more": False}
             game_ids = [g["game_id"] for g in games]
             # One query for every participant across all of these games,
             # rather than one query per game -- grouped back below.
@@ -823,10 +833,10 @@ def get_recent_games(username: str, limit: int = 20) -> list:
                     {"name": name, "is_bot": is_bot, "is_winner": is_winner})
             for g in games:
                 g["opponents"] = opponents_by_game.get(g["game_id"], [])
-            return games
+            return {"games": games, "has_more": has_more}
     except Exception as e:  # noqa: BLE001
         LoggingManager.warning(f"game_history.get_recent_games failed: {e}")
-        return []
+        return empty
     finally:
         if conn is not None:
             conn.close()

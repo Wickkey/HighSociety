@@ -1183,7 +1183,7 @@ def test_get_player_profile_stats_failure_is_caught_not_raised(database_url):
 # --------------------------------------------------- game history / leaderboard --
 
 def test_get_recent_games_is_empty_without_a_database(no_database_url):
-    assert game_history.get_recent_games("alice") == []
+    assert game_history.get_recent_games("alice") == {"games": [], "has_more": False}
 
 
 def test_get_recent_games_returns_none_for_an_unknown_username(database_url):
@@ -1192,7 +1192,7 @@ def test_get_recent_games_returns_none_for_an_unknown_username(database_url):
     cursor.fetchone.side_effect = None
     cursor.fetchone.return_value = None
     with patch.object(game_history, "_connect", return_value=conn):
-        assert game_history.get_recent_games("nobody") == []
+        assert game_history.get_recent_games("nobody") == {"games": [], "has_more": False}
 
 
 def test_get_recent_games_groups_opponents_by_game(database_url):
@@ -1212,19 +1212,40 @@ def test_get_recent_games_groups_opponents_by_game(database_url):
     ]
     with patch.object(game_history, "_connect", return_value=conn):
         result = game_history.get_recent_games("alice")
-    assert [g["game_id"] for g in result] == [100, 101]
-    assert result[0]["placement"] == 1
-    assert {o["name"] for o in result[0]["opponents"]} == {"alice", "Marble"}
-    assert result[1]["opponents"] == [
+    games = result["games"]
+    assert result["has_more"] is False
+    assert [g["game_id"] for g in games] == [100, 101]
+    assert games[0]["placement"] == 1
+    assert {o["name"] for o in games[0]["opponents"]} == {"alice", "Marble"}
+    assert games[1]["opponents"] == [
         {"name": "alice", "is_bot": False, "is_winner": False},
         {"name": "bob", "is_bot": False, "is_winner": True},
     ]
 
 
+def test_get_recent_games_sets_has_more_when_another_page_exists(database_url):
+    """Fetches limit+1 rows to know whether another page exists, without a
+    separate COUNT(*) -- see FRONTEND_FIXES.MD's 10-at-a-time pagination
+    ask. The (limit+1)th row is trimmed off the returned list."""
+    game_history._schema_ready = True
+    conn, cursor = _fake_connection()
+    cursor.fetchone.side_effect = None
+    cursor.fetchone.return_value = (1,)
+    finished_at = datetime.datetime(2026, 1, 1, tzinfo=datetime.timezone.utc)
+    cursor.fetchall.side_effect = [
+        [(100, finished_at, 1), (101, finished_at, 2)],  # limit=1 + 1 lookahead row = 2 rows back
+        [(100, "alice", False, True), (101, "alice", False, False)],
+    ]
+    with patch.object(game_history, "_connect", return_value=conn):
+        result = game_history.get_recent_games("alice", limit=1, offset=0)
+    assert result["has_more"] is True
+    assert [g["game_id"] for g in result["games"]] == [100]  # only `limit` rows kept
+
+
 def test_get_recent_games_failure_is_caught_not_raised(database_url):
     game_history._schema_ready = True
     with patch.object(game_history, "_connect", side_effect=RuntimeError("unreachable")):
-        assert game_history.get_recent_games("alice") == []
+        assert game_history.get_recent_games("alice") == {"games": [], "has_more": False}
 
 
 def test_get_game_detail_returns_none_for_an_unknown_game(database_url):
