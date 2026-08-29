@@ -33,7 +33,7 @@ how those fit together):
 import datetime
 import os
 import threading
-from typing import Optional
+from typing import Callable, Optional
 
 from highsociety.code.common import elo
 from highsociety.code.common.achievements import WIN_COUNT_MILESTONES
@@ -365,12 +365,64 @@ def is_configured() -> bool:
     return bool(os.environ.get(_DATABASE_URL_ENV))
 
 
+# Every one of this module's DB-touching functions used to open a brand
+# new psycopg2.connect() and close() it when done -- correct, but a full
+# TCP+TLS handshake to a remote Supabase Postgres instance on every
+# single call. Measured live: ~400ms just for that handshake, vs ~150ms
+# for the same query on a connection that's already open -- roughly 3.5x
+# slower than it needs to be, on every request. A small pool of already-
+# established connections, reused across calls, removes that handshake
+# from the common case entirely. minconn/maxconn are deliberately modest
+# (not "as many as this process could use") -- this app still uses
+# DATABASE_URL's *direct* connection (not Supabase's own pooler), which
+# has its own real ceiling on live connections that a future move to
+# their pooler endpoint would raise independently of this.
+_MIN_POOL_CONNECTIONS = 1
+_MAX_POOL_CONNECTIONS = 10
+_pool = None
+_pool_lock = threading.Lock()
+
+
+def _get_pool():
+    global _pool
+    if _pool is None:
+        with _pool_lock:
+            if _pool is None:
+                # Imported lazily (same reasoning as psycopg2 itself
+                # below): only actually needed once DATABASE_URL is set.
+                from psycopg2.pool import ThreadedConnectionPool
+                _pool = ThreadedConnectionPool(
+                    _MIN_POOL_CONNECTIONS, _MAX_POOL_CONNECTIONS, os.environ[_DATABASE_URL_ENV],
+                )
+    return _pool
+
+
 def _connect():
     # Imported lazily so merely importing this module (which web_server.py
     # does unconditionally) never fails for a dev/test setup that hasn't
     # installed psycopg2 — only actually needed once DATABASE_URL is set.
-    import psycopg2
-    return psycopg2.connect(os.environ[_DATABASE_URL_ENV])
+    import psycopg2  # noqa: F401 -- see _get_pool's own lazy psycopg2.pool import
+    return _get_pool().getconn()
+
+
+def _release_connection(conn) -> None:
+    """Returns `conn` to the pool instead of actually closing the
+    TCP+TLS connection -- every _connect() call site's own `finally`
+    block calls this now, in place of the plain conn.close() it used to
+    call before this module pooled connections. Every caller already
+    runs its queries inside a `with conn, conn.cursor() as cur:` block,
+    which commits (or rolls back, on an exception) before this ever
+    runs -- so the connection handed back here is always already in a
+    clean, reusable state, never mid-transaction.
+    """
+    pool = _get_pool()
+    if conn.closed:
+        # Already dead (e.g. the network dropped mid-query) -- tell the
+        # pool to discard it outright rather than recycling a connection
+        # nothing could actually use.
+        pool.putconn(conn, close=True)
+    else:
+        pool.putconn(conn)
 
 
 def ensure_schema() -> None:
@@ -416,7 +468,7 @@ def ensure_schema() -> None:
             LoggingManager.warning(f"game_history.ensure_schema failed, game history disabled: {e}")
         finally:
             if conn is not None:
-                conn.close()
+                _release_connection(conn)
 
 
 def _upsert_player(cur, username: str, display_name: str) -> tuple:
@@ -467,7 +519,7 @@ def find_player_by_google_id(google_id: str) -> Optional[dict]:
         return None
     finally:
         if conn is not None:
-            conn.close()
+            _release_connection(conn)
 
 
 def username_is_taken(username: str) -> bool:
@@ -500,10 +552,108 @@ def username_is_taken(username: str) -> bool:
         return True
     finally:
         if conn is not None:
-            conn.close()
+            _release_connection(conn)
 
 
 _DEFAULT_ELO = 1000
+
+
+class PlayerSession:
+    """
+    Per-username, in-memory cache of {player_id, elo} -- today just enough
+    to make elo reads instant, with room to grow (a last_seen_at for
+    daily-visit tracking, a reward-coin balance, ...) later without new
+    plumbing per feature; see this module's own history for the actual
+    design discussion this came out of.
+
+    The database is always the source of truth. This is a read-through/
+    write-through cache in front of it, never an independent store: a
+    session is only ever created from a genuine DB read (get_player_
+    session, on a real cache miss), and only ever updated in place from a
+    genuine DB write (record_finished_game's own elo update, right after
+    it commits). Deliberately *not* tied to any live connection or
+    per-tab session -- any ordinary request that already names a
+    username (a profile view, a matchmaking join, a game finishing) is a
+    fine moment to populate or refresh this. A server restart just wipes
+    it; the next request for any given username pays one real DB read
+    and the process is right back to being fully warm for that username,
+    same as day one -- there's nothing to migrate or persist about the
+    cache itself.
+    """
+    __slots__ = ("player_id", "elo")
+
+    def __init__(self, player_id: int, elo: int):
+        self.player_id = player_id
+        self.elo = elo
+
+
+_player_sessions: dict = {}
+_player_sessions_lock = threading.Lock()
+
+
+def _peek_player_session(username: str) -> Optional[PlayerSession]:
+    """Cache-only lookup, no DB fallback -- for a caller (get_player_
+    profile_stats) that's about to open its own connection regardless and
+    wants to skip a redundant id/elo query only on an actual hit, not pay
+    for a second connection just to check."""
+    with _player_sessions_lock:
+        return _player_sessions.get(username)
+
+
+def _cache_player_session(username: str, player_id: int, elo: int) -> None:
+    """Populates the cache from a row a caller just read anyway (never a
+    dedicated read of its own) -- setdefault so a slower concurrent
+    caller for the same username can't clobber a fresher entry another
+    thread already installed."""
+    with _player_sessions_lock:
+        _player_sessions.setdefault(username, PlayerSession(player_id, elo))
+
+
+def _refresh_cached_elo(username: str, elo: int) -> None:
+    """Called the instant record_finished_game actually commits a new
+    elo for `username` -- keeps an already-warm cache entry from ever
+    going stale, without waiting on anything to expire. A no-op if this
+    process has never cached this username (nothing to refresh; the next
+    real read will just populate it fresh from the database, which
+    already reflects this write)."""
+    with _player_sessions_lock:
+        session = _player_sessions.get(username)
+        if session is not None:
+            session.elo = elo
+
+
+def get_player_session(username: str) -> Optional[PlayerSession]:
+    """The cached (player_id, elo) pair for `username`, doing exactly one
+    real DB read the first time this process ever needs it and reusing
+    that from then on (see PlayerSession's own docstring for the full
+    read-through/write-through contract). None only if the username
+    genuinely has no players row yet, there's no database configured, or
+    the lookup itself errors.
+    """
+    session = _peek_player_session(username)
+    if session is not None:
+        return session
+    if not is_configured():
+        return None
+    ensure_schema()
+    if not _schema_ready:
+        return None
+    conn = None
+    try:
+        conn = _connect()
+        with conn, conn.cursor() as cur:
+            cur.execute("SELECT id, elo FROM players WHERE username = %s", (username,))
+            row = cur.fetchone()
+            if row is None:
+                return None
+            _cache_player_session(username, row[0], row[1])
+            return _peek_player_session(username)
+    except Exception as e:  # noqa: BLE001
+        LoggingManager.warning(f"game_history.get_player_session failed: {e}")
+        return None
+    finally:
+        if conn is not None:
+            _release_connection(conn)
 
 
 def get_player_elo(username: str) -> int:
@@ -516,25 +666,13 @@ def get_player_elo(username: str) -> int:
     the lookup itself errors. Matchmaking degrades gracefully to "everyone
     is equal" in every one of those cases rather than failing to queue at
     all.
+
+    Routed through get_player_session's cache -- a warm entry (this
+    username has been read or written before in this process) answers
+    with no database call at all.
     """
-    if not is_configured():
-        return _DEFAULT_ELO
-    ensure_schema()
-    if not _schema_ready:
-        return _DEFAULT_ELO
-    conn = None
-    try:
-        conn = _connect()
-        with conn, conn.cursor() as cur:
-            cur.execute("SELECT elo FROM players WHERE username = %s", (username,))
-            row = cur.fetchone()
-            return row[0] if row is not None else _DEFAULT_ELO
-    except Exception as e:  # noqa: BLE001
-        LoggingManager.warning(f"game_history.get_player_elo failed: {e}")
-        return _DEFAULT_ELO
-    finally:
-        if conn is not None:
-            conn.close()
+    session = get_player_session(username)
+    return session.elo if session is not None else _DEFAULT_ELO
 
 
 def get_player_achievements(username: str) -> list:
@@ -567,7 +705,7 @@ def get_player_achievements(username: str) -> list:
         return []
     finally:
         if conn is not None:
-            conn.close()
+            _release_connection(conn)
 
 
 def get_player_profile_stats(username: str) -> Optional[dict]:
@@ -582,13 +720,15 @@ def get_player_profile_stats(username: str) -> Optional[dict]:
     "played zero games" for the caller, though today's UI renders both as
     an empty profile either way.
 
-    `elo` is included here (not left to a separate get_player_elo() call)
-    specifically so /api/profile can answer with exactly one database
-    connection instead of two -- each _connect() call is a real TCP+TLS
-    handshake to a remote Supabase Postgres instance, not a local
-    round-trip, and this endpoint was visibly slow to load partly because
-    of that redundant second connection. get_player_elo() itself stays
-    (matchmaking.py calls it on its own, unrelated to this endpoint).
+    `elo`/`player_id` come from the PlayerSession cache (see its own
+    docstring) when this username is already warm in this process --
+    zero extra database round trips for that part on a cache hit, on top
+    of the original "one connection instead of two" fix this docstring
+    used to describe. On a cold cache, this still reads id+elo in the
+    very same connection as the two queries below (matching that
+    original fix exactly) rather than paying for get_player_session's
+    own separate connection, then populates the cache from that same row
+    so the *next* call is warm.
 
     The three averages come from `game_results` (added after
     `player_games`) rather than `player_games` itself -- a player whose
@@ -602,15 +742,20 @@ def get_player_profile_stats(username: str) -> Optional[dict]:
     ensure_schema()
     if not _schema_ready:
         return None
+    cached = _peek_player_session(username)
     conn = None
     try:
         conn = _connect()
         with conn, conn.cursor() as cur:
-            cur.execute("SELECT id, elo FROM players WHERE username = %s", (username,))
-            row = cur.fetchone()
-            if row is None:
-                return None
-            player_id, elo = row
+            if cached is not None:
+                player_id, elo = cached.player_id, cached.elo
+            else:
+                cur.execute("SELECT id, elo FROM players WHERE username = %s", (username,))
+                row = cur.fetchone()
+                if row is None:
+                    return None
+                player_id, elo = row
+                _cache_player_session(username, player_id, elo)
             cur.execute(
                 "SELECT count(*), count(*) FILTER (WHERE is_winner) FROM player_games WHERE player_id = %s",
                 (player_id,),
@@ -634,7 +779,7 @@ def get_player_profile_stats(username: str) -> Optional[dict]:
         return None
     finally:
         if conn is not None:
-            conn.close()
+            _release_connection(conn)
 
 
 def get_global_stats() -> Optional[dict]:
@@ -669,25 +814,32 @@ def get_global_stats() -> Optional[dict]:
         return None
     finally:
         if conn is not None:
-            conn.close()
+            _release_connection(conn)
 
 
-def get_recent_games(username: str, limit: int = 20) -> list:
+def get_recent_games(username: str, limit: int = 20, offset: int = 0) -> dict:
     """
-    This player's most recent games, newest first -- {"game_id",
+    This player's most recent games, newest first -- {"games": [{"game_id",
     "finished_at", "placement", "opponents": [{"name", "is_bot",
-    "is_winner"}, ...]} per game. `opponents` includes every seat at the
-    table (not just non-`username` ones) since the caller (the "My Games"
-    list, and the home screen's Recent Games widget) wants to show who
-    was actually at the table, this player included. [] on any failure or
-    no database -- an empty list renders as "no games yet", never an
-    error, for what's a purely supplementary view.
+    "is_winner"}, ...]}, ...], "has_more": bool}. `opponents` includes
+    every seat at the table (not just non-`username` ones) since the
+    caller (the "My Games" list, and the home screen's Recent Games
+    widget) wants to show who was actually at the table, this player
+    included. {"games": [], "has_more": False} on any failure or no
+    database -- an empty list renders as "no games yet", never an error,
+    for what's a purely supplementary view.
+
+    `offset`/`has_more` back "My Games"' pagination (see FRONTEND_FIXES.MD --
+    10 at a time rather than loading a player's whole history in one
+    shot): fetches one extra row beyond `limit` to know whether another
+    page exists, without a separate COUNT(*) query.
     """
+    empty = {"games": [], "has_more": False}
     if not is_configured():
-        return []
+        return empty
     ensure_schema()
     if not _schema_ready:
-        return []
+        return empty
     conn = None
     try:
         conn = _connect()
@@ -695,7 +847,7 @@ def get_recent_games(username: str, limit: int = 20) -> list:
             cur.execute("SELECT id FROM players WHERE username = %s", (username,))
             row = cur.fetchone()
             if row is None:
-                return []
+                return empty
             player_id = row[0]
             cur.execute(
                 """
@@ -704,13 +856,16 @@ def get_recent_games(username: str, limit: int = 20) -> list:
                 JOIN games g ON g.id = gr.game_id
                 WHERE gr.user_id = %s
                 ORDER BY g.finished_at DESC
-                LIMIT %s
+                LIMIT %s OFFSET %s
                 """,
-                (player_id, limit),
+                (player_id, limit + 1, offset),
             )
-            games = [{"game_id": r[0], "finished_at": r[1].isoformat(), "placement": r[2]} for r in cur.fetchall()]
+            rows = cur.fetchall()
+            has_more = len(rows) > limit
+            rows = rows[:limit]
+            games = [{"game_id": r[0], "finished_at": r[1].isoformat(), "placement": r[2]} for r in rows]
             if not games:
-                return []
+                return {"games": [], "has_more": False}
             game_ids = [g["game_id"] for g in games]
             # One query for every participant across all of these games,
             # rather than one query per game -- grouped back below.
@@ -730,13 +885,13 @@ def get_recent_games(username: str, limit: int = 20) -> list:
                     {"name": name, "is_bot": is_bot, "is_winner": is_winner})
             for g in games:
                 g["opponents"] = opponents_by_game.get(g["game_id"], [])
-            return games
+            return {"games": games, "has_more": has_more}
     except Exception as e:  # noqa: BLE001
         LoggingManager.warning(f"game_history.get_recent_games failed: {e}")
-        return []
+        return empty
     finally:
         if conn is not None:
-            conn.close()
+            _release_connection(conn)
 
 
 def get_game_detail(game_id: int) -> Optional[dict]:
@@ -792,7 +947,7 @@ def get_game_detail(game_id: int) -> Optional[dict]:
         return None
     finally:
         if conn is not None:
-            conn.close()
+            _release_connection(conn)
 
 
 def get_leaderboard(limit: int = 50) -> list:
@@ -834,7 +989,7 @@ def get_leaderboard(limit: int = 50) -> list:
         return []
     finally:
         if conn is not None:
-            conn.close()
+            _release_connection(conn)
 
 
 def get_rating_history(username: str) -> list:
@@ -870,7 +1025,7 @@ def get_rating_history(username: str) -> list:
         return []
     finally:
         if conn is not None:
-            conn.close()
+            _release_connection(conn)
 
 
 def create_google_player(google_id: str, email: str, username: str, display_name: str) -> bool:
@@ -908,7 +1063,7 @@ def create_google_player(google_id: str, email: str, username: str, display_name
         return False
     finally:
         if conn is not None:
-            conn.close()
+            _release_connection(conn)
 
 
 def create_guest_player(username: str) -> bool:
@@ -936,7 +1091,7 @@ def create_guest_player(username: str) -> bool:
         return False
     finally:
         if conn is not None:
-            conn.close()
+            _release_connection(conn)
 
 
 def rename_player(old_username: str, new_username: str) -> bool:
@@ -977,7 +1132,7 @@ def rename_player(old_username: str, new_username: str) -> bool:
         return False
     finally:
         if conn is not None:
-            conn.close()
+            _release_connection(conn)
 
 
 def _record_auction_rounds(cur, game_id: int, auction_rounds: list, player_id_by_username: dict) -> None:
@@ -993,7 +1148,34 @@ def _record_auction_rounds(cur, game_id: int, auction_rounds: list, player_id_by
     missing or mapping to None (a bot with no known difficulty) means that
     round/action simply can't be attributed to anyone, so it's skipped
     rather than written with a dangling/NULL player_id.
+
+    Batched into a handful of multi-row statements rather than one query
+    per round/action -- confirmed live (see the post-game Elo reveal's own
+    investigation) that the naive one-row-at-a-time version made this
+    function alone take ~11 seconds for an ordinary short game (100+
+    sequential round trips to Supabase, each paying full network latency),
+    which blew straight through record_finished_game_async's caller's
+    ~5.6s reveal-polling budget even though the actual rating write next
+    to it finishes in ~1s. Built by hand (a "(%s,%s,...),(%s,%s,...)"
+    placeholder string plus one flat params list) rather than psycopg2.
+    extras.execute_values, deliberately: execute_values builds its batched
+    SQL via cur.mogrify(), which needs a real psycopg2 cursor (mogrify
+    needs the connection's encoding, among other things) -- this repo's
+    whole test suite exercises this module against a plain mocked cursor
+    (see test_game_history.py's _fake_connection), so a hand-built
+    placeholder string that only ever calls the already-mocked cur.execute/
+    cur.fetchone keeps this testable without a real database.
     """
+    if not auction_rounds:
+        return
+
+    # This SELECT stays one-per-round (not batched) -- there are only ever
+    # as many rounds as cards in the deck (a couple dozen at most), so this
+    # was never the source of the real slowness; the round_players/
+    # game_actions writes below, one of which fires per player per round
+    # and the other per logged action per round, are what multiply into
+    # 100+ round trips for an ordinary game.
+    round_rows = []
     for record in auction_rounds:
         card = record["card"]
         # Matched by (type, value), not a stored card identity -- for a
@@ -1015,18 +1197,31 @@ def _record_auction_rounds(cur, game_id: int, auction_rounds: list, player_id_by
         winning_bid = None
         if recipient and record.get("auction_type") == "normal":
             winning_bid = (record.get("money_spent") or {}).get(recipient)
+        round_rows.append((game_id, record["round_number"], card_id, winner_id, winning_bid,
+                            record.get("started_at"), record.get("ended_at")))
 
-        cur.execute(
-            """
-            INSERT INTO game_rounds (game_id, round_number, card_id, winner_id, winning_bid, started_at, ended_at)
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
-            RETURNING id
-            """,
-            (game_id, record["round_number"], card_id, winner_id, winning_bid,
-             record.get("started_at"), record.get("ended_at")),
-        )
-        round_id = cur.fetchone()[0]
+    # One INSERT for every round's own row, in one round trip. Postgres
+    # returns RETURNING rows in the same order as the VALUES list for a
+    # plain multi-row INSERT like this, so reading them back with one
+    # fetchone() per row (in input order, below) safely zips round_ids
+    # back against auction_rounds by position -- and, unlike fetchall(),
+    # matches exactly how _fake_connection's mocked cursor already
+    # behaves (a fresh incrementing id per fetchone() call), so no test
+    # infrastructure needs to change for this.
+    cur.execute(
+        f"""
+        INSERT INTO game_rounds (game_id, round_number, card_id, winner_id, winning_bid, started_at, ended_at)
+        VALUES {_values_placeholder(len(round_rows), 7)}
+        RETURNING id
+        """,
+        _flatten(round_rows),
+    )
+    round_ids = [cur.fetchone()[0] for _ in round_rows]
 
+    round_player_rows = []
+    action_rows = []
+    for record, round_id in zip(auction_rounds, round_ids):
+        recipient = record.get("recipient")
         starting_money = record.get("starting_money") or {}
         ending_money = record.get("ending_money") or {}
         money_spent = record.get("money_spent") or {}
@@ -1034,39 +1229,62 @@ def _record_auction_rounds(cur, game_id: int, auction_rounds: list, player_id_by
             player_id = player_id_by_username.get(username)
             if player_id is None:
                 continue
-            # Two bot seats of the same difficulty share one player_id (the
-            # bots table's whole design -- see record_finished_game's own
-            # docstring), so this table's (round_id, player_id) primary key
-            # can collide within a single round -- confirmed live: any real
-            # game with 2+ same-difficulty bots crashed this whole function
-            # (and rolled back the games/player_games row along with it,
-            # since it's all one transaction) the instant a round included
-            # both seats. DO NOTHING keeps whichever seat's row landed
-            # first; losing the second seat's per-round money snapshot here
-            # is far cheaper than losing the entire game's history.
-            cur.execute(
-                """
-                INSERT INTO round_players
-                    (game_id, round_id, player_id, starting_money, ending_money, amount_paid, result)
-                VALUES (%s, %s, %s, %s, %s, %s, %s)
-                ON CONFLICT (round_id, player_id) DO NOTHING
-                """,
-                (game_id, round_id, player_id, starting_money.get(username), ending_money.get(username),
-                 money_spent.get(username), "won" if username == recipient else "lost"),
-            )
+            round_player_rows.append((game_id, round_id, player_id, starting_money.get(username),
+                                       ending_money.get(username), money_spent.get(username),
+                                       "won" if username == recipient else "lost"))
 
         for event in record.get("events") or []:
             player_id = player_id_by_username.get(event["player"])
             if player_id is None:
                 continue
-            cur.execute(
-                """
-                INSERT INTO game_actions (game_id, player_id, action_type, amount, round, timestamp)
-                VALUES (%s, %s, %s, %s, %s, %s)
-                """,
-                (game_id, player_id, event["action"].upper(), event.get("amount"),
-                 record["round_number"], event.get("timestamp")),
-            )
+            action_rows.append((game_id, player_id, event["action"].upper(), event.get("amount"),
+                                 record["round_number"], event.get("timestamp")))
+
+    if round_player_rows:
+        # Two bot seats of the same difficulty share one player_id (the
+        # bots table's whole design -- see record_finished_game's own
+        # docstring), so this table's (round_id, player_id) primary key
+        # can collide within a single round -- confirmed live: any real
+        # game with 2+ same-difficulty bots crashed this whole function
+        # (and rolled back the games/player_games row along with it,
+        # since it's all one transaction) the instant a round included
+        # both seats. DO NOTHING keeps whichever seat's row landed first
+        # within this batch; losing the second seat's per-round money
+        # snapshot here is far cheaper than losing the entire game's
+        # history.
+        cur.execute(
+            f"""
+            INSERT INTO round_players
+                (game_id, round_id, player_id, starting_money, ending_money, amount_paid, result)
+            VALUES {_values_placeholder(len(round_player_rows), 7)}
+            ON CONFLICT (round_id, player_id) DO NOTHING
+            """,
+            _flatten(round_player_rows),
+        )
+
+    if action_rows:
+        cur.execute(
+            f"""
+            INSERT INTO game_actions (game_id, player_id, action_type, amount, round, timestamp)
+            VALUES {_values_placeholder(len(action_rows), 6)}
+            """,
+            _flatten(action_rows),
+        )
+
+
+def _values_placeholder(num_rows: int, num_columns: int) -> str:
+    """"(%s,%s,...),(%s,%s,...)" -- num_rows groups of num_columns
+    placeholders each, for a hand-batched multi-row INSERT ... VALUES.
+    See _record_auction_rounds's own docstring on why this is built by
+    hand instead of psycopg2.extras.execute_values."""
+    row = "(" + ",".join(["%s"] * num_columns) + ")"
+    return ",".join([row] * num_rows)
+
+
+def _flatten(rows: list) -> list:
+    """[(a, b), (c, d)] -> [a, b, c, d] -- the flat params list a
+    _values_placeholder-built query's positional %s placeholders expect."""
+    return [value for row in rows for value in row]
 
 
 def record_finished_game(*, room_code: str, seats: int, bot_mix: list,
@@ -1074,8 +1292,17 @@ def record_finished_game(*, room_code: str, seats: int, bot_mix: list,
                           participants: list, achievement_unlocks: Optional[dict] = None,
                           host_username: Optional[str] = None, time_control: Optional[int] = None,
                           is_finished_successfully: bool = True,
-                          auction_rounds: Optional[list] = None) -> None:
+                          auction_rounds: Optional[list] = None) -> dict:
     """
+    Returns {rating_key: {"old_rating", "new_rating", "rating_change"}} for
+    every participant whose rating actually changed this game (a human's
+    rating_key is their real username -- see game_username's own docstring
+    below) -- empty on any early-return/no-op/failure path. Used by
+    web_server.py to surface the finished screen's post-game Elo reveal
+    without the caller needing its own copy of the Elo math or a second
+    DB round-trip; every other side effect below still happens regardless
+    of whether the caller reads this.
+
     `participants`: one dict per seat, already reduced to exactly what this
     module needs — see web_server.py's call site for how it's built from
     PlayGame.final_standings/GameRoom.players. Keeping that translation in
@@ -1144,11 +1371,12 @@ def record_finished_game(*, room_code: str, seats: int, bot_mix: list,
     that predates this or a crashed game with no history) just skips that
     entirely; nothing else here depends on it.
     """
+    elo_changes: dict = {}
     if not is_configured():
-        return
+        return elo_changes
     ensure_schema()
     if not _schema_ready:
-        return  # schema setup already failed and logged a warning above
+        return elo_changes  # schema setup already failed and logged a warning above
     achievement_unlocks = achievement_unlocks or {}
     conn = None
     try:
@@ -1205,10 +1433,18 @@ def record_finished_game(*, room_code: str, seats: int, bot_mix: list,
 
             rated_standings = []  # {"username", "points", "rating"} -- see elo.compute_elo_deltas
             rated_player_ids = {}  # username -> player_id, for writing the delta back below
-            elo_before_by_username = {}  # username -> rating before this game, for the ratings audit row
+            # player_id (not rating_key) -- every rating_key sharing a
+            # player_id (see the bot-seat-sharing comment below) reads the
+            # exact same elo at this point anyway, so one dict keyed by the
+            # real identity is enough for the ratings audit row.
+            elo_before_by_player_id = {}
             seat_player_ids = []  # in participant order -- becomes player_1..player_5 below
             winner_player_id = None  # first winner only -- see this function's own docstring on ties
             player_id_by_game_username = {}  # real per-game username (bot or human) -> player_id
+            # Real, stable DB usernames only (never a bot's per-game display
+            # name, which isn't a stable identity -- see the PlayerSession
+            # cache refresh below, right before this function returns).
+            real_username_by_player_id = {}
             for index, p in enumerate(participants):
                 player_id = None
                 google_id = None
@@ -1233,6 +1469,7 @@ def record_finished_game(*, room_code: str, seats: int, bot_mix: list,
                             player_id, elo_before = row
                 else:
                     player_id, google_id, elo_before = _upsert_player(cur, p["username"], p["name"])
+                    real_username_by_player_id[player_id] = p["username"]
                     cur.execute(
                         "UPDATE players SET games_played = games_played + 1, games_won = games_won + %s WHERE id = %s",
                         (1 if p["is_winner"] else 0, player_id),
@@ -1276,7 +1513,7 @@ def record_finished_game(*, room_code: str, seats: int, bot_mix: list,
                     rating_key = p.get("game_username") or p["username"]
                     rated_standings.append({"username": rating_key, "points": p["points"], "rating": elo_before})
                     rated_player_ids[rating_key] = player_id
-                    elo_before_by_username[rating_key] = elo_before
+                    elo_before_by_player_id[player_id] = elo_before
 
                 # Achievements stay strictly human-only -- a bot must never
                 # unlock one, regardless of the elo change above.
@@ -1299,18 +1536,65 @@ def record_finished_game(*, room_code: str, seats: int, bot_mix: list,
                             (player_id, achievement_id),
                         )
 
-            for username, delta in elo.compute_elo_deltas(rated_standings).items():
-                if delta:
-                    player_id = rated_player_ids[username]
-                    old_rating = elo_before_by_username[username]
-                    cur.execute("UPDATE players SET elo = elo + %s WHERE id = %s", (delta, player_id))
+            # Two or more bot seats of the same difficulty share one
+            # player_id (the bots table's whole design), so rated_standings
+            # can carry multiple distinct rating_keys that all resolve to
+            # the same real identity here. compute_elo_deltas has no idea
+            # they're the same player -- it computes each seat's delta as
+            # if it were a genuinely separate participant, which would
+            # double- (or triple-, ...) count that identity's rating swing
+            # if applied as-is: confirmed live, a game with 2 shared-
+            # identity bot seats moved the bot's elo by the SUM of both
+            # seats' independent deltas, and wrote two ratings rows that
+            # both claimed the same stale "before" value despite the first
+            # update having already landed. Grouped by player_id and
+            # averaged (not summed) below so one identity occupying N
+            # seats in one game gets exactly one, roughly-N-times-smaller-
+            # per-seat, correctly-audited rating change -- not N times the
+            # swing a single seat would have earned alone.
+            deltas_by_player_id: dict[int, list[int]] = {}
+            rating_keys_by_player_id: dict[int, list[str]] = {}
+            for rating_key, delta in elo.compute_elo_deltas(rated_standings).items():
+                player_id = rated_player_ids[rating_key]
+                deltas_by_player_id.setdefault(player_id, []).append(delta)
+                rating_keys_by_player_id.setdefault(player_id, []).append(rating_key)
+            # (username, new_rating) pairs to refresh in the PlayerSession
+            # cache -- collected here but deliberately not applied until
+            # after this whole transaction actually commits (see below):
+            # refreshing the in-memory cache mid-transaction would leave it
+            # showing a change that a later failure in this same block (e.g.
+            # _record_auction_rounds) could still roll back, which is
+            # exactly the kind of cache/database disagreement this cache
+            # can't afford to have. Bots are skipped -- their "username" is
+            # an ephemeral per-game display name, not a stable identity
+            # anything would ever look up again.
+            cache_refreshes = []
+            for player_id, seat_deltas in deltas_by_player_id.items():
+                combined_delta = round(sum(seat_deltas) / len(seat_deltas))
+                if combined_delta:
+                    old_rating = elo_before_by_player_id[player_id]
+                    new_rating = old_rating + combined_delta
+                    cur.execute("UPDATE players SET elo = elo + %s WHERE id = %s", (combined_delta, player_id))
                     cur.execute(
                         """
                         INSERT INTO ratings (user_id, game_id, old_rating, new_rating, rating_change)
                         VALUES (%s, %s, %s, %s, %s)
                         """,
-                        (player_id, game_id, old_rating, old_rating + delta, delta),
+                        (player_id, game_id, old_rating, new_rating, combined_delta),
                     )
+                    real_username = real_username_by_player_id.get(player_id)
+                    if real_username is not None:
+                        cache_refreshes.append((real_username, new_rating))
+                    # Keyed by rating_key (a human's real username, see
+                    # game_username's own docstring) so the caller
+                    # (web_server.py's post-game reveal) can look a
+                    # specific player up directly by the same username it
+                    # already knows client-side -- see this function's own
+                    # docstring for the full return-value shape.
+                    for rating_key in rating_keys_by_player_id[player_id]:
+                        elo_changes[rating_key] = {
+                            "old_rating": old_rating, "new_rating": new_rating, "rating_change": combined_delta,
+                        }
 
             seat_columns = (seat_player_ids + [None] * 5)[:5]
             cur.execute(
@@ -1326,12 +1610,19 @@ def record_finished_game(*, room_code: str, seats: int, bot_mix: list,
                 _record_auction_rounds(cur, game_id, auction_rounds, player_id_by_game_username)
     except Exception as e:  # noqa: BLE001 — see record_finished_game_async's docstring
         LoggingManager.warning(f"game_history.record_finished_game failed: {e}")
+        return {}
     finally:
         if conn is not None:
-            conn.close()
+            _release_connection(conn)
+    # Only reached once the transaction above has actually committed
+    # (the `with conn` block's own clean exit) -- see cache_refreshes'
+    # own comment on why this can't happen any earlier.
+    for username, new_rating in cache_refreshes:
+        _refresh_cached_elo(username, new_rating)
+    return elo_changes
 
 
-def record_finished_game_async(**kwargs) -> None:
+def record_finished_game_async(on_complete: Optional[Callable[[dict], None]] = None, **kwargs) -> None:
     """
     Fire-and-forget wrapper — the only entry point web_server.py's actual
     game-end path calls, since it must never wait on (or fail because of) a
@@ -1339,8 +1630,23 @@ def record_finished_game_async(**kwargs) -> None:
     ever have by this point, so nothing time-sensitive is being raced here:
     worst case, this game's row shows up a moment late or not at all
     (logged), while every player-facing message still goes out on schedule.
+
+    `on_complete`, if given, is called from the background thread with
+    record_finished_game's own return value (or `{}` if there's no
+    database configured at all, matching what record_finished_game itself
+    returns for every other no-op path) once the write actually finishes
+    -- a notification, not something this function waits on. Lets a caller
+    (the post-game Elo reveal) find out the real Elo change without
+    duplicating the Elo math or adding a second DB round-trip of its own.
     """
     if not is_configured():
+        if on_complete:
+            on_complete({})
         return
-    threading.Thread(target=record_finished_game, kwargs=kwargs, daemon=True,
-                      name="GameHistoryWrite").start()
+
+    def _run():
+        result = record_finished_game(**kwargs)
+        if on_complete:
+            on_complete(result)
+
+    threading.Thread(target=_run, daemon=True, name="GameHistoryWrite").start()

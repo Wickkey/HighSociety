@@ -162,6 +162,27 @@
 }
 .account-edit-username-btn svg { width: 15px; height: 15px; }
 .account-edit-username-btn:hover { color: var(--accent-strong); background: var(--accent-soft); }
+/* No prior indication anywhere in the app that a signed-in account is
+   actually Google-linked (chess.com's "Connected Accounts" panel was
+   the reference) -- a small pill under the name, toggled in
+   showAccountScreen() alongside the existing Unrated/numeric Elo
+   branch. White background specifically for the Google badge (not the
+   parchment tone everything else uses) since Google's own brand marks
+   are designed against a plain white/light surface. */
+.account-connection-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-top: 0.3rem;
+  padding: 0.2rem 0.6rem 0.2rem 0.45rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  width: fit-content;
+}
+.account-connection-badge-google { background: #fff; color: #3c4043; border: 1px solid var(--panel-border); }
+.account-connection-badge-google svg { width: 14px; height: 14px; flex-shrink: 0; }
+.account-connection-badge-guest { background: var(--panel-bg-soft); color: var(--muted); border: 1px solid var(--panel-border); }
 /* The one number this whole screen exists to show off -- see
    account.js's loadAccountStats -- previously a single muted inline
    word easy to miss entirely. */
@@ -265,7 +286,14 @@
 @media (max-width: 700px) {
   .home-tiles { grid-template-columns: 1fr; max-width: 420px; }
 }
-.home-recent-games { max-width: 780px; margin: 2rem auto 0; text-align: left; width: 100%; }
+/* Fades/rises in on appearing (same gentle vocabulary as the finished
+   screen's .standing-row -- not the bouncier .elo-reveal-pop, since this
+   isn't a celebratory moment) instead of the abrupt instant pop-in a
+   plain hidden->visible toggle gave it before -- reported as jarring
+   when navigating back to the home tile picker from Host/Join/Rules. */
+.home-recent-games { max-width: 780px; margin: 2rem auto 0; text-align: left; width: 100%; opacity: 0; transform: translateY(8px); }
+.home-recent-games.enter { animation: home-recent-games-in 0.4s ease forwards; }
+@keyframes home-recent-games-in { to { opacity: 1; transform: translateY(0); } }
 .home-recent-games h3 { margin: 0 0 0.8rem; }
 /* A real sticky footer -- position:fixed rather than a flex/margin-auto
    trick tied to one screen's internal layout, so it can never misalign
@@ -437,6 +465,14 @@ button.secondary.standalone { margin-top: 0.9rem; display: inline-block; }
   flex-wrap: wrap;
   margin-top: 0.9rem;
 }
+/* Root cause of the reported "Add" button sitting slightly low (see
+   .button-row's own identical override elsewhere for the same class of
+   bug): the generic `button { margin-top: 0.5rem }` rule is meant for
+   buttons stacked vertically, but bleeds into any button sitting inline
+   in a flex row -- align-items:center still centers the button's full
+   margin box, so that top margin visibly nudges it down relative to its
+   un-margined label sibling. */
+.bot-add-row button { margin-top: 0; }
 .bot-add-label {
   display: inline-flex;
   align-items: center;
@@ -648,5 +684,20 @@ button.secondary.standalone { margin-top: 0.9rem; display: inline-block; }
   border-radius: var(--radius-sm);
 }
 .leaderboard-my-rating-label { font-size: 0.78rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.03em; }
-.sparkline-svg { width: 100%; height: 48px; display: block; margin-top: 0.4rem; }
-.sparkline-range { display: flex; justify-content: space-between; font-size: 0.72rem; color: var(--muted); }
+/* Real axes/gridlines/tooltips via Chart.js now (see leaderboard.js) --
+   replacing the old hand-rolled <polyline> sparkline, which had no room
+   to grow into any of that. Fixed height keeps the panel from jumping as
+   the chart (re)renders; width is still fluid. */
+.leaderboard-sparkline { width: 100%; height: 160px; margin-top: 0.4rem; }
+/* Shown the instant the screen opens (before either the chart or the
+   table below it has resolved -- see leaderboard.js's showLeaderboardScreen,
+   which now fires both fetches in parallel instead of one after the
+   other) -- same pulsing-placeholder language as the Account screen's
+   own stat-skeleton-pulse, so "still loading" reads consistently
+   app-wide rather than each screen inventing its own loading look. */
+.leaderboard-sparkline.loading {
+  border-radius: var(--radius-sm);
+  background: var(--panel-bg-soft);
+  animation: stat-skeleton-pulse 1.4s ease-in-out infinite;
+}
+.leaderboard-loading-row td { color: var(--muted); animation: stat-skeleton-pulse 1.4s ease-in-out infinite; }

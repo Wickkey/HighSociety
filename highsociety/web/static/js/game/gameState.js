@@ -11,7 +11,7 @@
 // point all four modules have finished loading.
 import { $ } from '../utils/dom.js';
 import { clearMoveTimer, renderAuctionPanel, renderMyPanel, renderMoneyChips, renderMovePanel } from './gameRenderer.js';
-import { setHasResigned } from '../lobby/lobby.js';
+import { setHasResigned, setGameFinished } from '../lobby/lobby.js';
 import { resetSelectedDiscard } from './gameActions.js';
 
 export let game = null;
@@ -89,6 +89,7 @@ export function resetGameState(myUsername, status) {
   // close two more of the same shape.
   clearMoveTimer();
   setHasResigned(false);
+  setGameFinished(false); // a fresh game (or rematch) is, by definition, not finished yet
   resetSelectedDiscard();
   // logLine()/appendChatLine() only ever append — without this, a rematch
   // (or any other resetGameState call, e.g. reconnecting into a genuinely
@@ -120,6 +121,14 @@ export function resetGameState(myUsername, status) {
   // all, so it should stay exactly as compact as it always was.
   $('move-panel').classList.toggle('has-timer', !!game.turnTimeLimit);
   applyRoomDisplaySettings();
+  // gameActions.js's onResign disables this permanently for the game that
+  // just ended (nothing left to submit twice) — without re-enabling it
+  // here, any fresh game started in this same tab after a resign (a brand
+  // new host/join, not just a rematch — see rematch.js's REMATCH_STARTING
+  // handler, which had its own copy of this same line because this one
+  // was missing) would inherit the disabled button and Resign would never
+  // work again for the rest of the tab's life.
+  $('btn-resign').disabled = false;
 }
 
 // Reflects the room's fixed reveal-cards/show-logs settings in the UI: a

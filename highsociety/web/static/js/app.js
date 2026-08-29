@@ -15,13 +15,13 @@ import {
   onAccountEditUsernameClick, onAccountCancelEditClick,
 } from './account/account.js';
 import {
-  showHomeTile, showHomeTiles, onHomeLinkClick, navigateFromSidebar, onCreateGame, onJoinByCode,
+  showHomeTile, showHomeTiles, onHomeLinkClick, navigateFromSidebar, onCreateGame, onJoinByCode, onTimeLimitButtonClick,
   onCopyRoomLink, onJoin, onSpectateJoin, onChangeJoinIdentity, onChangeSpectateIdentity,
   startRoomsPolling, currentRoomCode, isActivelyPlayingLiveGame,
   applySpectateIdentityDefaults, refreshStatus, leaveToHome, setCurrentRoomCode,
 } from './lobby/lobby.js';
 import { onAddBot } from './lobby/playerList.js';
-import { showGameHistoryScreen } from './lobby/gameHistory.js';
+import { showGameHistoryScreen, onLoadMoreGameHistory } from './lobby/gameHistory.js';
 import { showLeaderboardScreen } from './lobby/leaderboard.js';
 import { onPlayClick, onFindMatch, onMatchmakingCancel, onMatchmakingAddBots } from './lobby/matchmaking.js';
 import {
@@ -73,6 +73,7 @@ function wireStaticHandlers() {
   });
   $('btn-leave-lobby-back').addEventListener('click', onHomeLinkClick);
   $('btn-create-game').addEventListener('click', onCreateGame);
+  $('host-turn-time-buttons').addEventListener('click', onTimeLimitButtonClick);
   $('btn-join-by-code').addEventListener('click', onJoinByCode);
   $('btn-copy-room-link').addEventListener('click', onCopyRoomLink);
   $('room-link-input').addEventListener('focus', (e) => e.target.select());
@@ -104,6 +105,7 @@ function wireStaticHandlers() {
     showScreen('screen-host-setup'); showHomeTiles(); startRoomsPolling();
   }));
   $('btn-account-my-games').addEventListener('click', () => navigateFromSidebar(showGameHistoryScreen));
+  $('btn-game-history-load-more').addEventListener('click', onLoadMoreGameHistory);
   $('sidebar-leaderboard').addEventListener('click', () => navigateFromSidebar(showLeaderboardScreen));
   $('game-detail-close').addEventListener('click', closeGameDetailModal);
   $('btn-account-save').addEventListener('click', onAccountSaveClick);

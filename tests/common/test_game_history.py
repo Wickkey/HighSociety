@@ -3,6 +3,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from highsociety.code.common import elo
 from highsociety.code.common.db import game_history
 
 
@@ -14,6 +15,36 @@ def reset_schema_cache():
     game_history._schema_ready = False
     yield
     game_history._schema_ready = False
+
+
+@pytest.fixture(autouse=True)
+def reset_player_sessions():
+    """_player_sessions (PlayerSession's own module-level cache) is process-
+    wide by design (see its own docstring) -- exactly the same reason
+    _schema_ready needs resetting around every test, so one test caching
+    "alice" can't make a later, unrelated test's mocked cursor calls come
+    out short (a cache hit skips a query the mock's fetchone.side_effect
+    list still expects to be consumed in order)."""
+    game_history._player_sessions = {}
+    yield
+    game_history._player_sessions = {}
+
+
+@pytest.fixture(autouse=True)
+def mock_release_connection(monkeypatch):
+    """_connect() now borrows from a real connection pool (see game_
+    history's own module docstring on why), and every call site's release
+    counterpart -- _release_connection -- expects a real pooled
+    connection object, not the bare MagicMock these tests hand _connect
+    in its place. Neutralized by default so a tested function's own
+    `finally` block doesn't try to build (and connect) a real
+    ThreadedConnectionPool against this file's fake DATABASE_URL. Tests
+    that specifically want to assert release happened take this fixture
+    as a parameter and assert on the mock directly, in place of the old
+    conn.close.assert_called_once()."""
+    mock = MagicMock()
+    monkeypatch.setattr(game_history, "_release_connection", mock)
+    return mock
 
 
 @pytest.fixture
@@ -40,19 +71,47 @@ def test_ensure_schema_is_a_silent_no_op_without_a_database(no_database_url):
 def test_record_finished_game_is_a_silent_no_op_without_a_database(no_database_url):
     # Must not raise even though every field below is nonsense -- the whole
     # point is that this never gets far enough to touch any of it.
-    game_history.record_finished_game(
+    result = game_history.record_finished_game(
         room_code="ABCDE", seats=2, bot_mix=["greedy"],
         started_at=datetime.datetime.now(datetime.timezone.utc),
         finished_at=datetime.datetime.now(datetime.timezone.utc),
         participants=[{"is_bot": True, "username": None, "name": "Marble",
                        "points": 5, "money_left": 10, "is_winner": True, "eliminated": False}],
     )
+    assert result == {}
 
 
 def test_record_finished_game_async_spawns_nothing_without_a_database(no_database_url):
     with patch("threading.Thread") as mock_thread:
         game_history.record_finished_game_async(room_code="ABCDE")
         mock_thread.assert_not_called()
+
+
+def test_record_finished_game_async_calls_on_complete_with_empty_dict_without_a_database(no_database_url):
+    """The post-game Elo reveal (web_server.py) relies on on_complete
+    always firing, even when there's nothing to compute -- otherwise a
+    local dev setup with no DATABASE_URL would leave the reveal polling
+    forever instead of resolving immediately to "nothing to show"."""
+    seen = []
+    game_history.record_finished_game_async(room_code="ABCDE", on_complete=seen.append)
+    assert seen == [{}]
+
+
+def test_record_finished_game_async_calls_on_complete_with_the_real_result(database_url):
+    game_history._schema_ready = True
+    conn, cursor = _fake_connection()
+    seen = []
+    with patch.object(game_history, "_connect", return_value=conn):
+        game_history.record_finished_game_async(
+            on_complete=seen.append,
+            room_code="ABCDE", seats=2, bot_mix=[],
+            started_at=datetime.datetime.now(datetime.timezone.utc),
+            finished_at=datetime.datetime.now(datetime.timezone.utc),
+            participants=[],
+        )
+        import time
+        time.sleep(0.2)  # give the background thread a moment to actually run
+    assert seen == [{}]  # no participants -- nothing rated, but on_complete still fires
 
 
 def _fake_connection():
@@ -73,13 +132,13 @@ def _fake_connection():
     return conn, cursor
 
 
-def test_ensure_schema_runs_every_ddl_statement_once(database_url):
+def test_ensure_schema_runs_every_ddl_statement_once(database_url, mock_release_connection):
     conn, cursor = _fake_connection()
     with patch.object(game_history, "_connect", return_value=conn):
         game_history.ensure_schema()
     assert cursor.execute.call_count == len(game_history._SCHEMA_STATEMENTS)
     assert game_history._schema_ready is True
-    conn.close.assert_called_once()
+    mock_release_connection.assert_called_once_with(conn)
 
 
 def test_ensure_schema_failure_is_caught_and_leaves_schema_not_ready(database_url):
@@ -88,7 +147,7 @@ def test_ensure_schema_failure_is_caught_and_leaves_schema_not_ready(database_ur
     assert game_history._schema_ready is False
 
 
-def test_record_finished_game_writes_one_row_per_human_and_bot_participant(database_url):
+def test_record_finished_game_writes_one_row_per_human_and_bot_participant(database_url, mock_release_connection):
     game_history._schema_ready = True  # skip ensure_schema's own DDL round-trip for this test
     conn, cursor = _fake_connection()
     participants = [
@@ -118,7 +177,7 @@ def test_record_finished_game_writes_one_row_per_human_and_bot_participant(datab
     game_id, player_id, bot_name = bot_row_params[0], bot_row_params[1], bot_row_params[2]
     assert player_id is None
     assert bot_name == "Marble"
-    conn.close.assert_called_once()
+    mock_release_connection.assert_called_once_with(conn)
 
 
 def test_record_finished_game_gives_a_bot_with_known_difficulty_a_real_player_id(database_url):
@@ -294,7 +353,7 @@ def test_record_finished_game_writes_a_ratings_row_per_rated_participant(databas
          "points": 5, "money_left": 0, "is_winner": False, "eliminated": False},
     ]
     with patch.object(game_history, "_connect", return_value=conn):
-        game_history.record_finished_game(
+        result = game_history.record_finished_game(
             room_code="ABCDE", seats=2, bot_mix=[],
             started_at=datetime.datetime.now(datetime.timezone.utc),
             finished_at=datetime.datetime.now(datetime.timezone.utc),
@@ -308,6 +367,78 @@ def test_record_finished_game_writes_a_ratings_row_per_rated_participant(databas
     assert by_player[10][3] == by_player[10][2] + by_player[10][4]  # new_rating == old + change
     assert by_player[10][4] > 0  # alice (winner) gains
     assert by_player[11][4] < 0  # bob (loser) loses
+
+    # The return value is what web_server.py's post-game Elo reveal
+    # actually reads -- keyed by rating_key (a human's real username).
+    assert result["alice"] == {"old_rating": 1000, "new_rating": by_player[10][3], "rating_change": by_player[10][4]}
+    assert result["bob"] == {"old_rating": 1000, "new_rating": by_player[11][3], "rating_change": by_player[11][4]}
+
+
+def test_record_finished_game_averages_elo_deltas_for_same_difficulty_bot_seats(database_url):
+    """Real bug, confirmed live against production (game 469): two bot
+    seats sharing one player_id (same difficulty) each got their own
+    independently-computed delta applied, summing onto the shared
+    identity as if it were two separate players -- inflating its rating
+    swing, and writing two ratings rows that both claimed the same stale
+    "before" value despite the first update having already landed.
+    Deltas are now grouped by player_id and averaged: one identity
+    occupying N seats gets exactly one rating change, worth 1/N of the
+    naive sum, backed by exactly one ratings row."""
+    game_history._schema_ready = True
+    conn, cursor = _fake_connection()
+    cursor.fetchone.side_effect = iter([
+        (1,),                    # INSERT INTO games ... RETURNING id
+        (10, "g-alice", 1000),   # _upsert_player(alice)
+        (55, 1000),               # bots lookup for medium bot A
+        (55, 1000),               # bots lookup for medium bot B -- same shared player_id
+    ])
+    participants = [
+        {"is_bot": False, "username": "alice", "name": "Alice", "game_username": "alice",
+         "points": 8, "money_left": 62, "is_winner": False, "eliminated": False},
+        {"is_bot": True, "username": None, "name": "Medium bot A", "game_username": "medium bot a",
+         "points": 40, "money_left": 66, "is_winner": True, "eliminated": False, "difficulty": "medium"},
+        {"is_bot": True, "username": None, "name": "Medium bot B", "game_username": "medium bot b",
+         "points": 18, "money_left": 27, "is_winner": False, "eliminated": True, "difficulty": "medium"},
+    ]
+    with patch.object(game_history, "_connect", return_value=conn):
+        result = game_history.record_finished_game(
+            room_code="ABCDE", seats=3, bot_mix=["medium", "medium"],
+            started_at=datetime.datetime.now(datetime.timezone.utc),
+            finished_at=datetime.datetime.now(datetime.timezone.utc),
+            participants=participants,
+        )
+
+    # Ground truth: what each seat's delta would independently be, exactly
+    # matching the rated_standings this call built internally.
+    expected_seat_deltas = elo.compute_elo_deltas([
+        {"username": "alice", "points": 8, "rating": 1000},
+        {"username": "medium bot a", "points": 40, "rating": 1000},
+        {"username": "medium bot b", "points": 18, "rating": 1000},
+    ])
+    expected_bot_delta = round(
+        (expected_seat_deltas["medium bot a"] + expected_seat_deltas["medium bot b"]) / 2
+    )
+
+    ratings_inserts = [call.args[1] for call in cursor.execute.call_args_list
+                       if "INSERT INTO ratings" in call.args[0]]
+    by_player = {row[0]: row for row in ratings_inserts}
+    assert set(by_player) == {10, 55}  # exactly one ratings row per real identity, not per seat
+    assert by_player[55][4] == expected_bot_delta  # averaged, not summed
+    assert by_player[10][4] == expected_seat_deltas["alice"]  # a solo seat is unaffected
+
+    elo_updates = [call.args[1] for call in cursor.execute.call_args_list
+                   if call.args[0].startswith("UPDATE players SET elo")]
+    bot_elo_update = next(p for p in elo_updates if p[1] == 55)
+    assert bot_elo_update[0] == expected_bot_delta  # applied exactly once, not twice
+
+    # Both bot seats' rating_keys resolve to the same, correct combined
+    # change in the return value too (each one only matters if a future
+    # caller ever looks a bot seat up by name -- today only alice's own
+    # entry is actually read, by web_server.py's Elo reveal).
+    assert result["alice"]["rating_change"] == expected_seat_deltas["alice"]
+    assert result["medium bot a"] == result["medium bot b"] == {
+        "old_rating": by_player[55][2], "new_rating": by_player[55][3], "rating_change": expected_bot_delta,
+    }
 
 
 def test_record_finished_game_rates_bot_games_but_never_gives_bots_achievements(database_url):
@@ -419,15 +550,78 @@ def test_record_finished_game_populates_game_rounds_round_players_and_game_actio
     assert winning_bid == 5
     assert winner_id is not None  # alice's resolved player_id
 
-    round_players_inserts = [p for q, p in queries_and_params if "INSERT INTO round_players" in q]
-    assert len(round_players_inserts) == 2
-    results = sorted(p[6] for p in round_players_inserts)  # (..., result) -- index 6
+    # round_players/game_actions are now written as one batched multi-row
+    # INSERT each (see _record_auction_rounds's own docstring on why),
+    # rather than one execute() call per row -- unflatten the single
+    # call's flat params list back into per-row tuples to check the same
+    # things as before.
+    round_players_params, = [p for q, p in queries_and_params if "INSERT INTO round_players" in q]
+    round_players_rows = [round_players_params[i:i + 7] for i in range(0, len(round_players_params), 7)]
+    assert len(round_players_rows) == 2
+    results = sorted(row[6] for row in round_players_rows)  # (..., result) -- index 6
     assert results == ["lost", "won"]
 
-    game_actions_inserts = [p for q, p in queries_and_params if "INSERT INTO game_actions" in q]
-    assert len(game_actions_inserts) == 2
-    action_types = sorted(p[2] for p in game_actions_inserts)  # (..., action_type, ...) -- index 2
+    game_actions_params, = [p for q, p in queries_and_params if "INSERT INTO game_actions" in q]
+    game_actions_rows = [game_actions_params[i:i + 6] for i in range(0, len(game_actions_params), 6)]
+    assert len(game_actions_rows) == 2
+    action_types = sorted(row[2] for row in game_actions_rows)  # (..., action_type, ...) -- index 2
     assert action_types == ["BID", "PASS"]
+
+
+def test_record_finished_game_batches_round_players_and_game_actions_into_one_call_each(database_url):
+    """Real production bug, confirmed live: writing one row at a time made
+    an ordinary short game's auction-history recording alone take ~11
+    seconds (100+ sequential round trips to Supabase), which blew straight
+    through the post-game Elo reveal's ~5.6s polling budget even though
+    the actual rating write next to it finishes in ~1s. Rounds/players/
+    events here are sized so a one-call-per-row version would need 5
+    round_players calls and 10 game_actions calls; the fix must produce
+    exactly one of each regardless of how many rounds the game had."""
+    game_history._schema_ready = True
+    conn, cursor = _fake_connection()
+    participants = [
+        {"is_bot": False, "username": "alice", "name": "Alice", "game_username": "alice",
+         "points": 10, "money_left": 5, "is_winner": True, "eliminated": False},
+        {"is_bot": False, "username": "bob", "name": "Bob", "game_username": "bob",
+         "points": 0, "money_left": 20, "is_winner": False, "eliminated": False},
+    ]
+    auction_rounds = [{
+        "round_number": n, "auction_type": "normal",
+        "card": {"type": "Painting", "value": n, "multiplier": 1, "is_green": False, "description": "x"},
+        "events": [
+            {"player": "alice", "action": "bid", "amount": 5, "cards": [5],
+             "timestamp": "2026-01-01T00:00:00+00:00"},
+            {"player": "bob", "action": "pass", "amount": None, "cards": None,
+             "timestamp": "2026-01-01T00:00:01+00:00"},
+        ],
+        "recipient": "alice",
+        "money_spent": {"alice": 5, "bob": 0},
+        "cards_spent": {"alice": [5], "bob": []},
+        "started_at": "2026-01-01T00:00:00+00:00",
+        "ended_at": "2026-01-01T00:00:01+00:00",
+        "starting_money": {"alice": 10, "bob": 20},
+        "ending_money": {"alice": 5, "bob": 20},
+    } for n in range(1, 6)]  # 5 rounds -- 10 round_players rows, 10 game_actions rows total
+    with patch.object(game_history, "_connect", return_value=conn):
+        game_history.record_finished_game(
+            room_code="ABCDE", seats=2, bot_mix=[],
+            started_at=datetime.datetime.now(datetime.timezone.utc),
+            finished_at=datetime.datetime.now(datetime.timezone.utc),
+            participants=participants, auction_rounds=auction_rounds,
+        )
+
+    queries = [call.args[0] for call in cursor.execute.call_args_list]
+    assert sum("INSERT INTO game_rounds" in q for q in queries) == 1
+    assert sum("INSERT INTO round_players" in q for q in queries) == 1
+    assert sum("INSERT INTO game_actions" in q for q in queries) == 1
+
+    round_players_params, = [call.args[1] for call in cursor.execute.call_args_list
+                              if "INSERT INTO round_players" in call.args[0]]
+    assert len(round_players_params) == 5 * 2 * 7  # 5 rounds x 2 players x 7 columns
+
+    game_actions_params, = [call.args[1] for call in cursor.execute.call_args_list
+                             if "INSERT INTO game_actions" in call.args[0]]
+    assert len(game_actions_params) == 5 * 2 * 6  # 5 rounds x 2 events x 6 columns
 
 
 def test_record_finished_game_does_not_crash_when_two_same_difficulty_bots_share_a_round(database_url):
@@ -476,12 +670,18 @@ def test_record_finished_game_does_not_crash_when_two_same_difficulty_bots_share
             participants=participants, auction_rounds=auction_rounds,
         )
 
+    # One batched call for all three seats' rows (see
+    # _record_auction_rounds's own docstring) -- unflatten it back into
+    # per-row tuples to check the same things the one-call-per-row version
+    # used to check directly.
     round_players_calls = [call for call in cursor.execute.call_args_list
                             if "INSERT INTO round_players" in call.args[0]]
-    assert len(round_players_calls) == 3  # alice + both bot seats, despite the shared player_id
-    for call in round_players_calls:
-        assert "ON CONFLICT (round_id, player_id) DO NOTHING" in call.args[0]
-    bot_player_ids = {call.args[1][2] for call in round_players_calls} - {10}  # exclude alice's player_id
+    assert len(round_players_calls) == 1
+    assert "ON CONFLICT (round_id, player_id) DO NOTHING" in round_players_calls[0].args[0]
+    flat_params = round_players_calls[0].args[1]
+    round_players_rows = [flat_params[i:i + 7] for i in range(0, len(flat_params), 7)]
+    assert len(round_players_rows) == 3  # alice + both bot seats, despite the shared player_id
+    bot_player_ids = {row[2] for row in round_players_rows} - {10}  # exclude alice's player_id
     assert bot_player_ids == {55}  # both bot seats resolved to the same shared player_id
 
 
@@ -584,7 +784,7 @@ def test_find_player_by_google_id_is_none_without_a_database(no_database_url):
     assert game_history.find_player_by_google_id("g-123") is None
 
 
-def test_find_player_by_google_id_returns_the_row_when_found(database_url):
+def test_find_player_by_google_id_returns_the_row_when_found(database_url, mock_release_connection):
     game_history._schema_ready = True
     conn, cursor = _fake_connection()
     cursor.fetchone.side_effect = None
@@ -595,7 +795,7 @@ def test_find_player_by_google_id_returns_the_row_when_found(database_url):
     query, params = cursor.execute.call_args.args
     assert "google_id" in query
     assert params == ("g-123",)
-    conn.close.assert_called_once()
+    mock_release_connection.assert_called_once_with(conn)
 
 
 def test_find_player_by_google_id_returns_none_when_not_found(database_url):
@@ -645,7 +845,7 @@ def test_get_player_elo_returns_the_stored_value(database_url):
     game_history._schema_ready = True
     conn, cursor = _fake_connection()
     cursor.fetchone.side_effect = None
-    cursor.fetchone.return_value = (1234,)
+    cursor.fetchone.return_value = (1, 1234)  # (player_id, elo) -- see PlayerSession
     with patch.object(game_history, "_connect", return_value=conn):
         assert game_history.get_player_elo("alice") == 1234
 
@@ -665,11 +865,81 @@ def test_get_player_elo_defaults_to_1000_on_a_db_error(database_url):
         assert game_history.get_player_elo("alice") == 1000
 
 
+def test_get_player_elo_second_call_is_served_from_the_cache_with_no_db_call(database_url):
+    """PlayerSession's whole point: a username already read once in this
+    process answers again with zero database interaction -- confirmed
+    here by making _connect blow up on a second call, which would fail
+    the test if the cache weren't actually being used."""
+    game_history._schema_ready = True
+    conn, cursor = _fake_connection()
+    cursor.fetchone.side_effect = None
+    cursor.fetchone.return_value = (1, 1234)
+    with patch.object(game_history, "_connect", return_value=conn) as mock_connect:
+        assert game_history.get_player_elo("alice") == 1234
+        assert game_history.get_player_elo("alice") == 1234
+        mock_connect.assert_called_once()
+
+
+def test_record_finished_game_refreshes_an_already_cached_elo(database_url):
+    """The write-through half of PlayerSession: once a game actually
+    finishes (and its transaction commits), a human participant's
+    already-warm cache entry reflects the new rating immediately --
+    without needing a fresh read to notice the change."""
+    game_history._schema_ready = True
+    game_history._player_sessions["alice"] = game_history.PlayerSession(player_id=10, elo=1000)
+    conn, cursor = _fake_connection()
+    participants = [
+        {"is_bot": False, "username": "alice", "name": "Alice", "game_username": "alice",
+         "points": 10, "money_left": 5, "is_winner": True, "eliminated": False},
+        {"is_bot": False, "username": "bob", "name": "Bob", "game_username": "bob",
+         "points": 0, "money_left": 20, "is_winner": False, "eliminated": False},
+    ]
+    with patch.object(game_history, "_connect", return_value=conn), \
+         patch.object(game_history, "_upsert_player",
+                      side_effect=[(10, "google-alice", 1000), (11, "google-bob", 1000)]):
+        game_history.record_finished_game(
+            room_code="ABCDE", seats=2, bot_mix=[],
+            started_at=datetime.datetime.now(datetime.timezone.utc),
+            finished_at=datetime.datetime.now(datetime.timezone.utc),
+            participants=participants,
+        )
+    assert game_history._player_sessions["alice"].elo != 1000
+
+
+def test_record_finished_game_does_not_refresh_the_cache_if_the_transaction_fails(database_url):
+    """A failure anywhere in record_finished_game's single transaction
+    rolls back every write it made (games/ratings/players.elo included) --
+    the in-memory cache must never show a change the database itself
+    threw away, so the refresh only happens after a clean commit (see
+    record_finished_game's own comment on cache_refreshes)."""
+    game_history._schema_ready = True
+    game_history._player_sessions["alice"] = game_history.PlayerSession(player_id=10, elo=1000)
+    conn, cursor = _fake_connection()
+    participants = [
+        {"is_bot": False, "username": "alice", "name": "Alice", "game_username": "alice",
+         "points": 10, "money_left": 5, "is_winner": True, "eliminated": False},
+        {"is_bot": False, "username": "bob", "name": "Bob", "game_username": "bob",
+         "points": 0, "money_left": 20, "is_winner": False, "eliminated": False},
+    ]
+    with patch.object(game_history, "_connect", return_value=conn), \
+         patch.object(game_history, "_upsert_player",
+                      side_effect=[(10, "google-alice", 1000), (11, "google-bob", 1000)]), \
+         patch.object(game_history, "_record_auction_rounds", side_effect=RuntimeError("boom")):
+        result = game_history.record_finished_game(
+            room_code="ABCDE", seats=2, bot_mix=[],
+            started_at=datetime.datetime.now(datetime.timezone.utc),
+            finished_at=datetime.datetime.now(datetime.timezone.utc),
+            participants=participants, auction_rounds=[{"round_number": 1}],
+        )
+    assert result == {}
+    assert game_history._player_sessions["alice"].elo == 1000  # unchanged -- the write never committed
+
+
 def test_create_google_player_is_a_no_op_without_a_database(no_database_url):
     assert game_history.create_google_player("g-123", "a@example.com", "alice", "Alice") is False
 
 
-def test_create_google_player_inserts_a_row_and_returns_true(database_url):
+def test_create_google_player_inserts_a_row_and_returns_true(database_url, mock_release_connection):
     game_history._schema_ready = True
     conn, cursor = _fake_connection()
     with patch.object(game_history, "_connect", return_value=conn):
@@ -678,7 +948,7 @@ def test_create_google_player_inserts_a_row_and_returns_true(database_url):
     query, params = cursor.execute.call_args.args
     assert "INSERT INTO players" in query
     assert params == ("alice", "Alice", "g-123", "a@example.com")
-    conn.close.assert_called_once()
+    mock_release_connection.assert_called_once_with(conn)
 
 
 def test_create_google_player_returns_false_instead_of_raising_on_a_uniqueness_race(database_url):
@@ -701,7 +971,7 @@ def test_create_guest_player_is_a_no_op_without_a_database(no_database_url):
     assert game_history.create_guest_player("alice") is False
 
 
-def test_create_guest_player_inserts_a_row_with_no_google_id_or_email(database_url):
+def test_create_guest_player_inserts_a_row_with_no_google_id_or_email(database_url, mock_release_connection):
     game_history._schema_ready = True
     conn, cursor = _fake_connection()
     with patch.object(game_history, "_connect", return_value=conn):
@@ -710,7 +980,7 @@ def test_create_guest_player_inserts_a_row_with_no_google_id_or_email(database_u
     query, params = cursor.execute.call_args.args
     assert "INSERT INTO players" in query
     assert params == ("CrimsonNaruto482", "CrimsonNaruto482")
-    conn.close.assert_called_once()
+    mock_release_connection.assert_called_once_with(conn)
 
 
 def test_create_guest_player_returns_false_instead_of_raising_on_a_uniqueness_race(database_url):
@@ -730,7 +1000,7 @@ def test_rename_player_refuses_when_the_new_username_is_taken(database_url):
         assert game_history.rename_player("alice", "bob") is False
 
 
-def test_rename_player_updates_the_existing_row(database_url):
+def test_rename_player_updates_the_existing_row(database_url, mock_release_connection):
     game_history._schema_ready = True
     conn, cursor = _fake_connection()
     cursor.rowcount = 1
@@ -741,7 +1011,7 @@ def test_rename_player_updates_the_existing_row(database_url):
     query, params = cursor.execute.call_args_list[0].args
     assert "UPDATE players" in query
     assert params == ("bob", "bob", "alice")
-    conn.close.assert_called_once()
+    mock_release_connection.assert_called_once_with(conn)
 
 
 def test_rename_player_falls_back_to_inserting_when_the_old_username_never_existed(database_url):
@@ -930,7 +1200,7 @@ def test_get_player_profile_stats_failure_is_caught_not_raised(database_url):
 # --------------------------------------------------- game history / leaderboard --
 
 def test_get_recent_games_is_empty_without_a_database(no_database_url):
-    assert game_history.get_recent_games("alice") == []
+    assert game_history.get_recent_games("alice") == {"games": [], "has_more": False}
 
 
 def test_get_recent_games_returns_none_for_an_unknown_username(database_url):
@@ -939,7 +1209,7 @@ def test_get_recent_games_returns_none_for_an_unknown_username(database_url):
     cursor.fetchone.side_effect = None
     cursor.fetchone.return_value = None
     with patch.object(game_history, "_connect", return_value=conn):
-        assert game_history.get_recent_games("nobody") == []
+        assert game_history.get_recent_games("nobody") == {"games": [], "has_more": False}
 
 
 def test_get_recent_games_groups_opponents_by_game(database_url):
@@ -959,19 +1229,40 @@ def test_get_recent_games_groups_opponents_by_game(database_url):
     ]
     with patch.object(game_history, "_connect", return_value=conn):
         result = game_history.get_recent_games("alice")
-    assert [g["game_id"] for g in result] == [100, 101]
-    assert result[0]["placement"] == 1
-    assert {o["name"] for o in result[0]["opponents"]} == {"alice", "Marble"}
-    assert result[1]["opponents"] == [
+    games = result["games"]
+    assert result["has_more"] is False
+    assert [g["game_id"] for g in games] == [100, 101]
+    assert games[0]["placement"] == 1
+    assert {o["name"] for o in games[0]["opponents"]} == {"alice", "Marble"}
+    assert games[1]["opponents"] == [
         {"name": "alice", "is_bot": False, "is_winner": False},
         {"name": "bob", "is_bot": False, "is_winner": True},
     ]
 
 
+def test_get_recent_games_sets_has_more_when_another_page_exists(database_url):
+    """Fetches limit+1 rows to know whether another page exists, without a
+    separate COUNT(*) -- see FRONTEND_FIXES.MD's 10-at-a-time pagination
+    ask. The (limit+1)th row is trimmed off the returned list."""
+    game_history._schema_ready = True
+    conn, cursor = _fake_connection()
+    cursor.fetchone.side_effect = None
+    cursor.fetchone.return_value = (1,)
+    finished_at = datetime.datetime(2026, 1, 1, tzinfo=datetime.timezone.utc)
+    cursor.fetchall.side_effect = [
+        [(100, finished_at, 1), (101, finished_at, 2)],  # limit=1 + 1 lookahead row = 2 rows back
+        [(100, "alice", False, True), (101, "alice", False, False)],
+    ]
+    with patch.object(game_history, "_connect", return_value=conn):
+        result = game_history.get_recent_games("alice", limit=1, offset=0)
+    assert result["has_more"] is True
+    assert [g["game_id"] for g in result["games"]] == [100]  # only `limit` rows kept
+
+
 def test_get_recent_games_failure_is_caught_not_raised(database_url):
     game_history._schema_ready = True
     with patch.object(game_history, "_connect", side_effect=RuntimeError("unreachable")):
-        assert game_history.get_recent_games("alice") == []
+        assert game_history.get_recent_games("alice") == {"games": [], "has_more": False}
 
 
 def test_get_game_detail_returns_none_for_an_unknown_game(database_url):

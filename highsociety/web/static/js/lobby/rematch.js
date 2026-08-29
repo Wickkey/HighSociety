@@ -11,12 +11,14 @@
 // non-circular static imports.
 import { $, hide, show, showError, showScreen } from '../utils/dom.js';
 import { escapeHtml } from '../utils/formatting.js';
-import { clearRejoinInfo, currentRoomCode, fetchJSON, lastStatus } from './lobby.js';
+import { clearRejoinInfo, currentRoomCode, fetchJSON, lastStatus, loadRejoinInfo, setGameFinished } from './lobby.js';
 import { openProfileModal } from '../ui/modals.js';
 import { ws } from '../network/websocket.js';
 import { game, resetGameState, seedOpponents, applyRoomDisplaySettings } from '../game/gameState.js';
 import { ensureGameScreenVisible } from '../game/gameEvents.js';
 import { renderOpponents } from '../game/gameRenderer.js';
+import { loadProfile } from '../auth/profile.js';
+import { prefetchAccountStats } from '../account/account.js';
 
 // Rematch panel state on the finished screen: null while no vote is
 // underway, else {requestedBy, botMix, votes} mirroring web_server.py's
@@ -31,7 +33,26 @@ let rematchBotSeats = 0;
 let rematchDefaultBotMix = [];
 
 export function renderFinished(status) {
+  if (!game) {
+    // `game` is still its module-level `null` default -- this is a cold
+    // arrival at an already-finished game (a page reload, a mobile browser
+    // reclaiming a backgrounded tab, reopening a saved room link, ...)
+    // where app.js's DOMContentLoaded handler called refreshStatus() from
+    // the URL's ?room= before any onJoin/attemptReconnect ever ran
+    // resetGameState. Every line below (and revealEloChange further down)
+    // assumes `game` exists -- most visibly game.myUsername, read
+    // unconditionally by renderRematchPanel() a few lines down -- so
+    // without this, that read throws on a bare `null` and the whole
+    // reveal never even starts. Recover "my" username the same way
+    // attemptReconnect() does, from this room's stored rejoin info, before
+    // clearRejoinInfo below wipes it; null (no stored info, e.g. arriving
+    // via a bare spectate link) is exactly the existing spectator case
+    // every myUsername check elsewhere already handles.
+    const info = loadRejoinInfo(currentRoomCode());
+    resetGameState(info ? info.username : null, status);
+  }
   clearRejoinInfo(currentRoomCode()); // game's over — nothing left to reconnect to
+  setGameFinished(true); // see lobby.js's own comment on why this can't just be inferred from the current screen
   showScreen('screen-finished');
   // The money-eliminated player (see gameplay.py's determine_winner —
   // distinct from simply "didn't have the highest score") was never in
@@ -80,6 +101,134 @@ export function renderFinished(status) {
   rematchBotSeats = status.rematch_bot_seats || 0;
   rematchDefaultBotMix = status.rematch_default_bot_mix || [];
   renderRematchPanel();
+
+  // Guarded by game_id, not just game.myUsername -- renderFinished itself
+  // can legitimately run more than once for the exact same finished game
+  // (a stray status poll, or a reconnect blip around game-end independently
+  // triggering its own refreshStatus() -- see websocket.js's onclose and
+  // gameEvents.js's game_over handler, both of which can call it). Every
+  // repeat call used to restart revealEloChange from scratch: hiding
+  // whatever it had just shown, bumping eloRevealToken, and racing a brand
+  // new poll against whichever call happens to finish last -- if that last
+  // one loses the race (e.g. its own poll hasn't reached the DB write yet
+  // even though an earlier call already had the answer), the token guard
+  // makes it silently discard the earlier call's good result and the card
+  // never gets a chance to show anything. Only the first call for a given
+  // game_id may ever start the cycle; later ones for that same game are a
+  // no-op here (whatever the first call already resolved to stays showing).
+  if (game.myUsername && status.game_id !== revealedGameId) {
+    revealedGameId = status.game_id;
+    revealEloChange(status);
+  }
+}
+
+// The game_id revealEloChange has already been started for -- see
+// renderFinished's own comment on why a repeat call for the same game must
+// never restart it. null until the first finished render of any game.
+let revealedGameId = null;
+
+// A per-game token, bumped every time revealEloChange starts -- so a
+// rematch (which calls renderFinished again for a brand new game) can't
+// have its OLD poll loop's late response land on top of the NEW game's
+// card once it's already showing something else. Simpler than threading
+// an AbortController through fetchJSON for what's already a short,
+// bounded retry loop.
+let eloRevealToken = 0;
+
+// See index.html's three elo-reveal-* elements for the state machine
+// this drives: a brief "calculating" placeholder (shown immediately --
+// the game-history write is fire-and-forget, see game_history.py's own
+// docstring on why), replaced once /api/status's elo_changes stops being
+// null by either the real numbers or a guest sign-in nudge in the same
+// slot. Only ever shows *this* player's own change (chess.com/colonist.io
+// both treat a post-game rating reveal as personal, not table-wide).
+async function revealEloChange(initialStatus) {
+  const token = ++eloRevealToken;
+  const calculating = $('elo-reveal-calculating');
+  const reveal = $('elo-reveal');
+  const guestNote = $('elo-reveal-guest-note');
+  hide(reveal);
+  hide(guestNote);
+  showEnter(calculating);
+
+  // Up to ~16s, not the original ~5.6s -- confirmed live (see
+  // game_history.py's _record_auction_rounds, batched for exactly this
+  // reason) that the background write's auction-history step alone could
+  // take ~11s under ordinary network conditions to Supabase, well past
+  // the old budget, even though the actual rating write next to it
+  // finishes in ~1s. This is comfortable headroom above that measured
+  // worst case, not a guess.
+  let changes = initialStatus.elo_changes;
+  for (let attempt = 0; attempt < 20 && (changes === undefined || changes === null); attempt++) {
+    await new Promise((resolve) => setTimeout(resolve, 800));
+    if (token !== eloRevealToken) return; // superseded by a newer game (e.g. a rematch)
+    try {
+      const fresh = await fetchJSON(`/api/status?room=${encodeURIComponent(currentRoomCode())}`);
+      changes = fresh.elo_changes;
+    } catch (e) { /* transient network hiccup -- next attempt (or the timeout below) handles it */ }
+  }
+  if (token !== eloRevealToken) return;
+  hide(calculating);
+
+  // The Account screen's own stats are prefetched once at login and
+  // never touched again until this -- so anyone who plays more than one
+  // game per tab (the common case) sees stale numbers flash before
+  // self-correcting on their next Account visit (a real, reported case:
+  // Elo showing 910 for a moment before snapping to the actual 924).
+  // `changes` being settled here (found or genuinely empty) means the
+  // whole game-history write has committed, real numbers included --
+  // exactly the right moment to refresh that stale snapshot so the next
+  // Account visit is correct from the very first paint instead of
+  // flashing the old value first.
+  prefetchAccountStats();
+
+  const mine = changes && changes[game.myUsername];
+  const profile = loadProfile();
+  if (mine) {
+    showEloNumbers(mine.old_rating, mine.new_rating, mine.rating_change);
+  } else if (!profile || !profile.google_id) {
+    // A guest never actually gets a rating change -- the same slot that
+    // would show one instead nudges them to sign in, turning this into a
+    // conversion moment rather than just showing nothing.
+    showEnter(guestNote);
+  }
+  // Neither: e.g. a Google-linked human whose table had no other rated
+  // participant that game (compute_elo_deltas needs 2+) -- nothing
+  // meaningful to show, so the card just stays hidden.
+}
+
+function showEnter(el) {
+  el.classList.remove('hidden', 'enter');
+  void el.offsetWidth; // force reflow so the class removal above actually takes effect first
+  el.classList.add('enter');
+}
+
+function showEloNumbers(oldRating, newRating, delta) {
+  const card = $('elo-reveal');
+  card.classList.remove('gain', 'loss');
+  if (delta > 0) card.classList.add('gain');
+  else if (delta < 0) card.classList.add('loss');
+  $('elo-reveal-old').textContent = oldRating;
+  $('elo-reveal-new').textContent = oldRating; // count-up starts here, see animateEloNumber
+  $('elo-reveal-delta').textContent = delta > 0 ? `+${delta}` : `${delta}`;
+  showEnter(card);
+  animateEloNumber($('elo-reveal-new'), oldRating, newRating);
+}
+
+// No charting-library-style dependency for this (matching this session's
+// own hand-rolled-sparkline precedent) -- just a plain
+// requestAnimationFrame loop easing from old_rating to new_rating,
+// landing exactly on the real integer regardless of frame timing.
+function animateEloNumber(el, from, to, durationMs = 1100) {
+  const start = performance.now();
+  function tick(now) {
+    const t = Math.min(1, (now - start) / durationMs);
+    const eased = 1 - (1 - t) ** 3; // ease-out cubic
+    el.textContent = Math.round(from + (to - from) * eased);
+    if (t < 1) requestAnimationFrame(tick);
+    else el.textContent = to;
+  }
+  requestAnimationFrame(tick);
 }
 
 // Only a still-connected player (as opposed to a spectator, or a player
@@ -232,10 +381,8 @@ export function handleRematchMessage(msg) {
     game.manualSeed = !!msg.data.manual_seed;
     applyRoomDisplaySettings(); // resetGameState already called this once with the stale seed baked in
   }
-  // Resign works anytime once in a game (see gameActions.js's onResign) --
-  // re-enable it for the fresh game immediately rather than waiting for
-  // its first PLAYER_STATE/PLAYER_MOVE.
-  $('btn-resign').disabled = false;
+  // btn-resign's re-enable now lives inside resetGameState itself (see its
+  // own comment) so every fresh game gets it, not just a rematch.
   ensureGameScreenVisible(false);
   fetchJSON(`/api/status?room=${encodeURIComponent(currentRoomCode())}`).then((status) => {
     seedOpponents(status, myUsername);

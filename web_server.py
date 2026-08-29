@@ -198,6 +198,16 @@ class GameRoom:
         # state == "finished"; cleared the moment it's declined or the
         # rematch actually starts.
         self.rematch: Optional[dict] = None
+        # None while the (fire-and-forget, async) game-history write for
+        # the current/most recent game hasn't finished computing Elo yet;
+        # {} once it has but nobody was rated; otherwise
+        # {rating_key: {"old_rating", "new_rating", "rating_change"}} --
+        # see _record_game_history's on_complete callback below and
+        # _status_payload's "elo_changes" field, which is what the
+        # finished screen's post-game reveal actually polls. Reset to
+        # None at the top of every fresh game (including a rematch) so a
+        # previous game's numbers can never leak into a new one's reveal.
+        self.elo_changes: Optional[dict] = None
 
     def touch(self) -> None:
         """Marks the room as recently active, so the reaper thread's idle
@@ -229,6 +239,11 @@ class GameRoom:
     def run_game(self) -> None:
         def _run():
             started_at = datetime.datetime.now(datetime.timezone.utc)
+            # A rematch reuses this same GameRoom -- without resetting this
+            # here, a still-finishing (or already-finished) previous game's
+            # Elo reveal data would otherwise be readable as if it belonged
+            # to the game that's only just starting now.
+            self.elo_changes = None
             game = PlayGame(players=self.players, spectators=self.spectators,
                              mode='network', game_id=self.game_id, seed=self.seed,
                              turn_duration=self.turn_time_limit,
@@ -277,6 +292,7 @@ class GameRoom:
                         time_control=int(self.turn_time_limit) if self.turn_time_limit else None,
                         is_finished_successfully=False,
                     )
+                self.elo_changes = {}  # no participants recorded -- nothing ever will be rated for this one
                 for p in self.players:
                     if isinstance(p, NetworkPlayer):
                         p.close()
@@ -312,6 +328,7 @@ def _record_game_history(room: "GameRoom", game: PlayGame, started_at: datetime.
     configured, since is_configured() short-circuits before touching a
     network connection."""
     if not game_history.is_configured():
+        room.elo_changes = {}  # nothing to compute -- let the reveal poll resolve immediately, not time out
         return
     winner_usernames = {w.username for w in (game.winners or [])}
     players_by_username = {p.username: p for p in room.players}
@@ -349,6 +366,15 @@ def _record_game_history(room: "GameRoom", game: PlayGame, started_at: datetime.
         auction_rounds=auction_rounds,
         bot_mix=room.bot_mix,
     )
+    def _store_elo_changes(changes: dict) -> None:
+        # Written from the background write's own thread -- under the
+        # lock since it's a genuine cross-thread write, even though a
+        # single attribute assignment happens to be safe under the GIL;
+        # _status_payload's read of it stays lock-free, matching every
+        # other room attribute it already reads that way.
+        with room.lock:
+            room.elo_changes = changes
+
     game_history.record_finished_game_async(
         room_code=room.room_code,
         seats=room.seats,
@@ -360,6 +386,7 @@ def _record_game_history(room: "GameRoom", game: PlayGame, started_at: datetime.
         participants=participants,
         host_username=room.host_username,
         time_control=int(room.turn_time_limit) if room.turn_time_limit else None,
+        on_complete=_store_elo_changes,
     )
 
 
@@ -815,10 +842,17 @@ def api_global_stats():
 
 @app.route("/api/games/<username>")
 def api_recent_games(username):
-    """'My Games' list + the home screen's Recent Games widget -- same
-    data, different caller. Always 200 with a (possibly empty) list, no
-    404: an empty list already means "nothing to show" to both callers."""
-    return jsonify({"games": game_history.get_recent_games(username)})
+    """'My Games' list (paginated -- see ?limit/?offset) + the home
+    screen's Recent Games widget (always just the first page, default
+    limit). Same data, different caller. Always 200 with a (possibly
+    empty) list, no 404: an empty list already means "nothing to show"
+    to both callers."""
+    try:
+        limit = int(request.args.get("limit", 20))
+        offset = int(request.args.get("offset", 0))
+    except (TypeError, ValueError):
+        return jsonify({"error": "limit/offset must be integers"}), 400
+    return jsonify(game_history.get_recent_games(username, limit=limit, offset=offset))
 
 
 @app.route("/api/games/detail/<int:game_id>")
@@ -980,6 +1014,11 @@ def _status_payload(room: Optional[GameRoom]) -> dict:
         winners = room.game.winners or []
         payload["winners"] = [w.username for w in winners]
         payload["final_standings"] = room.game.final_standings
+        # None while the async game-history write hasn't finished
+        # computing Elo yet -- the finished screen's reveal (rematch.js's
+        # revealEloChange) polls this same endpoint a few more times
+        # until it's non-null. See GameRoom.elo_changes's own comment.
+        payload["elo_changes"] = room.elo_changes
 
         # Everything a finished-screen client needs to render the rematch
         # panel from a plain page load/status poll, not just from the live
