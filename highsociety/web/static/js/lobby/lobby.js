@@ -171,11 +171,22 @@ export async function loadHomeGlobalStats() {
   }
 }
 
-// clearRejoin is false only for the "clicked the High Society title mid-game"
-// path (see onHomeLinkClick) — that's meant to behave like closing the tab,
-// which stays reconnectable, not like clicking "Return to Home" after the
+// Clears whatever this tab knew about being in a room -- the part every
+// "leave" path needs regardless of what gets shown next. clearRejoin is
+// false only for the "clicked the High Society title mid-game" path (see
+// onHomeLinkClick) — that's meant to behave like closing the tab, which
+// stays reconnectable, not like clicking "Return to Home" after the
 // game's already over, which has nothing left to reconnect to.
-export function leaveToHome(clearRejoin = true) {
+//
+// Split out from leaveToHome (below) specifically so navigateFromSidebar
+// can reuse just this half without also paying for leaveToHome's own
+// tile-picker render, which used to run and immediately get thrown away
+// by whatever real destination (Account, Leaderboard, a sub-panel, ...)
+// came right after it -- a real, reported bug: every sidebar navigation
+// wastefully fetched/rendered the tile picker's Recent Games and global
+// stats, visibly flickering, before switching to the screen actually
+// requested.
+function resetRoomState(clearRejoin) {
   if (clearRejoin) clearRejoinInfo(currentRoomCodeValue);
   currentRoomCodeValue = null;
   reconnectAttempted = false;
@@ -184,6 +195,15 @@ export function leaveToHome(clearRejoin = true) {
   joinIdentityOverridden = false;
   history.replaceState(null, '', location.pathname);
   stopPolling();
+}
+
+// The actual "return to the tile picker" action (btn-new-game, a
+// finished game's own "Return to Home", matchmaking cancel) -- unlike
+// navigateFromSidebar below, the tile picker genuinely *is* the
+// destination here, so rendering it as part of this call is correct,
+// not wasted.
+export function leaveToHome(clearRejoin = true) {
+  resetRoomState(clearRejoin);
   showScreen('screen-host-setup');
   showHomeTiles();
   renderProfileChip();
@@ -198,6 +218,21 @@ export function isActivelyPlayingLiveGame() {
   return !!(ws && ws.readyState === WebSocket.OPEN && game && game.round > 0 && !gameFinished);
 }
 
+// Shared by onHomeLinkClick and navigateFromSidebar below: if actually
+// mid-game, confirm first (declining aborts the whole navigation);
+// otherwise there's nothing to ask about. Returns null if declined,
+// otherwise the midGame flag itself (needed by both callers to decide
+// clearRejoin -- see resetRoomState's own comment on why that differs
+// between "closed the tab" and "the game's already over").
+async function confirmLeaveMidGameIfNeeded() {
+  const midGame = isActivelyPlayingLiveGame();
+  if (midGame) {
+    const ok = await confirmDialog('Leave the game? You can rejoin later.', 'Leave');
+    if (!ok) return null;
+  }
+  return midGame;
+}
+
 // The "High Society" wordmark doubles as a home link (most sites' logos
 // do) — most of the time that's a free action, but mid-game it needs the
 // same confirmation a browser's own "are you sure you want to leave"
@@ -207,15 +242,10 @@ export function isActivelyPlayingLiveGame() {
 // tab would — recoverable via the room's own reconnect flow — not like
 // clicking Resign, which is permanent.
 // Returns whether it actually left (false only if a mid-game confirm was
-// shown and declined) -- callers that need to chain a further navigation
-// afterward (see navigateFromSidebar) can check this instead of assuming
-// the leave always happened.
+// shown and declined).
 export async function onHomeLinkClick() {
-  const midGame = isActivelyPlayingLiveGame();
-  if (midGame) {
-    const ok = await confirmDialog('Leave the game? You can rejoin later.', 'Leave');
-    if (!ok) return false;
-  }
+  const midGame = await confirmLeaveMidGameIfNeeded();
+  if (midGame === null) return false;
   closeSocket();
   leaveToHome(!midGame);
   return true;
@@ -223,12 +253,28 @@ export async function onHomeLinkClick() {
 
 // Sidebar items are reachable from any screen, some of which (an active
 // lobby wait, a live game) hold an open connection -- route through the
-// same safe "leave" path the header title/lobby back-button already use
-// (confirms first if actually mid-game) before jumping to the target,
-// rather than yanking the screen out from under an open socket.
-export async function navigateFromSidebar(afterHome) {
-  const left = await onHomeLinkClick();
-  if (left) afterHome();
+// same safe "leave" confirmation the header title/lobby back-button
+// already use before jumping to the target, rather than yanking the
+// screen out from under an open socket.
+//
+// Deliberately does NOT route through onHomeLinkClick/leaveToHome (which
+// render the tile picker as part of leaving) -- this used to call
+// onHomeLinkClick and then afterHome() right after it, meaning the tile
+// picker (and its Recent Games/global-stats fetches) rendered once from
+// leaveToHome and then got immediately thrown away by whatever afterHome
+// actually wanted to show instead. A real, reported bug: every sidebar
+// navigation visibly flickered/double-fetched because of it. Only the
+// shared "confirm if mid-game, then tear down room state" half is reused
+// here; 100% of what gets rendered afterward is up to `afterHome` (which
+// defaults to a no-op for callers -- every screen's own back button --
+// that just want the teardown with nothing further to do).
+export async function navigateFromSidebar(afterHome = () => {}) {
+  const midGame = await confirmLeaveMidGameIfNeeded();
+  if (midGame === null) return;
+  closeSocket();
+  resetRoomState(!midGame);
+  renderProfileChip();
+  afterHome();
 }
 
 export function startRoomsPolling() {

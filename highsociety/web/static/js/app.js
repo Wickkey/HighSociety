@@ -92,6 +92,10 @@ function wireStaticHandlers() {
   $('btn-new-game').addEventListener('click', () => leaveToHome());
   $('connection-badge').addEventListener('click', onProfileChipClick);
   $('btn-open-account').addEventListener('click', () => { closeProfilePopover(); showAccountScreen(); });
+  // navigateFromSidebar itself no longer renders anything on its own (see
+  // its own comment on why) -- each of these back buttons is the thing
+  // that actually wants to land on the tile picker, so it renders it
+  // exactly once via its own afterHome callback.
   $('btn-account-back').addEventListener('click', () => navigateFromSidebar(() => {
     showScreen('screen-host-setup'); showHomeTiles(); startRoomsPolling();
   }));
