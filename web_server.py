@@ -915,13 +915,13 @@ def api_app_config():
 
 
 @app.route("/")
-# The 8 top-level, sidebar-navigable screens (see frontend/src/App.tsx's
-# route table) each get a real, shareable/refreshable URL -- all served
-# by this exact same static file, since it's a single-page app: the
-# client's router reads location.pathname on boot and jumps straight to
-# the matching screen. Deep room/game state deliberately isn't included
-# here -- that's still the existing ?room=<code> query-param mechanism,
-# unchanged.
+# The 8 top-level, sidebar-navigable screens plus /room/<code> (see
+# frontend/src/App.tsx's route table) each get a real, shareable/
+# refreshable URL -- all served by this exact same static file, since it's
+# a single-page app: the client's router reads location.pathname on boot
+# and jumps straight to the matching screen. <code> itself is unused here
+# (Flask just needs *a* route that matches the shape) -- React Router reads
+# the real value back out of the URL client-side once index.html loads.
 @app.route("/play")
 @app.route("/join")
 @app.route("/host")
@@ -930,7 +930,8 @@ def api_app_config():
 @app.route("/account")
 @app.route("/achievements")
 @app.route("/my-games")
-def index():
+@app.route("/room/<code>")
+def index(code=None):
     return send_from_directory(FRONTEND_DIST_DIR, "index.html")
 
 
