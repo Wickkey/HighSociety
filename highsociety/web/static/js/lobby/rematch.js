@@ -18,6 +18,7 @@ import { game, resetGameState, seedOpponents, applyRoomDisplaySettings } from '.
 import { ensureGameScreenVisible } from '../game/gameEvents.js';
 import { renderOpponents } from '../game/gameRenderer.js';
 import { loadProfile } from '../auth/profile.js';
+import { prefetchAccountStats } from '../account/account.js';
 
 // Rematch panel state on the finished screen: null while no vote is
 // underway, else {requestedBy, botMix, votes} mirroring web_server.py's
@@ -168,6 +169,18 @@ async function revealEloChange(initialStatus) {
   }
   if (token !== eloRevealToken) return;
   hide(calculating);
+
+  // The Account screen's own stats are prefetched once at login and
+  // never touched again until this -- so anyone who plays more than one
+  // game per tab (the common case) sees stale numbers flash before
+  // self-correcting on their next Account visit (a real, reported case:
+  // Elo showing 910 for a moment before snapping to the actual 924).
+  // `changes` being settled here (found or genuinely empty) means the
+  // whole game-history write has committed, real numbers included --
+  // exactly the right moment to refresh that stale snapshot so the next
+  // Account visit is correct from the very first paint instead of
+  // flashing the old value first.
+  prefetchAccountStats();
 
   const mine = changes && changes[game.myUsername];
   const profile = loadProfile();

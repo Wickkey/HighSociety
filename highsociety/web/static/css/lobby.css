@@ -689,3 +689,15 @@ button.secondary.standalone { margin-top: 0.9rem; display: inline-block; }
    to grow into any of that. Fixed height keeps the panel from jumping as
    the chart (re)renders; width is still fluid. */
 .leaderboard-sparkline { width: 100%; height: 160px; margin-top: 0.4rem; }
+/* Shown the instant the screen opens (before either the chart or the
+   table below it has resolved -- see leaderboard.js's showLeaderboardScreen,
+   which now fires both fetches in parallel instead of one after the
+   other) -- same pulsing-placeholder language as the Account screen's
+   own stat-skeleton-pulse, so "still loading" reads consistently
+   app-wide rather than each screen inventing its own loading look. */
+.leaderboard-sparkline.loading {
+  border-radius: var(--radius-sm);
+  background: var(--panel-bg-soft);
+  animation: stat-skeleton-pulse 1.4s ease-in-out infinite;
+}
+.leaderboard-loading-row td { color: var(--muted); animation: stat-skeleton-pulse 1.4s ease-in-out infinite; }

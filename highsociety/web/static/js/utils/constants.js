@@ -21,8 +21,19 @@ export const SIDEBAR_HIDDEN_SCREENS = new Set(['screen-login', 'screen-game']);
 // spectating, finished) where it would just be clutter over gameplay.
 // An allow-list (rather than SIDEBAR_HIDDEN_SCREENS' deny-list) since
 // there are more "hide" screens than "show" ones.
+// 'screen-host-setup' is deliberately NOT here despite showing the tile
+// picker sometimes: every one of its own callers already pairs
+// showScreen('screen-host-setup') with either showHomeTile() (a Join/
+// Host/Rules sub-panel, which immediately hides this footer again -- see
+// its own hide($('home-global-stats'))) or showHomeTiles() (the tile
+// picker itself, which already calls loadHomeGlobalStats() directly).
+// Including it here made every single one of those navigations fetch
+// global stats *twice* -- once from this Set membership, once from
+// showHomeTiles()'s own explicit call -- a real, reported bug (visible
+// as the home screen's stats/Recent-Games area appearing to load more
+// than once on every "back to home" navigation).
 export const GLOBAL_STATS_FOOTER_SCREENS = new Set([
-  'screen-host-setup', 'screen-matchmaking', 'screen-leaderboard',
+  'screen-matchmaking', 'screen-leaderboard',
   'screen-account', 'screen-achievements', 'screen-game-history',
 ]);
 

@@ -128,32 +128,54 @@ async function renderSparkline(history) {
   });
 }
 
-export async function showLeaderboardScreen() {
+// The chart and the table are two entirely independent fetches with no
+// data dependency on each other -- they used to run one after the other
+// (await the chart, then start the table), so a slow rating-history
+// request delayed the table from even starting. Both now fire in
+// parallel and each renders into its own already-reserved slot the
+// moment its own data arrives, regardless of which one that is or how
+// long the other takes -- see this session's own "show whichever comes
+// first" note in .claude/skills.md.
+export function showLeaderboardScreen() {
   showScreen('screen-leaderboard');
   setScreenPath('/leaderboard');
-  const body = $('leaderboard-body');
-  const empty = $('leaderboard-empty');
-  body.innerHTML = '';
-  hide(empty);
 
   const profile = loadProfile();
   const myRatingSection = $('leaderboard-my-rating');
   if (profile && profile.google_id) {
-    try {
-      const result = await fetchJSON(`/api/profile/${encodeURIComponent(profile.username)}/rating_history`);
-      await renderSparkline(result.history || []);
-      show(myRatingSection);
-    } catch (e) {
-      hide(myRatingSection);
-    }
+    // Reserve the slot and show it loading immediately -- we already
+    // know this profile *should* have a chart, so there's no reason to
+    // wait for the fetch to even decide whether to show the section.
+    show(myRatingSection);
+    $('leaderboard-sparkline').classList.add('loading');
+    $('leaderboard-sparkline').innerHTML = '';
+    loadMyRatingChart(profile);
   } else {
     hide(myRatingSection); // guests have no rating history to show
   }
 
+  loadLeaderboardTable(profile);
+}
+
+async function loadMyRatingChart(profile) {
+  try {
+    const result = await fetchJSON(`/api/profile/${encodeURIComponent(profile.username)}/rating_history`);
+    $('leaderboard-sparkline').classList.remove('loading');
+    await renderSparkline(result.history || []);
+  } catch (e) {
+    hide($('leaderboard-my-rating'));
+  }
+}
+
+async function loadLeaderboardTable(profile) {
+  const body = $('leaderboard-body');
+  const empty = $('leaderboard-empty');
+  hide(empty);
+  body.innerHTML = '<tr class="leaderboard-loading-row"><td colspan="5">Loading…</td></tr>';
   try {
     const result = await fetchJSON('/api/leaderboard');
     const rows = result.leaderboard || [];
-    if (rows.length === 0) { show(empty); return; }
+    if (rows.length === 0) { body.innerHTML = ''; show(empty); return; }
     body.innerHTML = rows.map((r, i) => `
       <tr class="${profile && r.username === profile.username ? 'leaderboard-row-me' : ''}">
         <td>${i + 1}</td>
@@ -164,6 +186,7 @@ export async function showLeaderboardScreen() {
       </tr>
     `).join('');
   } catch (e) {
+    body.innerHTML = '';
     show(empty);
   }
 }
