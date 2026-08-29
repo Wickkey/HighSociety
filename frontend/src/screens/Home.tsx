@@ -7,6 +7,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { api } from '../api/client';
 import { RecentGamesWidget } from '../components/RecentGamesWidget';
+import { usePolling } from '../hooks/usePolling';
 import { useProfile } from '../state/ProfileContext';
 import type { GlobalStats, RoomSummary } from '../types/api';
 import styles from './Home.module.css';
@@ -104,13 +105,7 @@ function JoinPanel({ onBack }: { onBack: () => void }) {
   const [error, setError] = useState('');
   const navigate = useNavigate();
 
-  useEffect(() => {
-    let cancelled = false;
-    const tick = () => api.rooms().then((r) => { if (!cancelled) setRooms(r.rooms); }).catch(() => {});
-    tick();
-    const timer = setInterval(tick, 2000);
-    return () => { cancelled = true; clearInterval(timer); };
-  }, []);
+  usePolling(() => { api.rooms().then((r) => setRooms(r.rooms)).catch(() => {}); }, 2000);
 
   function joinRoom(code: string) {
     // The real "enter your name and connect" join screen is Phase 2 (it

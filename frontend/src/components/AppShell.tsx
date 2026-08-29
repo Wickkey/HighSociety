@@ -4,6 +4,7 @@
 // popover.
 import { useState } from 'react';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
+import { useLeaveRoomGuard } from '../hooks/useLeaveRoomGuard';
 import { useProfile } from '../state/ProfileContext';
 import styles from './AppShell.module.css';
 
@@ -66,6 +67,14 @@ const SIDEBAR_ITEMS: { to: string; title: string; label: string; iconClassName?:
 ];
 
 function Sidebar() {
+  const navigate = useNavigate();
+  const guardLeave = useLeaveRoomGuard();
+
+  function handleNavClick(e: React.MouseEvent, to: string) {
+    e.preventDefault();
+    guardLeave().then((left) => { if (left) navigate(to); });
+  }
+
   return (
     <nav className={styles.sidebar}>
       {SIDEBAR_ITEMS.map((item) => (
@@ -74,6 +83,7 @@ function Sidebar() {
           to={item.to}
           title={item.title}
           className={({ isActive }) => `${styles.sidebarItem} ${isActive ? styles.sidebarItemActive : ''}`}
+          onClick={(e) => handleNavClick(e, item.to)}
         >
           <svg
             className={`${styles.sidebarIcon} ${item.iconClassName ?? ''}`}
@@ -93,6 +103,7 @@ function ProfileChip() {
   const { profile, logout } = useProfile();
   const [open, setOpen] = useState(false);
   const navigate = useNavigate();
+  const guardLeave = useLeaveRoomGuard();
   if (!profile) return null;
 
   return (
@@ -106,14 +117,14 @@ function ProfileChip() {
           <button
             type="button"
             className={styles.popoverItem}
-            onClick={() => { setOpen(false); navigate('/account'); }}
+            onClick={() => { setOpen(false); guardLeave().then((left) => { if (left) navigate('/account'); }); }}
           >
             Account
           </button>
           <button
             type="button"
             className={`${styles.popoverItem} ${styles.popoverItemDanger}`}
-            onClick={() => { setOpen(false); logout(); navigate('/'); }}
+            onClick={() => { setOpen(false); guardLeave().then((left) => { if (left) { logout(); navigate('/'); } }); }}
           >
             Log out
           </button>
@@ -123,14 +134,22 @@ function ProfileChip() {
   );
 }
 
+// The "High Society" wordmark doubles as a home link (most sites' logos
+// do) -- mid-game it needs the same leave confirmation the sidebar/profile
+// popover already apply, ported from the old frontend's lobby.js
+// onHomeLinkClick.
 export function AppShell() {
   const navigate = useNavigate();
+  const guardLeave = useLeaveRoomGuard();
   return (
     <div className={styles.shell}>
       <Sidebar />
       <div className={styles.mainCol}>
         <header className={styles.topbar}>
-          <button type="button" className={styles.title} onClick={() => navigate('/')}>
+          <button
+            type="button" className={styles.title}
+            onClick={() => guardLeave().then((left) => { if (left) navigate('/'); })}
+          >
             High&nbsp;Society
           </button>
           <ProfileChip />

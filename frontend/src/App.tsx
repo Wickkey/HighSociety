@@ -2,6 +2,8 @@ import { Navigate, Route, Routes } from 'react-router-dom';
 import { AppShell } from './components/AppShell';
 import { Login } from './screens/Login';
 import { Home } from './screens/Home';
+import { Matchmaking } from './screens/Matchmaking';
+import { Room } from './screens/Room/Room';
 import { ComingSoon } from './screens/ComingSoon';
 import { useProfile } from './state/ProfileContext';
 
@@ -23,7 +25,7 @@ export function App() {
     <Routes>
       <Route element={<AppShell />}>
         <Route path="/" element={<Home />} />
-        <Route path="/play" element={<Navigate to="/" replace />} /> {/* onPlayClick (matchmaking) is Phase 2 */}
+        <Route path="/play" element={<Matchmaking />} />
         <Route path="/host-setup/:panel" element={<Home />} />
         <Route path="/join" element={<Navigate to="/host-setup/join" replace />} />
         <Route path="/host" element={<Navigate to="/host-setup/host" replace />} />
@@ -32,7 +34,7 @@ export function App() {
         <Route path="/achievements" element={<ComingSoon title="Achievements" />} />
         <Route path="/account" element={<ComingSoon title="Account" />} />
         <Route path="/my-games" element={<ComingSoon title="My Games" />} />
-        <Route path="/room/:code" element={<ComingSoon title="Room (Phase 2)" />} />
+        <Route path="/room/:code" element={<Room />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
     </Routes>

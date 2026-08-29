@@ -3,7 +3,8 @@
 // backend's own {"error": "..."} message on a non-2xx response, which
 // every screen's error-display logic depends on).
 import type {
-  AccountStats, AppConfig, CreateGameRequest, GlobalStats, GoogleAuthResult, RecentGamesPage, RoomStatus, RoomSummary,
+  AccountStats, AppConfig, CreateGameRequest, GlobalStats, GoogleAuthResult, MatchmakingJoinResult, MatchmakingStatus,
+  RecentGamesPage, RoomStatus, RoomSummary,
 } from '../types/api';
 
 export async function fetchJSON<T>(url: string, opts?: RequestInit): Promise<T> {
@@ -37,11 +38,20 @@ export const api = {
   rooms: () => fetchJSON<{ rooms: RoomSummary[] }>('/api/rooms'),
   createGame: (body: CreateGameRequest) => postJSON<RoomStatus>('/api/create_game', body),
   status: (roomCode: string) => fetchJSON<RoomStatus>(`/api/status?room=${encodeURIComponent(roomCode)}`),
+  addBot: (roomCode: string, botType: string) =>
+    postJSON<unknown>('/api/add_bot', { room: roomCode, bot_type: botType }),
   globalStats: async (): Promise<GlobalStats | null> => {
     const res = await fetch('/api/global_stats');
     if (res.status === 204) return null;
     return res.json();
   },
+
+  matchmakingJoin: (username: string, seats: number) =>
+    postJSON<MatchmakingJoinResult>('/api/matchmaking/join', { username, seats }),
+  matchmakingStatus: (ticketId: string) =>
+    fetchJSON<MatchmakingStatus>(`/api/matchmaking/status?ticket=${encodeURIComponent(ticketId)}`),
+  matchmakingCancel: (ticketId: string) =>
+    postJSON<unknown>('/api/matchmaking/cancel', { ticket_id: ticketId }),
 
   accountStats: (username: string) => fetchJSON<AccountStats>(`/api/profile/${encodeURIComponent(username)}`),
   recentGames: (username: string, limit: number, offset: number) =>

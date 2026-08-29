@@ -69,9 +69,30 @@ export interface CreateGameRequest {
   seed?: number;
 }
 
+export interface RoomPlayer {
+  name: string;
+  is_bot: boolean;
+}
+
 export interface RoomStatus {
   room_code: string;
   exists: boolean;
-  state: string;
-  [key: string]: unknown; // the full shape grows a lot once the lobby/game screens (Phase 2-3) need it -- not worth typing exhaustively yet
+  state: 'lobby' | 'starting' | 'in_progress' | 'finished' | string;
+  seats?: number;
+  joined?: RoomPlayer[];
+  visibility?: 'public' | 'private';
+  reveal_cards?: boolean;
+  show_logs?: boolean;
+  [key: string]: unknown; // the full shape grows a lot once the live-game screen (Phase 3) needs it -- not worth typing exhaustively yet
+}
+
+export interface MatchmakingJoinResult {
+  ticket_id: string;
+}
+
+export interface MatchmakingStatus {
+  matched: boolean;
+  room_code?: string;
+  waiting_count?: number;
+  timed_out?: boolean;
 }

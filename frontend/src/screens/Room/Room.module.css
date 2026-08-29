@@ -1,0 +1,49 @@
+.roomWrap {
+  max-width: 460px;
+  width: 100%;
+  margin: 2rem auto;
+}
+
+.linkRow {
+  display: flex;
+  gap: 0.5rem;
+}
+.linkRow input {
+  flex: 1;
+  margin: 0;
+  padding: 0.5rem 0.65rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--panel-border);
+  background: var(--panel-bg-soft);
+  color: var(--text);
+  font-size: 0.9rem;
+}
+
+.addBotRow {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  margin: 0.8rem 0;
+}
+.addBotRow select {
+  padding: 0.5rem 0.65rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--panel-border);
+  background: var(--panel-bg-soft);
+  color: var(--text);
+}
+
+.linkButton {
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  font-weight: 600;
+  color: var(--accent-strong);
+  cursor: pointer;
+  text-decoration: underline;
+}
+.linkButton:hover { filter: brightness(1.15); }
+
+.hint { color: var(--muted); font-size: 0.85rem; margin-top: 0.6rem; }
