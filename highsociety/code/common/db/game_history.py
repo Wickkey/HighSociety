@@ -506,6 +506,104 @@ def username_is_taken(username: str) -> bool:
 _DEFAULT_ELO = 1000
 
 
+class PlayerSession:
+    """
+    Per-username, in-memory cache of {player_id, elo} -- today just enough
+    to make elo reads instant, with room to grow (a last_seen_at for
+    daily-visit tracking, a reward-coin balance, ...) later without new
+    plumbing per feature; see this module's own history for the actual
+    design discussion this came out of.
+
+    The database is always the source of truth. This is a read-through/
+    write-through cache in front of it, never an independent store: a
+    session is only ever created from a genuine DB read (get_player_
+    session, on a real cache miss), and only ever updated in place from a
+    genuine DB write (record_finished_game's own elo update, right after
+    it commits). Deliberately *not* tied to any live connection or
+    per-tab session -- any ordinary request that already names a
+    username (a profile view, a matchmaking join, a game finishing) is a
+    fine moment to populate or refresh this. A server restart just wipes
+    it; the next request for any given username pays one real DB read
+    and the process is right back to being fully warm for that username,
+    same as day one -- there's nothing to migrate or persist about the
+    cache itself.
+    """
+    __slots__ = ("player_id", "elo")
+
+    def __init__(self, player_id: int, elo: int):
+        self.player_id = player_id
+        self.elo = elo
+
+
+_player_sessions: dict = {}
+_player_sessions_lock = threading.Lock()
+
+
+def _peek_player_session(username: str) -> Optional[PlayerSession]:
+    """Cache-only lookup, no DB fallback -- for a caller (get_player_
+    profile_stats) that's about to open its own connection regardless and
+    wants to skip a redundant id/elo query only on an actual hit, not pay
+    for a second connection just to check."""
+    with _player_sessions_lock:
+        return _player_sessions.get(username)
+
+
+def _cache_player_session(username: str, player_id: int, elo: int) -> None:
+    """Populates the cache from a row a caller just read anyway (never a
+    dedicated read of its own) -- setdefault so a slower concurrent
+    caller for the same username can't clobber a fresher entry another
+    thread already installed."""
+    with _player_sessions_lock:
+        _player_sessions.setdefault(username, PlayerSession(player_id, elo))
+
+
+def _refresh_cached_elo(username: str, elo: int) -> None:
+    """Called the instant record_finished_game actually commits a new
+    elo for `username` -- keeps an already-warm cache entry from ever
+    going stale, without waiting on anything to expire. A no-op if this
+    process has never cached this username (nothing to refresh; the next
+    real read will just populate it fresh from the database, which
+    already reflects this write)."""
+    with _player_sessions_lock:
+        session = _player_sessions.get(username)
+        if session is not None:
+            session.elo = elo
+
+
+def get_player_session(username: str) -> Optional[PlayerSession]:
+    """The cached (player_id, elo) pair for `username`, doing exactly one
+    real DB read the first time this process ever needs it and reusing
+    that from then on (see PlayerSession's own docstring for the full
+    read-through/write-through contract). None only if the username
+    genuinely has no players row yet, there's no database configured, or
+    the lookup itself errors.
+    """
+    session = _peek_player_session(username)
+    if session is not None:
+        return session
+    if not is_configured():
+        return None
+    ensure_schema()
+    if not _schema_ready:
+        return None
+    conn = None
+    try:
+        conn = _connect()
+        with conn, conn.cursor() as cur:
+            cur.execute("SELECT id, elo FROM players WHERE username = %s", (username,))
+            row = cur.fetchone()
+            if row is None:
+                return None
+            _cache_player_session(username, row[0], row[1])
+            return _peek_player_session(username)
+    except Exception as e:  # noqa: BLE001
+        LoggingManager.warning(f"game_history.get_player_session failed: {e}")
+        return None
+    finally:
+        if conn is not None:
+            conn.close()
+
+
 def get_player_elo(username: str) -> int:
     """
     A player's current rating, for matchmaking.py to pair by -- 1000 (the
@@ -516,25 +614,13 @@ def get_player_elo(username: str) -> int:
     the lookup itself errors. Matchmaking degrades gracefully to "everyone
     is equal" in every one of those cases rather than failing to queue at
     all.
+
+    Routed through get_player_session's cache -- a warm entry (this
+    username has been read or written before in this process) answers
+    with no database call at all.
     """
-    if not is_configured():
-        return _DEFAULT_ELO
-    ensure_schema()
-    if not _schema_ready:
-        return _DEFAULT_ELO
-    conn = None
-    try:
-        conn = _connect()
-        with conn, conn.cursor() as cur:
-            cur.execute("SELECT elo FROM players WHERE username = %s", (username,))
-            row = cur.fetchone()
-            return row[0] if row is not None else _DEFAULT_ELO
-    except Exception as e:  # noqa: BLE001
-        LoggingManager.warning(f"game_history.get_player_elo failed: {e}")
-        return _DEFAULT_ELO
-    finally:
-        if conn is not None:
-            conn.close()
+    session = get_player_session(username)
+    return session.elo if session is not None else _DEFAULT_ELO
 
 
 def get_player_achievements(username: str) -> list:
@@ -582,13 +668,15 @@ def get_player_profile_stats(username: str) -> Optional[dict]:
     "played zero games" for the caller, though today's UI renders both as
     an empty profile either way.
 
-    `elo` is included here (not left to a separate get_player_elo() call)
-    specifically so /api/profile can answer with exactly one database
-    connection instead of two -- each _connect() call is a real TCP+TLS
-    handshake to a remote Supabase Postgres instance, not a local
-    round-trip, and this endpoint was visibly slow to load partly because
-    of that redundant second connection. get_player_elo() itself stays
-    (matchmaking.py calls it on its own, unrelated to this endpoint).
+    `elo`/`player_id` come from the PlayerSession cache (see its own
+    docstring) when this username is already warm in this process --
+    zero extra database round trips for that part on a cache hit, on top
+    of the original "one connection instead of two" fix this docstring
+    used to describe. On a cold cache, this still reads id+elo in the
+    very same connection as the two queries below (matching that
+    original fix exactly) rather than paying for get_player_session's
+    own separate connection, then populates the cache from that same row
+    so the *next* call is warm.
 
     The three averages come from `game_results` (added after
     `player_games`) rather than `player_games` itself -- a player whose
@@ -602,15 +690,20 @@ def get_player_profile_stats(username: str) -> Optional[dict]:
     ensure_schema()
     if not _schema_ready:
         return None
+    cached = _peek_player_session(username)
     conn = None
     try:
         conn = _connect()
         with conn, conn.cursor() as cur:
-            cur.execute("SELECT id, elo FROM players WHERE username = %s", (username,))
-            row = cur.fetchone()
-            if row is None:
-                return None
-            player_id, elo = row
+            if cached is not None:
+                player_id, elo = cached.player_id, cached.elo
+            else:
+                cur.execute("SELECT id, elo FROM players WHERE username = %s", (username,))
+                row = cur.fetchone()
+                if row is None:
+                    return None
+                player_id, elo = row
+                _cache_player_session(username, player_id, elo)
             cur.execute(
                 "SELECT count(*), count(*) FILTER (WHERE is_winner) FROM player_games WHERE player_id = %s",
                 (player_id,),
@@ -1286,6 +1379,10 @@ def record_finished_game(*, room_code: str, seats: int, bot_mix: list,
             seat_player_ids = []  # in participant order -- becomes player_1..player_5 below
             winner_player_id = None  # first winner only -- see this function's own docstring on ties
             player_id_by_game_username = {}  # real per-game username (bot or human) -> player_id
+            # Real, stable DB usernames only (never a bot's per-game display
+            # name, which isn't a stable identity -- see the PlayerSession
+            # cache refresh below, right before this function returns).
+            real_username_by_player_id = {}
             for index, p in enumerate(participants):
                 player_id = None
                 google_id = None
@@ -1310,6 +1407,7 @@ def record_finished_game(*, room_code: str, seats: int, bot_mix: list,
                             player_id, elo_before = row
                 else:
                     player_id, google_id, elo_before = _upsert_player(cur, p["username"], p["name"])
+                    real_username_by_player_id[player_id] = p["username"]
                     cur.execute(
                         "UPDATE players SET games_played = games_played + 1, games_won = games_won + %s WHERE id = %s",
                         (1 if p["is_winner"] else 0, player_id),
@@ -1398,6 +1496,17 @@ def record_finished_game(*, room_code: str, seats: int, bot_mix: list,
                 player_id = rated_player_ids[rating_key]
                 deltas_by_player_id.setdefault(player_id, []).append(delta)
                 rating_keys_by_player_id.setdefault(player_id, []).append(rating_key)
+            # (username, new_rating) pairs to refresh in the PlayerSession
+            # cache -- collected here but deliberately not applied until
+            # after this whole transaction actually commits (see below):
+            # refreshing the in-memory cache mid-transaction would leave it
+            # showing a change that a later failure in this same block (e.g.
+            # _record_auction_rounds) could still roll back, which is
+            # exactly the kind of cache/database disagreement this cache
+            # can't afford to have. Bots are skipped -- their "username" is
+            # an ephemeral per-game display name, not a stable identity
+            # anything would ever look up again.
+            cache_refreshes = []
             for player_id, seat_deltas in deltas_by_player_id.items():
                 combined_delta = round(sum(seat_deltas) / len(seat_deltas))
                 if combined_delta:
@@ -1411,6 +1520,9 @@ def record_finished_game(*, room_code: str, seats: int, bot_mix: list,
                         """,
                         (player_id, game_id, old_rating, new_rating, combined_delta),
                     )
+                    real_username = real_username_by_player_id.get(player_id)
+                    if real_username is not None:
+                        cache_refreshes.append((real_username, new_rating))
                     # Keyed by rating_key (a human's real username, see
                     # game_username's own docstring) so the caller
                     # (web_server.py's post-game reveal) can look a
@@ -1440,6 +1552,11 @@ def record_finished_game(*, room_code: str, seats: int, bot_mix: list,
     finally:
         if conn is not None:
             conn.close()
+    # Only reached once the transaction above has actually committed
+    # (the `with conn` block's own clean exit) -- see cache_refreshes'
+    # own comment on why this can't happen any earlier.
+    for username, new_rating in cache_refreshes:
+        _refresh_cached_elo(username, new_rating)
     return elo_changes
 
 

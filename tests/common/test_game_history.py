@@ -17,6 +17,19 @@ def reset_schema_cache():
     game_history._schema_ready = False
 
 
+@pytest.fixture(autouse=True)
+def reset_player_sessions():
+    """_player_sessions (PlayerSession's own module-level cache) is process-
+    wide by design (see its own docstring) -- exactly the same reason
+    _schema_ready needs resetting around every test, so one test caching
+    "alice" can't make a later, unrelated test's mocked cursor calls come
+    out short (a cache hit skips a query the mock's fetchone.side_effect
+    list still expects to be consumed in order)."""
+    game_history._player_sessions = {}
+    yield
+    game_history._player_sessions = {}
+
+
 @pytest.fixture
 def no_database_url(monkeypatch):
     monkeypatch.delenv("DATABASE_URL", raising=False)
@@ -815,7 +828,7 @@ def test_get_player_elo_returns_the_stored_value(database_url):
     game_history._schema_ready = True
     conn, cursor = _fake_connection()
     cursor.fetchone.side_effect = None
-    cursor.fetchone.return_value = (1234,)
+    cursor.fetchone.return_value = (1, 1234)  # (player_id, elo) -- see PlayerSession
     with patch.object(game_history, "_connect", return_value=conn):
         assert game_history.get_player_elo("alice") == 1234
 
@@ -833,6 +846,76 @@ def test_get_player_elo_defaults_to_1000_on_a_db_error(database_url):
     game_history._schema_ready = True
     with patch.object(game_history, "_connect", side_effect=RuntimeError("unreachable")):
         assert game_history.get_player_elo("alice") == 1000
+
+
+def test_get_player_elo_second_call_is_served_from_the_cache_with_no_db_call(database_url):
+    """PlayerSession's whole point: a username already read once in this
+    process answers again with zero database interaction -- confirmed
+    here by making _connect blow up on a second call, which would fail
+    the test if the cache weren't actually being used."""
+    game_history._schema_ready = True
+    conn, cursor = _fake_connection()
+    cursor.fetchone.side_effect = None
+    cursor.fetchone.return_value = (1, 1234)
+    with patch.object(game_history, "_connect", return_value=conn) as mock_connect:
+        assert game_history.get_player_elo("alice") == 1234
+        assert game_history.get_player_elo("alice") == 1234
+        mock_connect.assert_called_once()
+
+
+def test_record_finished_game_refreshes_an_already_cached_elo(database_url):
+    """The write-through half of PlayerSession: once a game actually
+    finishes (and its transaction commits), a human participant's
+    already-warm cache entry reflects the new rating immediately --
+    without needing a fresh read to notice the change."""
+    game_history._schema_ready = True
+    game_history._player_sessions["alice"] = game_history.PlayerSession(player_id=10, elo=1000)
+    conn, cursor = _fake_connection()
+    participants = [
+        {"is_bot": False, "username": "alice", "name": "Alice", "game_username": "alice",
+         "points": 10, "money_left": 5, "is_winner": True, "eliminated": False},
+        {"is_bot": False, "username": "bob", "name": "Bob", "game_username": "bob",
+         "points": 0, "money_left": 20, "is_winner": False, "eliminated": False},
+    ]
+    with patch.object(game_history, "_connect", return_value=conn), \
+         patch.object(game_history, "_upsert_player",
+                      side_effect=[(10, "google-alice", 1000), (11, "google-bob", 1000)]):
+        game_history.record_finished_game(
+            room_code="ABCDE", seats=2, bot_mix=[],
+            started_at=datetime.datetime.now(datetime.timezone.utc),
+            finished_at=datetime.datetime.now(datetime.timezone.utc),
+            participants=participants,
+        )
+    assert game_history._player_sessions["alice"].elo != 1000
+
+
+def test_record_finished_game_does_not_refresh_the_cache_if_the_transaction_fails(database_url):
+    """A failure anywhere in record_finished_game's single transaction
+    rolls back every write it made (games/ratings/players.elo included) --
+    the in-memory cache must never show a change the database itself
+    threw away, so the refresh only happens after a clean commit (see
+    record_finished_game's own comment on cache_refreshes)."""
+    game_history._schema_ready = True
+    game_history._player_sessions["alice"] = game_history.PlayerSession(player_id=10, elo=1000)
+    conn, cursor = _fake_connection()
+    participants = [
+        {"is_bot": False, "username": "alice", "name": "Alice", "game_username": "alice",
+         "points": 10, "money_left": 5, "is_winner": True, "eliminated": False},
+        {"is_bot": False, "username": "bob", "name": "Bob", "game_username": "bob",
+         "points": 0, "money_left": 20, "is_winner": False, "eliminated": False},
+    ]
+    with patch.object(game_history, "_connect", return_value=conn), \
+         patch.object(game_history, "_upsert_player",
+                      side_effect=[(10, "google-alice", 1000), (11, "google-bob", 1000)]), \
+         patch.object(game_history, "_record_auction_rounds", side_effect=RuntimeError("boom")):
+        result = game_history.record_finished_game(
+            room_code="ABCDE", seats=2, bot_mix=[],
+            started_at=datetime.datetime.now(datetime.timezone.utc),
+            finished_at=datetime.datetime.now(datetime.timezone.utc),
+            participants=participants, auction_rounds=[{"round_number": 1}],
+        )
+    assert result == {}
+    assert game_history._player_sessions["alice"].elo == 1000  # unchanged -- the write never committed
 
 
 def test_create_google_player_is_a_no_op_without_a_database(no_database_url):
