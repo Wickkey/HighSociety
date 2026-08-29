@@ -33,6 +33,7 @@ how those fit together):
 import datetime
 import os
 import threading
+import time
 from typing import Callable, Optional
 
 from highsociety.code.common import elo
@@ -950,46 +951,81 @@ def get_game_detail(game_id: int) -> Optional[dict]:
             _release_connection(conn)
 
 
-def get_leaderboard(limit: int = 50) -> list:
+_LEADERBOARD_CACHE_TTL_SECONDS = 20
+_leaderboard_cache: dict = {}  # (limit, offset) -> (cached_at_monotonic, result)
+_leaderboard_cache_lock = threading.Lock()
+
+
+def get_leaderboard(limit: int = 20, offset: int = 0) -> dict:
     """
-    Top `limit` players by elo -- {"username", "elo", "games_played",
-    "games_won"} -- restricted to Google-linked accounts (a guest's elo
-    never moves off the 1000 default, so including them would just be a
-    meaningless tie-heavy list) and explicitly excluding the 3 reserved
-    bot identities (see the `bots` table): bots are real rated
-    participants now (see record_finished_game's own docstring) so their
-    elo genuinely moves, but it must never be shown to players. []
-    on any failure or no database.
+    Page of players ranked by elo -- {"rows": [{"username", "elo",
+    "games_played", "games_won"}, ...], "has_more": bool}. Restricted to
+    Google-linked accounts (a guest's elo never moves off the 1000
+    default, so including them would just be a meaningless tie-heavy
+    list) and explicitly excluding the 3 reserved bot identities (see the
+    `bots` table): bots are real rated participants now (see record_
+    finished_game's own docstring) so their elo genuinely moves, but it
+    must never be shown to players. {"rows": [], "has_more": False} on
+    any failure or no database.
+
+    The leaderboard is the exact same data for every single visitor --
+    unlike everything else in this module, there's no per-user identity
+    involved at all, which makes it the cleanest possible caching target:
+    each (limit, offset) page is cached in memory for
+    _LEADERBOARD_CACHE_TTL_SECONDS and served with zero database
+    round-trips to every request that lands within that window, however
+    many concurrent visitors that is. 20s of staleness is imperceptible
+    for a leaderboard (nobody needs their rank to update mid-second) and
+    turns "the leaderboard should load instantly, it's the same for
+    everyone" from a database-latency problem into a non-problem.
     """
+    cache_key = (limit, offset)
+    now = time.monotonic()
+    with _leaderboard_cache_lock:
+        cached = _leaderboard_cache.get(cache_key)
+    if cached is not None and now - cached[0] < _LEADERBOARD_CACHE_TTL_SECONDS:
+        return cached[1]
+
+    empty = {"rows": [], "has_more": False}
     if not is_configured():
-        return []
+        return empty
     ensure_schema()
     if not _schema_ready:
-        return []
+        return empty
     conn = None
     try:
         conn = _connect()
         with conn, conn.cursor() as cur:
+            # limit + 1 to detect whether another page exists, same
+            # lookahead trick get_recent_games already uses -- no separate
+            # COUNT(*) query needed.
             cur.execute(
                 """
                 SELECT username, elo, games_played, games_won
                 FROM players
                 WHERE google_id IS NOT NULL AND id NOT IN (SELECT player_id FROM bots)
-                ORDER BY elo DESC
-                LIMIT %s
+                ORDER BY elo DESC, username ASC
+                LIMIT %s OFFSET %s
                 """,
-                (limit,),
+                (limit + 1, offset),
             )
-            return [
-                {"username": username, "elo": elo, "games_played": games_played, "games_won": games_won}
-                for username, elo, games_played, games_won in cur.fetchall()
+            all_rows = cur.fetchall()
+            has_more = len(all_rows) > limit
+            rows = [
+                {"username": u, "elo": e, "games_played": gp, "games_won": gw}
+                for u, e, gp, gw in all_rows[:limit]
             ]
+            result = {"rows": rows, "has_more": has_more}
     except Exception as e:  # noqa: BLE001
         LoggingManager.warning(f"game_history.get_leaderboard failed: {e}")
-        return []
+        return empty
     finally:
         if conn is not None:
             _release_connection(conn)
+
+    with _leaderboard_cache_lock:
+        _leaderboard_cache[cache_key] = (now, result)
+    return result
 
 
 def get_rating_history(username: str) -> list:
@@ -1619,6 +1655,14 @@ def record_finished_game(*, room_code: str, seats: int, bot_mix: list,
     # own comment on why this can't happen any earlier.
     for username, new_rating in cache_refreshes:
         _refresh_cached_elo(username, new_rating)
+    if cache_refreshes:
+        # A rated game just changed someone's standing -- don't make
+        # everyone wait out the rest of the leaderboard's TTL to see it.
+        # Cheap regardless of how many pages are cached: worst case, the
+        # very next leaderboard view for each page pays one real query
+        # again instead of a cache hit.
+        with _leaderboard_cache_lock:
+            _leaderboard_cache.clear()
     return elo_changes
 
 

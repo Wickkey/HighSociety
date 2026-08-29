@@ -1853,12 +1853,32 @@ def test_game_detail_endpoint_returns_the_detail(monkeypatch):
 
 def test_leaderboard_endpoint_returns_a_list(monkeypatch):
     monkeypatch.setattr(game_history, "get_leaderboard",
-                         lambda **kw: [{"username": "alice", "elo": 1200, "games_played": 10, "games_won": 6}])
+                         lambda **kw: {"rows": [{"username": "alice", "elo": 1200, "games_played": 10, "games_won": 6}],
+                                       "has_more": False})
     resp = web_server.app.test_client().get("/api/leaderboard")
     assert resp.status_code == 200
     assert resp.get_json() == {
         "leaderboard": [{"username": "alice", "elo": 1200, "games_played": 10, "games_won": 6}],
+        "has_more": False,
     }
+
+
+def test_leaderboard_endpoint_passes_through_limit_and_offset(monkeypatch):
+    seen = {}
+
+    def fake_get_leaderboard(limit=20, offset=0):
+        seen["args"] = (limit, offset)
+        return {"rows": [], "has_more": False}
+
+    monkeypatch.setattr(game_history, "get_leaderboard", fake_get_leaderboard)
+    resp = web_server.app.test_client().get("/api/leaderboard?limit=20&offset=20")
+    assert resp.status_code == 200
+    assert seen["args"] == (20, 20)
+
+
+def test_leaderboard_endpoint_rejects_non_integer_pagination_params(monkeypatch):
+    resp = web_server.app.test_client().get("/api/leaderboard?offset=abc")
+    assert resp.status_code == 400
 
 
 def test_rating_history_endpoint_returns_a_list(monkeypatch):

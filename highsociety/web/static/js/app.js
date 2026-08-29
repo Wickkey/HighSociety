@@ -22,7 +22,7 @@ import {
 } from './lobby/lobby.js';
 import { onAddBot } from './lobby/playerList.js';
 import { showGameHistoryScreen, onLoadMoreGameHistory } from './lobby/gameHistory.js';
-import { showLeaderboardScreen } from './lobby/leaderboard.js';
+import { showLeaderboardScreen, onLeaderboardPrevClick, onLeaderboardNextClick } from './lobby/leaderboard.js';
 import { onPlayClick, onFindMatch, onMatchmakingCancel, onMatchmakingAddBots } from './lobby/matchmaking.js';
 import {
   onRequestRematchClick, onCancelRematchForm, onSendRematchRequest, onAcceptRematch, onDeclineRematch,
@@ -111,6 +111,8 @@ function wireStaticHandlers() {
   $('btn-account-my-games').addEventListener('click', () => navigateFromSidebar(showGameHistoryScreen));
   $('btn-game-history-load-more').addEventListener('click', onLoadMoreGameHistory);
   $('sidebar-leaderboard').addEventListener('click', () => navigateFromSidebar(showLeaderboardScreen));
+  $('btn-leaderboard-prev').addEventListener('click', onLeaderboardPrevClick);
+  $('btn-leaderboard-next').addEventListener('click', onLeaderboardNextClick);
   $('game-detail-close').addEventListener('click', closeGameDetailModal);
   $('btn-account-save').addEventListener('click', onAccountSaveClick);
   $('btn-account-edit-username').addEventListener('click', onAccountEditUsernameClick);

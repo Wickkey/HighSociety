@@ -1,4 +1,5 @@
 import datetime
+import time
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -45,6 +46,19 @@ def mock_release_connection(monkeypatch):
     mock = MagicMock()
     monkeypatch.setattr(game_history, "_release_connection", mock)
     return mock
+
+
+@pytest.fixture(autouse=True)
+def reset_leaderboard_cache():
+    """_leaderboard_cache is process-wide by design (see get_leaderboard's
+    own docstring -- the whole point is one shared cache for every
+    visitor) -- same reasoning as reset_player_sessions above: reset it
+    around every test so one test's cached page can't make a later,
+    differently-mocked test see stale cached rows instead of its own
+    mocked cursor's data."""
+    game_history._leaderboard_cache = {}
+    yield
+    game_history._leaderboard_cache = {}
 
 
 @pytest.fixture
@@ -1361,7 +1375,69 @@ def test_get_leaderboard_excludes_guests_and_bots_by_query(database_url):
     query = cursor.execute.call_args.args[0]
     assert "google_id IS NOT NULL" in query
     assert "NOT IN (SELECT player_id FROM bots)" in query
-    assert result == [{"username": "alice", "elo": 1200, "games_played": 10, "games_won": 6}]
+    assert result == {"rows": [{"username": "alice", "elo": 1200, "games_played": 10, "games_won": 6}],
+                       "has_more": False}
+
+
+def test_get_leaderboard_sets_has_more_when_another_page_exists(database_url):
+    game_history._schema_ready = True
+    conn, cursor = _fake_connection()
+    cursor.fetchall = MagicMock(return_value=[("alice", 1200, 10, 6), ("bob", 1100, 5, 2)])
+    with patch.object(game_history, "_connect", return_value=conn):
+        result = game_history.get_leaderboard(limit=1, offset=0)
+    assert result["has_more"] is True
+    assert [r["username"] for r in result["rows"]] == ["alice"]  # only `limit` rows kept
+
+
+def test_get_leaderboard_is_cached_across_calls_with_no_further_db_hit(database_url):
+    """The leaderboard is identical for every visitor -- confirmed here by
+    making _connect blow up on a second call for the same page, which
+    would fail the test if the cache weren't actually being used."""
+    game_history._schema_ready = True
+    conn, cursor = _fake_connection()
+    cursor.fetchall = MagicMock(return_value=[("alice", 1200, 10, 6)])
+    with patch.object(game_history, "_connect", return_value=conn) as mock_connect:
+        first = game_history.get_leaderboard(limit=20, offset=0)
+        second = game_history.get_leaderboard(limit=20, offset=0)
+        mock_connect.assert_called_once()
+    assert first == second
+
+
+def test_get_leaderboard_cache_is_scoped_per_page(database_url):
+    """A different (limit, offset) page is a genuinely different cache
+    entry -- confirmed by requiring a second real _connect() call for a
+    different offset."""
+    game_history._schema_ready = True
+    conn, cursor = _fake_connection()
+    cursor.fetchall = MagicMock(return_value=[("alice", 1200, 10, 6)])
+    with patch.object(game_history, "_connect", return_value=conn) as mock_connect:
+        game_history.get_leaderboard(limit=20, offset=0)
+        game_history.get_leaderboard(limit=20, offset=20)
+        assert mock_connect.call_count == 2
+
+
+def test_record_finished_game_invalidates_the_leaderboard_cache(database_url, mock_release_connection):
+    """A rated game just changed someone's standing -- don't make every
+    visitor wait out the rest of the leaderboard's TTL to see it."""
+    game_history._schema_ready = True
+    game_history._leaderboard_cache[(20, 0)] = (time.monotonic(), {"rows": ["stale"], "has_more": False})
+    conn, cursor = _fake_connection()
+    participants = [
+        {"is_bot": False, "username": "alice", "name": "Alice", "game_username": "alice",
+         "points": 10, "money_left": 5, "is_winner": True, "eliminated": False},
+        {"is_bot": False, "username": "bob", "name": "Bob", "game_username": "bob",
+         "points": 0, "money_left": 20, "is_winner": False, "eliminated": False},
+    ]
+    with patch.object(game_history, "_connect", return_value=conn), \
+         patch.object(game_history, "_upsert_player",
+                      side_effect=[(10, "google-alice", 1000), (11, "google-bob", 1000)]):
+        game_history.record_finished_game(
+            room_code="ABCDE", seats=2, bot_mix=[],
+            started_at=datetime.datetime.now(datetime.timezone.utc),
+            finished_at=datetime.datetime.now(datetime.timezone.utc),
+            participants=participants,
+        )
+    assert (20, 0) not in game_history._leaderboard_cache
 
 
 def test_get_rating_history_is_empty_without_a_database(no_database_url):

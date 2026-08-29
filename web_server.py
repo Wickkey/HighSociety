@@ -869,10 +869,18 @@ def api_game_detail(game_id):
 
 @app.route("/api/leaderboard")
 def api_leaderboard():
-    """Top players by Elo -- Google-linked accounts only (see
-    get_leaderboard's own docstring for why guests and bots are both
-    excluded)."""
-    return jsonify({"leaderboard": game_history.get_leaderboard()})
+    """Players ranked by Elo, paginated (?limit/?offset -- default 20 per
+    page) -- Google-linked accounts only (see get_leaderboard's own
+    docstring for why guests and bots are both excluded). The exact same
+    data for every visitor, so get_leaderboard caches each page briefly
+    -- this endpoint itself stays a thin pass-through."""
+    try:
+        limit = int(request.args.get("limit", 20))
+        offset = int(request.args.get("offset", 0))
+    except (TypeError, ValueError):
+        return jsonify({"error": "limit/offset must be integers"}), 400
+    result = game_history.get_leaderboard(limit=limit, offset=offset)
+    return jsonify({"leaderboard": result["rows"], "has_more": result["has_more"]})
 
 
 @app.route("/api/profile/<username>/rating_history")

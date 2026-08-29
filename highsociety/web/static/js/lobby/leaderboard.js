@@ -128,33 +128,74 @@ async function renderSparkline(history) {
   });
 }
 
-// The chart and the table are two entirely independent fetches with no
-// data dependency on each other -- they used to run one after the other
-// (await the chart, then start the table), so a slow rating-history
-// request delayed the table from even starting. Both now fire in
-// parallel and each renders into its own already-reserved slot the
-// moment its own data arrives, regardless of which one that is or how
-// long the other takes -- see this session's own "show whichever comes
-// first" note in .claude/skills.md.
+// loadMyRatingChart/renderSparkline/loadChartJs below are deliberately
+// kept even though nothing on this screen calls them anymore -- the
+// leaderboard is the exact same data for every visitor and should load
+// instantly (see get_leaderboard's own caching for the backend half of
+// that), which a per-player chart fetch sharing the screen had no
+// business slowing down or blocking on. The chart itself isn't gone,
+// just relocated to wherever it's asked to move to next.
+const PAGE_SIZE = 20;
+let leaderboardOffset = 0;
+
 export function showLeaderboardScreen() {
   showScreen('screen-leaderboard');
   setScreenPath('/leaderboard');
+  leaderboardOffset = 0;
+  loadLeaderboardPage(loadProfile());
+}
 
-  const profile = loadProfile();
-  const myRatingSection = $('leaderboard-my-rating');
-  if (profile && profile.google_id) {
-    // Reserve the slot and show it loading immediately -- we already
-    // know this profile *should* have a chart, so there's no reason to
-    // wait for the fetch to even decide whether to show the section.
-    show(myRatingSection);
-    $('leaderboard-sparkline').classList.add('loading');
-    $('leaderboard-sparkline').innerHTML = '';
-    loadMyRatingChart(profile);
-  } else {
-    hide(myRatingSection); // guests have no rating history to show
+export function onLeaderboardPrevClick() {
+  leaderboardOffset = Math.max(0, leaderboardOffset - PAGE_SIZE);
+  loadLeaderboardPage(loadProfile());
+}
+
+export function onLeaderboardNextClick() {
+  leaderboardOffset += PAGE_SIZE;
+  loadLeaderboardPage(loadProfile());
+}
+
+async function loadLeaderboardPage(profile) {
+  const body = $('leaderboard-body');
+  const empty = $('leaderboard-empty');
+  const pagination = $('leaderboard-pagination');
+  const offset = leaderboardOffset; // snapshot -- see the stale-response guard below
+  hide(empty);
+  hide(pagination);
+  body.innerHTML = '<tr class="leaderboard-loading-row"><td colspan="5">Loading…</td></tr>';
+  try {
+    const result = await fetchJSON(`/api/leaderboard?limit=${PAGE_SIZE}&offset=${offset}`);
+    if (offset !== leaderboardOffset) return; // Prev/Next clicked again before this resolved -- a newer request already owns the screen
+    const rows = result.leaderboard || [];
+    if (rows.length === 0) {
+      body.innerHTML = '';
+      // An empty *first* page really means "no ranked players yet"; an
+      // empty later page means Prev/Next raced past the real end (should
+      // only happen if the leaderboard shrank between page loads) --
+      // either way, back off to the last page that actually had rows
+      // rather than stranding the visitor on a blank one.
+      if (offset === 0) { show(empty); return; }
+      leaderboardOffset = Math.max(0, offset - PAGE_SIZE);
+      loadLeaderboardPage(profile);
+      return;
+    }
+    body.innerHTML = rows.map((r, i) => `
+      <tr class="${profile && r.username === profile.username ? 'leaderboard-row-me' : ''}">
+        <td>${offset + i + 1}</td>
+        <td>${escapeHtml(r.username)}</td>
+        <td>${r.elo}</td>
+        <td>${r.games_played}</td>
+        <td>${r.games_won}</td>
+      </tr>
+    `).join('');
+    $('btn-leaderboard-prev').disabled = offset === 0;
+    $('btn-leaderboard-next').disabled = !result.has_more;
+    $('leaderboard-page-label').textContent = `${offset + 1}–${offset + rows.length}`;
+    show(pagination);
+  } catch (e) {
+    body.innerHTML = '';
+    show(empty);
   }
-
-  loadLeaderboardTable(profile);
 }
 
 async function loadMyRatingChart(profile) {
@@ -164,29 +205,5 @@ async function loadMyRatingChart(profile) {
     await renderSparkline(result.history || []);
   } catch (e) {
     hide($('leaderboard-my-rating'));
-  }
-}
-
-async function loadLeaderboardTable(profile) {
-  const body = $('leaderboard-body');
-  const empty = $('leaderboard-empty');
-  hide(empty);
-  body.innerHTML = '<tr class="leaderboard-loading-row"><td colspan="5">Loading…</td></tr>';
-  try {
-    const result = await fetchJSON('/api/leaderboard');
-    const rows = result.leaderboard || [];
-    if (rows.length === 0) { body.innerHTML = ''; show(empty); return; }
-    body.innerHTML = rows.map((r, i) => `
-      <tr class="${profile && r.username === profile.username ? 'leaderboard-row-me' : ''}">
-        <td>${i + 1}</td>
-        <td>${escapeHtml(r.username)}</td>
-        <td>${r.elo}</td>
-        <td>${r.games_played}</td>
-        <td>${r.games_won}</td>
-      </tr>
-    `).join('');
-  } catch (e) {
-    body.innerHTML = '';
-    show(empty);
   }
 }
