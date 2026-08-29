@@ -1,11 +1,11 @@
 // Recent-games list rendering -- shared by the home screen's small Recent
 // Games widget and the full My Games screen (see account.js's
 // showAccountScreen, which links here via #btn-account-my-games). Both
-// just fetch /api/games/<username> and hand the same rows to
-// renderGamesList; the actual "click a game -> see full results" view
-// lives in ui/modals.js's openGameDetailModal, which either caller can
-// reuse without knowing anything about the list that led to it.
-import { $, hide, show, showScreen } from '../utils/dom.js';
+// fetch /api/games/<username> and hand the same rows to gamesListHtml;
+// the actual "click a game -> see full results" view lives in
+// ui/modals.js's openGameDetailModal, which either caller can reuse
+// without knowing anything about the list that led to it.
+import { $, hide, show, showScreen, setScreenPath } from '../utils/dom.js';
 import { escapeHtml } from '../utils/formatting.js';
 import { loadProfile } from '../auth/profile.js';
 import { fetchJSON } from './lobby.js';
@@ -37,26 +37,59 @@ function gamesListHtml(games, myUsername) {
 
 function wireRowClicks(container) {
   container.querySelectorAll('.recent-game-row:not([data-wired])').forEach((row) => {
-    row.dataset.wired = 'true'; // appendGamesList calls this repeatedly across pages -- don't double-bind rows already wired by an earlier page
+    row.dataset.wired = 'true'; // re-rendering a page whose rows are already wired shouldn't double-bind them
     row.addEventListener('click', () => openGameDetailModal(row.dataset.gameId));
   });
 }
 
-// Home widget: always a full, one-shot render (it never paginates).
-function renderGamesList(container, games, myUsername) {
-  container.innerHTML = gamesListHtml(games, myUsername);
+// Renders `games` into `container` -- but only actually touches the DOM
+// if the resulting HTML differs from what's already there. Both the home
+// widget and My Games call this on every visit (stale-while-revalidate,
+// see fetchGamesPage below), and re-painting identical content every
+// single time was the whole "annoying tiny refresh" report: nothing
+// visibly changed, yet the list still flashed. Skipping a no-op DOM write
+// makes the common case (nothing changed since last look) produce zero
+// visible change, matching what actually happened.
+function renderIfChanged(container, games, myUsername) {
+  const html = gamesListHtml(games, myUsername);
+  if (container.dataset.renderedHtml === html) return false;
+  container.innerHTML = html;
+  container.dataset.renderedHtml = html;
   wireRowClicks(container);
+  return true;
 }
 
-// My Games: appends a page's rows onto whatever's already there instead
-// of replacing it, so "Load more" grows the list rather than restarting
-// it from scratch.
-function appendGamesList(container, games, myUsername) {
-  container.insertAdjacentHTML('beforeend', gamesListHtml(games, myUsername));
-  wireRowClicks(container);
+// One page of a player's game history, cached in memory keyed by
+// `username:offset` -- deliberately NOT keyed by limit: the home widget
+// only ever wants the first 5 rows of offset 0, and My Games wants 10,
+// so both fetch the same PAGE_SIZE=10 superset for offset 0 and the home
+// widget just slices what it needs from it. That's the literal fix for
+// "My Games is loading slowly, if it's already cached on the home page
+// why not display it" -- they're now the same cache entry, not two
+// separate fetches for overlapping data.
+const PAGE_SIZE = 10;
+const gamesPageCache = new Map(); // key -> {games, has_more}
+
+// Returns {cached, freshPromise}: `cached` is last known good data for
+// this page (or null the very first time), paintable immediately with no
+// wait; `freshPromise` resolves to the real current data (or null on a
+// transient failure) and also updates the cache for next time -- classic
+// stale-while-revalidate, same pattern as account.js's own stats
+// prefetch.
+function fetchGamesPage(username, offset) {
+  const key = `${username}:${offset}`;
+  const cached = gamesPageCache.get(key) || null;
+  const freshPromise = fetchJSON(`/api/games/${encodeURIComponent(username)}?limit=${PAGE_SIZE}&offset=${offset}`)
+    .then((result) => {
+      const page = { games: result.games || [], has_more: !!result.has_more };
+      gamesPageCache.set(key, page);
+      return page;
+    })
+    .catch(() => null);
+  return { cached, freshPromise };
 }
 
-// Home screen widget -- top few games for whoever's currently signed in,
+// Home screen widget -- top 5 games for whoever's currently signed in,
 // hidden entirely for a fresh profile with nothing to show yet (see
 // index.html's #home-recent-games, hidden by default for the same
 // reason #home-global-stats is).
@@ -64,22 +97,25 @@ export async function loadHomeRecentGames() {
   const profile = loadProfile();
   const section = $('home-recent-games');
   if (!profile) { hide(section); return; }
-  try {
-    const result = await fetchJSON(`/api/games/${encodeURIComponent(profile.username)}?limit=5`);
-    const games = result.games || [];
-    // showHomeTile (lobby.js) hides this synchronously the instant a
-    // sub-panel (Join/Host/Rules) is picked -- but this fetch is async,
-    // so if that happened while it was in flight, this callback landing
-    // afterward would otherwise un-hide it again on the wrong screen (a
-    // real, reported bug: Recent Games appearing above the Host form).
-    // $('home-tiles') being hidden is exactly "no longer on the tile
-    // picker", regardless of which sub-panel is now showing instead.
-    if (games.length === 0 || $('home-tiles').classList.contains('hidden')) { hide(section); return; }
-    renderGamesList($('home-recent-games-list'), games, profile.username);
-    showEnter(section);
-  } catch (e) {
-    hide(section); // transient network hiccup -- just skip the widget
-  }
+  const { cached, freshPromise } = fetchGamesPage(profile.username, 0);
+  if (cached) paintHomeRecentGames(cached, profile.username, section);
+  const fresh = await freshPromise;
+  if (fresh) paintHomeRecentGames(fresh, profile.username, section);
+  else if (!cached) hide(section); // no cache and the fetch failed -- nothing to show
+}
+
+function paintHomeRecentGames(page, username, section) {
+  const games = page.games.slice(0, 5);
+  // showHomeTile (lobby.js) hides this synchronously the instant a
+  // sub-panel (Join/Host/Rules) is picked -- but this can resolve after
+  // that happened, so it would otherwise un-hide it again on the wrong
+  // screen (a real, reported bug: Recent Games appearing above the Host
+  // form). $('home-tiles') being hidden is exactly "no longer on the
+  // tile picker", regardless of which sub-panel is now showing instead.
+  if (games.length === 0 || $('home-tiles').classList.contains('hidden')) { hide(section); return; }
+  const changed = renderIfChanged($('home-recent-games-list'), games, username);
+  const alreadyShown = !section.classList.contains('hidden');
+  if (changed || !alreadyShown) showEnter(section);
 }
 
 // Same pop-in vocabulary used elsewhere (finished-trophy, elo-reveal) --
@@ -87,59 +123,91 @@ export async function loadHomeRecentGames() {
 // page load (or the trip back from Host/Join/Rules to the tile picker)
 // pop into place instantly with no transition at all, which read as
 // abrupt next to everything else on this screen animating in. See
-// game.css's .home-recent-games.enter for the actual fade/rise.
+// game.css's .home-recent-games.enter for the actual fade/rise. Only
+// actually called when the section wasn't already showing this exact
+// content -- see paintHomeRecentGames.
 function showEnter(el) {
   el.classList.remove('hidden', 'enter');
   void el.offsetWidth; // force reflow so the class removal above actually takes effect first
   el.classList.add('enter');
 }
 
-// The full "My Games" screen, reached from the Account screen -- 10 games
-// per page (see FRONTEND_FIXES.MD: the home widget's top-5 stays a single
-// fast fetch, but loading a whole history in one shot here was the part
-// that felt slow) via a "Load more" button appending the next page rather
-// than a full prev/next pager, since there's no need to go back to an
-// earlier page once its rows are already on screen.
-const PAGE_SIZE = 10;
+// The full "My Games" screen, reached from the Account screen -- real
+// pagination (10 per page, Prev/Next) rather than a "Load more" button
+// that only ever grows, matching the Leaderboard's own pagination.
 let gameHistoryOffset = 0;
 let gameHistoryUsername = null;
 
-export async function showGameHistoryScreen() {
+export function showGameHistoryScreen() {
   showScreen('screen-game-history');
+  setScreenPath('/my-games');
   const profile = loadProfile();
-  const list = $('game-history-list');
-  const empty = $('game-history-empty');
-  const loadMoreBtn = $('btn-game-history-load-more');
-  list.innerHTML = '';
-  hide(empty);
-  hide(loadMoreBtn);
   gameHistoryOffset = 0;
   gameHistoryUsername = profile ? profile.username : null;
-  if (!profile) { show(empty); return; }
-  await loadNextGameHistoryPage();
+  if (!profile) {
+    $('game-history-list').innerHTML = '';
+    hide($('game-history-pagination'));
+    show($('game-history-empty'));
+    return;
+  }
+  loadGameHistoryPage();
 }
 
-async function loadNextGameHistoryPage() {
+export function onGameHistoryPrevClick() {
+  gameHistoryOffset = Math.max(0, gameHistoryOffset - PAGE_SIZE);
+  loadGameHistoryPage();
+}
+
+export function onGameHistoryNextClick() {
+  gameHistoryOffset += PAGE_SIZE;
+  loadGameHistoryPage();
+}
+
+async function loadGameHistoryPage() {
   const username = gameHistoryUsername;
+  const offset = gameHistoryOffset;
   const list = $('game-history-list');
-  const empty = $('game-history-empty');
-  const loadMoreBtn = $('btn-game-history-load-more');
-  try {
-    const result = await fetchJSON(
-      `/api/games/${encodeURIComponent(username)}?limit=${PAGE_SIZE}&offset=${gameHistoryOffset}`,
-    );
-    if (username !== gameHistoryUsername) return; // screen navigated away/reopened while this was in flight
-    const games = result.games || [];
-    if (gameHistoryOffset === 0 && games.length === 0) { show(empty); hide(loadMoreBtn); return; }
-    appendGamesList(list, games, username);
-    gameHistoryOffset += games.length;
-    loadMoreBtn.classList.toggle('hidden', !result.has_more);
-  } catch (e) {
-    if (gameHistoryOffset === 0) show(empty);
+  const { cached, freshPromise } = fetchGamesPage(username, offset);
+  if (cached) {
+    paintGameHistoryPage(cached, username, offset);
+  } else {
+    hide($('game-history-empty'));
+    hide($('game-history-pagination'));
+    list.innerHTML = '<p class="muted">Loading…</p>';
+    delete list.dataset.renderedHtml; // the loading message above isn't a real page render -- don't let the next real one think it's a no-op match
+  }
+  const fresh = await freshPromise;
+  if (username !== gameHistoryUsername || offset !== gameHistoryOffset) return; // navigated away or changed page while this was in flight
+  if (fresh) {
+    paintGameHistoryPage(fresh, username, offset);
+  } else if (!cached) {
+    list.innerHTML = '';
+    show($('game-history-empty'));
   }
 }
 
-// Wired from app.js's static handlers.
-export function onLoadMoreGameHistory() {
-  loadNextGameHistoryPage();
+function paintGameHistoryPage(page, username, offset) {
+  const list = $('game-history-list');
+  const empty = $('game-history-empty');
+  const pagination = $('game-history-pagination');
+  if (page.games.length === 0) {
+    if (offset === 0) {
+      list.innerHTML = '';
+      delete list.dataset.renderedHtml;
+      show(empty);
+      hide(pagination);
+      return;
+    }
+    // Landed past the real end (e.g. the list shrank between visits) --
+    // fall back a page instead of stranding the visitor on a blank one.
+    gameHistoryOffset = Math.max(0, offset - PAGE_SIZE);
+    loadGameHistoryPage();
+    return;
+  }
+  hide(empty);
+  renderIfChanged(list, page.games, username);
+  $('btn-game-history-prev').disabled = offset === 0;
+  $('btn-game-history-next').disabled = !page.has_more;
+  $('game-history-page-label').textContent = `${offset + 1}–${offset + page.games.length}`;
+  show(pagination);
 }

@@ -126,6 +126,25 @@ async function loadAccountStats() {
   } catch (e) { /* 404: no games recorded yet -- leave whatever's already rendered (or the skeleton) */ }
 }
 
+// Cached per username, in memory for this tab's lifetime -- an unlocked
+// achievement never re-locks (see achievements.py's own append-only
+// design: "new achievements just unlock the new ones, existing ones stay
+// correct"), so a cached set is never wrong, only possibly missing
+// something unlocked moments ago. Reported live as "the achievements
+// page loads slowly": every visit re-painted the whole grid as fully
+// locked *first* (see the old unconditional grid.innerHTML reset below)
+// before the real fetch landed, even for a returning visitor who'd
+// already unlocked half of them -- that's what actually read as slow,
+// not the network call itself.
+const achievementsCache = new Map(); // username -> Set(unlocked ids)
+
+function renderAchievementsIfChanged(grid, unlocked) {
+  const html = ACHIEVEMENTS.map((a) => renderAchievementTile(a, unlocked.has(a.id))).join('');
+  if (grid.dataset.renderedHtml === html) return; // identical to what's already shown -- skip the repaint
+  grid.innerHTML = html;
+  grid.dataset.renderedHtml = html;
+}
+
 // Guests have no stable identity to hang persistent progress off (a
 // guest's username is regenerated every time their browser profile
 // resets -- see saveProfile), so achievements only ever start counting
@@ -136,19 +155,26 @@ async function loadAchievements() {
   const profile = loadProfile();
   const grid = $('achievements-grid');
   const guestNote = $('account-achievements-guest-note');
-  grid.innerHTML = ACHIEVEMENTS.map((a) => renderAchievementTile(a, false)).join('');
-  if (!profile) return;
-  if (!profile.google_id) {
+  if (!profile || !profile.google_id) {
+    renderAchievementsIfChanged(grid, new Set());
+    if (!profile) return;
     show(guestNote);
     showToast('Sign in with Google to start unlocking achievements.');
     return;
   }
   hide(guestNote);
+  const cached = achievementsCache.get(profile.username);
+  if (cached) {
+    renderAchievementsIfChanged(grid, cached); // instant repaint from last known-good state -- no locked-then-unlocked flash
+  } else {
+    renderAchievementsIfChanged(grid, new Set()); // first time this session -- nothing to paint from yet, show the locked skeleton as "loading"
+  }
   try {
     const result = await fetchJSON(`/api/achievements?username=${encodeURIComponent(profile.username)}`);
     const unlocked = new Set(result.achievements || []);
-    grid.innerHTML = ACHIEVEMENTS.map((a) => renderAchievementTile(a, unlocked.has(a.id))).join('');
-  } catch (e) { /* transient network error -- leave the grid locked rather than block the screen */ }
+    achievementsCache.set(profile.username, unlocked);
+    renderAchievementsIfChanged(grid, unlocked);
+  } catch (e) { /* transient network error -- leave whatever's already rendered (cached or locked skeleton) */ }
 }
 
 // Reached via the popover's "Account" item or the sidebar's Account tab --

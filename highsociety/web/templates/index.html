@@ -317,7 +317,11 @@
         <h2>My Games</h2>
         <div id="game-history-list" class="recent-games-list"></div>
         <p id="game-history-empty" class="muted hidden">No games recorded yet.</p>
-        <button type="button" id="btn-game-history-load-more" class="secondary standalone hidden">Load more</button>
+        <div id="game-history-pagination" class="leaderboard-pagination hidden">
+          <button type="button" id="btn-game-history-prev" class="secondary" disabled>← Prev</button>
+          <span id="game-history-page-label" class="muted"></span>
+          <button type="button" id="btn-game-history-next" class="secondary" disabled>Next →</button>
+        </div>
       </div>
     </section>
 

@@ -906,6 +906,7 @@ def api_rating_history(username):
 @app.route("/rules")
 @app.route("/account")
 @app.route("/achievements")
+@app.route("/my-games")
 def index():
     return render_template(
         "index.html", ga_measurement_id=GA_MEASUREMENT_ID,

@@ -21,7 +21,7 @@ import {
   applySpectateIdentityDefaults, refreshStatus, leaveToHome, setCurrentRoomCode,
 } from './lobby/lobby.js';
 import { onAddBot } from './lobby/playerList.js';
-import { showGameHistoryScreen, onLoadMoreGameHistory } from './lobby/gameHistory.js';
+import { showGameHistoryScreen, onGameHistoryPrevClick, onGameHistoryNextClick } from './lobby/gameHistory.js';
 import { showLeaderboardScreen, onLeaderboardPrevClick, onLeaderboardNextClick } from './lobby/leaderboard.js';
 import { onPlayClick, onFindMatch, onMatchmakingCancel, onMatchmakingAddBots } from './lobby/matchmaking.js';
 import {
@@ -109,7 +109,8 @@ function wireStaticHandlers() {
     showScreen('screen-host-setup'); showHomeTiles(); startRoomsPolling();
   }));
   $('btn-account-my-games').addEventListener('click', () => navigateFromSidebar(showGameHistoryScreen));
-  $('btn-game-history-load-more').addEventListener('click', onLoadMoreGameHistory);
+  $('btn-game-history-prev').addEventListener('click', onGameHistoryPrevClick);
+  $('btn-game-history-next').addEventListener('click', onGameHistoryNextClick);
   $('sidebar-leaderboard').addEventListener('click', () => navigateFromSidebar(showLeaderboardScreen));
   $('btn-leaderboard-prev').addEventListener('click', onLeaderboardPrevClick);
   $('btn-leaderboard-next').addEventListener('click', onLeaderboardNextClick);

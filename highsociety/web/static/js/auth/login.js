@@ -6,9 +6,10 @@ import {
 import { saveProfile, renderProfileChip } from './profile.js';
 import { prefetchAccountStats, showAccountScreen, showAchievementsScreen } from '../account/account.js';
 import { showLeaderboardScreen } from '../lobby/leaderboard.js';
+import { showGameHistoryScreen } from '../lobby/gameHistory.js';
 import { onPlayClick } from '../lobby/matchmaking.js';
 
-// Maps a direct/refreshed visit to one of the 7 static screen URLs
+// Maps a direct/refreshed visit to one of the 8 static screen URLs
 // (web_server.py's routes) back to the in-app navigation that would have
 // produced it -- boot's own version of what each sidebar/tile button
 // already does, so a bookmark or shared link lands on the right screen
@@ -21,6 +22,7 @@ const BOOT_PATH_HANDLERS = {
   '/leaderboard': showLeaderboardScreen,
   '/account': showAccountScreen,
   '/achievements': showAchievementsScreen,
+  '/my-games': showGameHistoryScreen,
 };
 
 // Set while the login screen's username form is collecting a name for a
