@@ -1,4 +1,12 @@
-<p>
+{% if htp_jump_links %}
+<div class="htp-jump-links">
+  <a href="#htp-goal">Goal</a>
+  <a href="#htp-auctions">Auctions</a>
+  <a href="#htp-cards">Cards</a>
+</div>
+{% endif %}
+
+<p{% if htp_jump_links %} id="htp-goal"{% endif %}>
   <strong>Goal:</strong> End the game with the most points — but there's a catch.
   When the game ends, whoever has the <strong>least money left</strong> is eliminated
   from winning entirely. If two or more players are tied for the least money, none of
@@ -6,7 +14,7 @@
   does the highest score win.
 </p>
 
-<p>Each round, one card is auctioned. There are two opposite auction types:</p>
+<p{% if htp_jump_links %} id="htp-auctions"{% endif %}>Each round, one card is auctioned. There are two opposite auction types:</p>
 
 <dl class="auction-types">
   <dt>Normal auction <span class="hint">— Paintings, the Prestige Card</span></dt>
@@ -18,7 +26,7 @@
 
 <p class="hint">Money cards are locked in once committed to a bid — you can add more on a later turn to raise, but can't take any back until the auction resolves (unspent bids are returned if you don't win).</p>
 
-<table class="card-types-table">
+<table class="card-types-table"{% if htp_jump_links %} id="htp-cards"{% endif %}>
   <thead><tr><th>Card</th><th>How many</th><th>Effect</th></tr></thead>
   <tbody>
     <tr><td>Painting</td><td>10, one each</td><td>Worth 1–10 points.</td></tr>

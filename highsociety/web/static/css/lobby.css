@@ -191,7 +191,21 @@
 .account-elo-label { font-size: 0.78rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
 #account-username-edit { margin-top: 1rem; }
 .account-saved { color: var(--chip-money); font-weight: 600; margin: 0.4rem 0 0; }
-#btn-account-logout { width: 100%; margin-top: 1.2rem; }
+/* Deliberately NOT the same weight as "My Games" above it (a real
+   .secondary bordered button) -- logging out is an exit action, not a
+   normal nav destination, and looking identical to one made it too easy
+   to click by mistake reaching for My Games. Plain text + a faint red
+   hover tint reads as "quieter, and different in kind" rather than just
+   a differently-colored version of the same button. */
+#btn-account-logout {
+  width: 100%;
+  margin-top: 0.6rem;
+  background: none;
+  border: 1px solid transparent;
+  color: var(--danger);
+  box-shadow: none;
+}
+#btn-account-logout:hover { background: var(--danger-soft); box-shadow: none; transform: none; }
 
 .account-stats-row {
   display: flex;
@@ -241,6 +255,7 @@
   gap: 0.8rem;
 }
 .achievement-tile {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -253,6 +268,7 @@
   transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
 }
 .achievement-icon {
+  position: relative;
   width: 48px;
   height: 48px;
   display: flex;
@@ -275,23 +291,78 @@
   box-shadow: var(--shadow-sm);
 }
 .achievement-tile.unlocked:hover { transform: translateY(-2px); box-shadow: var(--shadow); }
+/* A small pin on the icon badge itself, not just the tile's overall
+   grayscale/faded treatment -- "why is this one different" reads at a
+   glance instead of needing the fade to be noticed and interpreted. */
+.achievement-lock {
+  position: absolute;
+  bottom: -3px;
+  right: -3px;
+  width: 19px;
+  height: 19px;
+  border-radius: 50%;
+  background: var(--muted);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid var(--panel-bg);
+}
+.achievement-lock svg { width: 9px; height: 9px; }
+/* Instant, styled tooltip replacing a native title="..." -- shows exactly
+   how to unlock a locked achievement (or just confirms what an unlocked
+   one was for) on hover *or* focus, so a keyboard user (see the tile's
+   own tabindex) gets the same info a mouse hover does. */
+.achievement-tile { cursor: default; }
+/* Below the tile, not above -- a first-row tile's tooltip opening upward
+   collided with the floating session-status toast that sits just above
+   this whole panel (confirmed live); the panel has much more headroom
+   below any row than the viewport has above the topmost one. */
+.achievement-tooltip {
+  display: none;
+  position: absolute;
+  top: calc(100% + 0.5rem);
+  left: 50%;
+  transform: translateX(-50%);
+  width: 170px;
+  background: var(--felt-2);
+  color: #f5f1e6;
+  font-size: 0.74rem;
+  font-weight: 500;
+  line-height: 1.4;
+  padding: 0.55rem 0.7rem;
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow);
+  z-index: 5;
+  pointer-events: none;
+}
+.achievement-tile:hover .achievement-tooltip,
+.achievement-tile:focus-visible .achievement-tooltip { display: block; }
 
-.home-tiles {
+/* Actions (left) + Recent Games (right), side by side -- replaces a
+   3-tile grid that left most of the screen's width empty once the tiles'
+   own row was done, with Recent Games/global-stats squeezed in below it.
+   Both children keep managing their own visibility independently (see
+   showHomeTile/loadHomeRecentGames) -- this only changes how they're
+   arranged when both are showing. */
+.home-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 1.1rem;
-  max-width: 780px;
-  margin: 4rem auto 0;
+  grid-template-columns: 1.3fr 1fr;
+  gap: 1.75rem;
+  max-width: 900px;
+  margin: 3rem auto 0;
+  align-items: start;
 }
-@media (max-width: 700px) {
-  .home-tiles { grid-template-columns: 1fr; max-width: 420px; }
+@media (max-width: 780px) {
+  .home-grid { grid-template-columns: 1fr; max-width: 480px; }
 }
+.home-tiles { display: flex; flex-direction: column; gap: 0.85rem; }
 /* Fades/rises in on appearing (same gentle vocabulary as the finished
    screen's .standing-row -- not the bouncier .elo-reveal-pop, since this
    isn't a celebratory moment) instead of the abrupt instant pop-in a
    plain hidden->visible toggle gave it before -- reported as jarring
    when navigating back to the home tile picker from Host/Join/Rules. */
-.home-recent-games { max-width: 780px; margin: 2rem auto 0; text-align: left; width: 100%; opacity: 0; transform: translateY(8px); }
+.home-recent-games { text-align: left; width: 100%; opacity: 0; transform: translateY(8px); }
 .home-recent-games.enter { animation: home-recent-games-in 0.4s ease forwards; }
 @keyframes home-recent-games-in { to { opacity: 1; transform: translateY(0); } }
 .home-recent-games h3 { margin: 0 0 0.8rem; }
@@ -318,28 +389,57 @@
 .home-global-stat { display: flex; flex-direction: column; align-items: center; gap: 0.15rem; }
 .home-global-stat-value { font-size: 1.5rem; font-weight: 800; color: var(--accent-strong); }
 .home-global-stat-label { font-size: 0.78rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+/* A horizontal row (icon, title+subtitle, arrow) rather than a centered
+   column -- reads as a real action list next to Recent Games, not a
+   second, smaller tile grid competing with it. */
 .home-tile {
   position: relative;
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   align-items: center;
-  gap: 0.5rem;
-  text-align: center;
+  gap: 1.1rem;
+  text-align: left;
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.35), rgba(255, 255, 255, 0) 40%), var(--panel-bg);
   border: 1px solid var(--panel-border);
   border-radius: var(--radius);
-  padding: 2rem 1.2rem;
+  padding: 1.3rem 1.5rem;
   box-shadow: var(--shadow-sm);
   cursor: pointer;
   font: inherit;
   color: inherit;
-  transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+  width: 100%;
+  transition: transform 0.15s var(--ease-out), box-shadow 0.15s var(--ease-out), border-color 0.15s ease;
 }
 .home-tile:hover, .home-tile:focus-visible {
   transform: translateY(-2px);
   border-color: var(--accent-light);
   box-shadow: var(--shadow);
   outline: none;
+}
+.home-tile:hover .home-tile-arrow, .home-tile:focus-visible .home-tile-arrow { transform: translateX(3px); color: var(--accent-strong); }
+/* The clear primary CTA -- a gold fill instead of the same cream every
+   other tile gets, so "start here if you're not sure" reads at a glance
+   rather than needing all three read in full first. */
+.home-tile-primary {
+  background: linear-gradient(135deg, var(--accent-highlight), var(--accent));
+  border-color: transparent;
+  box-shadow: 0 10px 26px rgba(185, 138, 47, 0.35);
+}
+.home-tile-primary:hover, .home-tile-primary:focus-visible { border-color: transparent; box-shadow: 0 14px 32px rgba(185, 138, 47, 0.42); }
+.home-tile-primary .home-tile-icon { background: rgba(28, 26, 22, 0.14); border-color: rgba(28, 26, 22, 0.2); color: #2a2115; }
+.home-tile-primary .home-tile-title { color: #2a2115; }
+.home-tile-primary .home-tile-sub { color: rgba(42, 33, 21, 0.72); }
+.home-tile-primary .home-tile-arrow { color: rgba(42, 33, 21, 0.6); }
+.home-tile-primary:hover .home-tile-arrow, .home-tile-primary:focus-visible .home-tile-arrow { color: #2a2115; }
+.home-tile-badge {
+  position: absolute;
+  top: 0.7rem;
+  right: 1rem;
+  font-size: 0.65rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: rgba(42, 33, 21, 0.6);
 }
 /* A colored badge behind the line icon rather than a bare glyph -- gives
    the tile a focal point and ties the icon to the app's own gold accent
@@ -355,16 +455,18 @@
   background: var(--accent-soft);
   border: 1px solid var(--accent-light);
   color: var(--accent-strong);
-  margin-bottom: 0.2rem;
+  flex-shrink: 0;
 }
 .home-tile-icon svg { width: 27px; height: 27px; }
 /* The Host tile's crown gets the same size bump as the sidebar's -- see
    main.css's #sidebar-host .sidebar-icon -- so the same icon doesn't read
    as two different sizes depending on which entry point shows it. */
 .home-tile[data-home-target="host"] .home-tile-icon svg { width: 33px; height: 33px; }
+.home-tile-text { display: flex; flex-direction: column; gap: 0.2rem; min-width: 0; flex: 1 1 auto; }
 .home-tile-title { font-weight: 700; font-size: 1.05rem; }
 .home-tile-sub { color: var(--muted); font-size: 0.82rem; }
 .home-tile-sub.has-live { color: var(--accent-strong); font-weight: 600; }
+.home-tile-arrow { width: 20px; height: 20px; flex-shrink: 0; color: var(--muted); transition: transform 0.15s var(--ease-out), color 0.15s ease; }
 
 .home-tile-live-badge {
   position: absolute;
@@ -590,6 +692,11 @@
 
 .host-hint-icon { display: flex; align-items: flex-start; gap: 0.4rem; margin: 0; }
 .host-hint-icon svg { width: 16px; height: 16px; flex: none; margin-top: 0.1rem; color: var(--muted); }
+/* A quiet confirmation, not a warning -- a fully-seated table is exactly
+   what hosting is for, so this just tints toward the accent rather than
+   anything alarm-colored. */
+#host-seat-summary.full { color: var(--accent-strong); font-weight: 500; }
+#host-seat-summary.full svg { color: var(--accent-strong); }
 /* Same info-line content as .host-hint-icon, boxed -- used inside Advanced
    settings where the surrounding collapsible body has more going on around
    it than the bot-fill section's single hint line does. */
@@ -946,44 +1053,100 @@ button.secondary.standalone { margin-top: 0.9rem; display: inline-block; }
 }
 .room-row button { margin-top: 0; }
 
+/* A dashed, quieter treatment than a real .panel -- this is a "nothing to
+   see here (yet)" state, not content of its own, so it shouldn't compete
+   visually with an actual room row. Reused wherever a list has nothing
+   to show (see also the Leaderboard/My Games empty states). */
+.empty-state {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  background: rgba(0, 0, 0, 0.03);
+  border: 1px dashed var(--panel-border);
+  border-radius: var(--radius-sm);
+  padding: 0.9rem 1rem;
+  margin-bottom: 1rem;
+}
+.empty-state-icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.empty-state-icon svg { width: 17px; height: 17px; }
+.empty-state-text { font-size: 0.85rem; color: var(--muted); line-height: 1.5; }
+.empty-state-text strong { color: var(--text); }
+
+/* A code you type carefully, letter by letter -- wider letter-spacing and
+   a bigger, bolder monospace-ish weight make each character easy to track
+   while typing, the same treatment a 2FA/verification-code field usually
+   gets. */
+.room-code-input {
+  text-transform: uppercase;
+  letter-spacing: 0.3em;
+  font-weight: 700;
+  text-align: center;
+}
+.room-code-input::placeholder { letter-spacing: 0.15em; font-weight: 400; }
+
 /* ---------------- recent games / My Games (Part G) ---------------- */
 
-.recent-games-list { display: flex; flex-direction: column; gap: 0.5rem; margin-top: 0.8rem; }
+.recent-games-list { display: flex; flex-direction: column; gap: 0.4rem; margin-top: 0.8rem; }
+/* A row -- rank badge, opponents/date, a chevron -- rather than two
+   stacked lines with the placement pill floating at the top: reads more
+   like a real list of clickable rows (the chevron is the "this opens
+   something" affordance the plain hover-only version didn't have) and
+   gives the rank badge room to be a real circle instead of a thin pill. */
 .recent-game-row {
   display: flex;
-  flex-direction: column;
-  gap: 0.3rem;
+  align-items: center;
+  gap: 0.8rem;
   width: 100%;
   background: var(--panel-bg-soft);
   border: 1px solid var(--panel-border);
   border-radius: var(--radius-sm);
-  padding: 0.65rem 0.9rem;
+  padding: 0.6rem 0.8rem;
   font-size: 0.85rem;
   font: inherit;
   color: inherit;
   cursor: pointer;
   text-align: left;
-  transition: border-color 0.15s ease, background 0.15s ease;
+  transition: border-color 0.15s ease, background 0.15s ease, transform 0.15s var(--ease-out);
 }
-.recent-game-row:hover { border-color: var(--accent-light); background: var(--accent-soft); }
-.recent-game-row-top { display: flex; align-items: center; justify-content: space-between; gap: 0.6rem; }
-.recent-game-date { color: var(--muted); font-size: 0.78rem; }
+.recent-game-row:hover { border-color: var(--accent-light); background: var(--accent-soft); transform: translateX(2px); }
+.recent-game-row:hover .recent-game-chevron { color: var(--accent-strong); transform: translateX(2px); }
+.recent-game-body { display: flex; flex-direction: column; gap: 0.1rem; min-width: 0; flex: 1 1 auto; }
+.recent-game-date { color: var(--muted); font-size: 0.76rem; }
 .recent-game-opponents {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: var(--muted);
+  font-weight: 600;
 }
+.recent-game-chevron { width: 16px; height: 16px; color: var(--panel-border); flex-shrink: 0; transition: transform 0.15s var(--ease-out), color 0.15s ease; }
 .recent-game-placement {
-  font-weight: 700;
-  font-size: 0.78rem;
+  width: 34px;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+  font-size: 0.8rem;
   color: var(--text);
   background: var(--panel-border);
-  border-radius: 999px;
-  padding: 0.15rem 0.55rem;
+  border-radius: 50%;
   flex-shrink: 0;
 }
-.recent-game-placement-first { color: #1c1a16; background: var(--accent-light); }
+/* Same medal-tier language as the Leaderboard's own #1 styling -- gold,
+   silver, bronze, in that order. */
+.recent-game-placement-1 { color: #3a2c0b; background: linear-gradient(135deg, var(--accent-highlight), var(--accent-light)); }
+.recent-game-placement-2 { color: #2c3230; background: linear-gradient(135deg, #d5dbd8, #aeb8b3); }
+.recent-game-placement-3 { color: #fff; background: linear-gradient(135deg, #cf8f5a, #a1663a); }
 
 .game-detail-box { max-width: 480px; width: 100%; }
 
@@ -999,6 +1162,7 @@ button.secondary.standalone { margin-top: 0.9rem; display: inline-block; }
 }
 .leaderboard-table th { color: var(--muted); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.03em; }
 .leaderboard-row-me { background: var(--accent-soft); font-weight: 700; }
+.leaderboard-rank-1 { color: var(--accent-strong); font-weight: 800; font-size: 1.05rem; }
 .leaderboard-pagination { display: flex; align-items: center; justify-content: center; gap: 1rem; margin-top: 0.9rem; }
 .leaderboard-pagination button { margin: 0; }
 .leaderboard-pagination button:disabled { opacity: 0.4; cursor: default; }

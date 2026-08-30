@@ -144,6 +144,12 @@ export function showHomeTile(target) {
   hide($('home-recent-games'));
   HOME_TILE_TARGETS.forEach((t) => $(`home-panel-${t}`).classList.toggle('hidden', t !== target));
   setScreenPath(`/${target}`); // 'join'/'host'/'rules' -- matches web_server.py's static routes exactly
+  // One less click for the single most common thing to do on this panel --
+  // Join's whole reason for existing, for anyone who already has a code in
+  // hand (e.g. pasted from a chat message) rather than picking a public
+  // room. The classList.toggle above already ran synchronously, so the
+  // field is already visible/focusable by this point.
+  if (target === 'join') $('join-room-code').focus();
 }
 export function showHomeTiles() {
   show($('home-tiles'));
@@ -300,7 +306,20 @@ function renderRoomsList(rooms) {
   updateJoinTileLiveBadge(rooms.length);
   const container = $('public-rooms-list');
   if (!rooms.length) {
-    container.innerHTML = '<p class="muted">No public games right now.</p>';
+    // A dead end otherwise -- "nothing to join" is also exactly the
+    // moment hosting one yourself is the obvious next step, so this links
+    // straight there instead of just reporting the empty state.
+    container.innerHTML = `
+      <div class="empty-state">
+        <span class="empty-state-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+        </span>
+        <span class="empty-state-text">
+          <strong>No public games right now.</strong>
+          Be the first — <button type="button" class="link-button" id="btn-empty-state-host">host one instead →</button>
+        </span>
+      </div>`;
+    $('btn-empty-state-host').addEventListener('click', () => showHomeTile('host'));
     return;
   }
   container.innerHTML = '';
@@ -482,6 +501,67 @@ export function onSeatCountButtonClick(e) {
     b.classList.toggle('selected', b === btn);
   });
   $('host-seats').value = btn.dataset.value;
+  // Fewer seats can leave the current bot mix no longer fitting (must
+  // always leave at least one seat for the host) -- trim it back down
+  // rather than letting Host Game round-trip to the server just to be
+  // told so.
+  trimBotsToFit();
+  syncBotSeatCapacity();
+}
+
+const BOT_TIERS = ['easy', 'medium', 'hard'];
+
+function totalBotCount() {
+  return BOT_TIERS.reduce((sum, tier) => sum + parseInt($(`bot-${tier}`).value, 10), 0);
+}
+
+function maxBotsAllowed() {
+  return parseInt($('host-seats').value, 10) - 1;
+}
+
+// Reduces bot counts (hardest tier first, matching this form's own visual
+// left-to-right/easy-to-hard order in reverse) until the total fits the
+// current seat count -- called whenever seats decreases. A single pass is
+// enough: each tier only gives up as much as still needed once the
+// tiers before it have already been trimmed.
+function trimBotsToFit() {
+  const maxBots = maxBotsAllowed();
+  ['hard', 'medium', 'easy'].forEach((tier) => {
+    const stillOver = totalBotCount() - maxBots;
+    if (stillOver <= 0) return;
+    const input = $(`bot-${tier}`);
+    const current = parseInt(input.value, 10);
+    const reduceBy = Math.min(stillOver, current);
+    if (reduceBy <= 0) return;
+    input.value = current - reduceBy;
+    syncStepperButtons(document.querySelector(`.host-stepper[data-target="bot-${tier}"]`), input);
+  });
+}
+
+// Beyond each tier's own 0-4 range (see syncStepperButtons), the three
+// tiers combined can never reach the seat count -- at least one seat must
+// stay open for the host. Re-derives each tier's own baseline disabled
+// state first (a stepper's "+" that seat capacity disabled must go back
+// to enabled once seats increases again, same as any other stale disabled
+// state -- there's no reason to special-case "only ever add disabling"
+// here), then layers the capacity check on top; also keeps the
+// "You + N bots = X of Y seats" summary current.
+function syncBotSeatCapacity() {
+  const seats = parseInt($('host-seats').value, 10);
+  const bots = totalBotCount();
+  const atCapacity = bots >= seats - 1;
+  BOT_TIERS.forEach((tier) => {
+    const input = $(`bot-${tier}`);
+    const stepper = document.querySelector(`.host-stepper[data-target="bot-${tier}"]`);
+    syncStepperButtons(stepper, input);
+    if (atCapacity) stepper.querySelector('.host-stepper-btn[data-delta="1"]').disabled = true;
+  });
+  const summary = $('host-seat-summary');
+  if (!summary) return;
+  const filled = 1 + bots;
+  summary.querySelector('.host-seat-summary-text').innerHTML =
+    `You + <strong>${bots} bot${bots === 1 ? '' : 's'}</strong> = <strong>${filled} of ${seats}</strong> seats filled`;
+  summary.classList.toggle('full', filled === seats);
 }
 
 // Rounds to the same number of decimal places as `step` (e.g. step="0.1"
@@ -520,6 +600,7 @@ export function initHostBotSteppers() {
   document.querySelectorAll('.host-stepper').forEach((stepper) => {
     syncStepperButtons(stepper, $(stepper.dataset.target));
   });
+  syncBotSeatCapacity();
 }
 
 // The +/- steppers -- both the integer "fill seats with bots" counts and
@@ -533,11 +614,21 @@ export function onBotStepperClick(e) {
   if (!btn) return;
   const stepper = btn.closest('.host-stepper');
   const input = $(stepper.dataset.target);
+  const isBotTier = BOT_TIERS.some((tier) => stepper.dataset.target === `bot-${tier}`);
+  const delta = parseFloat(btn.dataset.delta);
+  // Beyond this one tier's own 0-4 range, a bot-tier "+" also can't push
+  // the combined total past what's left once the host's own seat is
+  // accounted for -- checked here (not just via the button's disabled
+  // state) so a click can never sneak through between this render and the
+  // last one, e.g. two rapid clicks landing before the first's disable
+  // takes visual effect.
+  if (isBotTier && delta > 0 && totalBotCount() >= maxBotsAllowed()) return;
   const min = parseFloat(input.min);
   const max = parseFloat(input.max);
-  const next = Math.min(max, Math.max(min, roundToStep(parseFloat(input.value) + parseFloat(btn.dataset.delta), input.step)));
+  const next = Math.min(max, Math.max(min, roundToStep(parseFloat(input.value) + delta, input.step)));
   input.value = next;
   syncStepperButtons(stepper, input);
+  if (isBotTier) syncBotSeatCapacity();
 }
 
 export async function onCreateGame() {
@@ -591,6 +682,19 @@ export function onJoinByCode(event) {
   const code = $('join-room-code').value.trim().toUpperCase();
   if (!code) { showError($('host-error'), 'Enter a room code.'); return; }
   enterRoom(code, event);
+}
+
+// Live-formats the room code field as you type (uppercase, strip anything
+// that couldn't be part of one -- see web_server.py's
+// _ROOM_CODE_ALPHABET/_ROOM_CODE_LENGTH) and keeps Join disabled until
+// there's actually a complete code to submit, rather than letting a click
+// on an obviously-incomplete field round-trip to the server just to be
+// told "no game found".
+export function onJoinRoomCodeInput(e) {
+  const input = e.target;
+  const cleaned = input.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 5);
+  if (cleaned !== input.value) input.value = cleaned;
+  $('btn-join-by-code').disabled = cleaned.length !== 5;
 }
 
 // Copies the full joinable URL (not just the bare code) -- pasted into a

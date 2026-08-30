@@ -15,7 +15,7 @@ import {
   onAccountEditUsernameClick, onAccountCancelEditClick,
 } from './account/account.js';
 import {
-  showHomeTile, showHomeTiles, onHomeLinkClick, navigateFromSidebar, onCreateGame, onJoinByCode,
+  showHomeTile, showHomeTiles, onHomeLinkClick, navigateFromSidebar, onCreateGame, onJoinByCode, onJoinRoomCodeInput,
   onTimeLimitButtonClick, onSeatCountButtonClick, onBotStepperClick, initHostBotSteppers,
   onCopyRoomLink, onJoin, onSpectateJoin, onChangeJoinIdentity, onChangeSpectateIdentity,
   startRoomsPolling, currentRoomCode, isActivelyPlayingLiveGame,
@@ -81,6 +81,8 @@ function wireStaticHandlers() {
   });
   initHostBotSteppers();
   $('btn-join-by-code').addEventListener('click', onJoinByCode);
+  $('join-room-code').addEventListener('input', onJoinRoomCodeInput);
+  $('join-room-code').addEventListener('keydown', (e) => { if (e.key === 'Enter' && !$('btn-join-by-code').disabled) onJoinByCode(e); });
   $('btn-copy-room-link').addEventListener('click', onCopyRoomLink);
   $('room-link-input').addEventListener('focus', (e) => e.target.select());
   $('room-link-input').addEventListener('click', (e) => e.target.select());

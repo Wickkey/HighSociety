@@ -179,15 +179,18 @@ async function loadLeaderboardPage(profile) {
       loadLeaderboardPage(profile);
       return;
     }
-    body.innerHTML = rows.map((r, i) => `
+    body.innerHTML = rows.map((r, i) => {
+      const rank = offset + i + 1;
+      return `
       <tr class="${profile && r.username === profile.username ? 'leaderboard-row-me' : ''}">
-        <td>${offset + i + 1}</td>
+        <td class="${rank === 1 ? 'leaderboard-rank-1' : ''}">${rank}</td>
         <td>${escapeHtml(r.username)}</td>
         <td>${r.elo}</td>
         <td>${r.games_played}</td>
         <td>${r.games_won}</td>
       </tr>
-    `).join('');
+    `;
+    }).join('');
     $('btn-leaderboard-prev').disabled = offset === 0;
     $('btn-leaderboard-next').disabled = !result.has_more;
     $('leaderboard-page-label').textContent = `${offset + 1}–${offset + rows.length}`;

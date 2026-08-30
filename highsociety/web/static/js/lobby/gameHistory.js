@@ -23,14 +23,26 @@ function opponentsLabel(game, myUsername) {
 
 const DATE_FORMAT = { month: 'short', day: 'numeric', year: 'numeric' };
 
+// Medal-colored for a top-3 finish (gold/silver/bronze), same treatment a
+// leaderboard rank gets -- every other placement just uses the neutral
+// pill it always has, since there's nothing distinct about finishing 4th
+// vs 5th to call out.
+function placementClass(placement) {
+  if (placement === 1) return ' recent-game-placement-1';
+  if (placement === 2) return ' recent-game-placement-2';
+  if (placement === 3) return ' recent-game-placement-3';
+  return '';
+}
+
 function gamesListHtml(games, myUsername) {
   return games.map((g) => `
     <button type="button" class="recent-game-row" data-game-id="${g.game_id}">
-      <div class="recent-game-row-top">
+      <span class="recent-game-placement${placementClass(g.placement)}">#${g.placement}</span>
+      <span class="recent-game-body">
+        <span class="recent-game-opponents">${escapeHtml(opponentsLabel(g, myUsername))}</span>
         <span class="recent-game-date">${new Date(g.finished_at).toLocaleDateString('en-US', DATE_FORMAT)}</span>
-        <span class="recent-game-placement${g.placement === 1 ? ' recent-game-placement-first' : ''}">#${g.placement}</span>
-      </div>
-      <div class="recent-game-opponents">${escapeHtml(opponentsLabel(g, myUsername))}</div>
+      </span>
+      <svg class="recent-game-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18l6-6-6-6"/></svg>
     </button>
   `).join('');
 }

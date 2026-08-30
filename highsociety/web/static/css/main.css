@@ -40,8 +40,18 @@
   --radius: 18px;
   --radius-card: 14px;
   --radius-sm: 12px;
-  --shadow: 0 14px 34px rgba(0, 0, 0, 0.24);
-  --shadow-sm: 0 8px 24px rgba(0, 0, 0, 0.1);
+  /* Warm-tinted (not pure black) shadows -- a small thing, but flat black
+     drop shadows read as generic/dated against a warm parchment-on-felt
+     palette; a shadow with a hint of the felt's own hue underneath it
+     reads as "this surface belongs to this room" instead of "a shadow
+     plugin ran on a random panel". --shadow-lg is new: a third, more
+     pronounced step for hover/lift states (cards, buttons) that want more
+     separation than the resting --shadow-sm without jumping straight to
+     the modal-level --shadow. */
+  --shadow: 0 16px 38px rgba(6, 20, 14, 0.32);
+  --shadow-sm: 0 6px 18px rgba(6, 20, 14, 0.16);
+  --shadow-lg: 0 22px 46px rgba(6, 20, 14, 0.36);
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 * { box-sizing: border-box; }
@@ -53,11 +63,25 @@ body {
   background:
     /* very faint felt weave, purely textural */
     repeating-linear-gradient(45deg, rgba(255, 255, 255, 0.015) 0 2px, transparent 2px 4px),
+    /* a soft spotlight over the content column -- pure depth, no layout
+       effect -- so the felt doesn't read as one flat color edge-to-edge */
+    radial-gradient(ellipse 900px 560px at 50% 0%, rgba(255, 255, 255, 0.05), transparent 65%),
     linear-gradient(180deg, var(--felt-1) 0%, var(--felt-2) 100%);
   background-attachment: fixed;
   color: var(--text);
   -webkit-font-smoothing: antialiased;
 }
+
+/* Themed scrollbars -- default OS scrollbars (bright white/grey) look out
+   of place against this palette wherever real scrolling content lives
+   (chat, game log, tables). Firefox's two-value property first, WebKit's
+   pseudo-elements after (Firefox ignores the ones it doesn't support and
+   vice versa, so both can just coexist). */
+* { scrollbar-width: thin; scrollbar-color: var(--accent-light) transparent; }
+::-webkit-scrollbar { width: 9px; height: 9px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--panel-border); border-radius: 999px; }
+::-webkit-scrollbar-thumb:hover { background: var(--accent-light); }
 
 /* ---------------- app shell / sidebar ---------------- */
 
@@ -83,6 +107,7 @@ body {
 }
 .app-shell.sidebar-hidden .app-sidebar { display: none; }
 .sidebar-item {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -102,6 +127,21 @@ body {
 .sidebar-item:hover { background: rgba(255, 255, 255, 0.08); color: #f5f1e6; }
 .sidebar-item:active { transform: translateY(1px); }
 .sidebar-item.active { background: var(--accent-soft); border-color: var(--accent-light); color: #f5f1e6; }
+/* A small glowing accent bar on the active item's outer edge -- reads as
+   "you are here" at a glance even before parsing the icon/label, the same
+   role a colored rail indicator plays in most modern sidebar navs. */
+.sidebar-item.active::before {
+  content: "";
+  position: absolute;
+  left: -0.6rem;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 20px;
+  border-radius: 999px;
+  background: var(--accent-light);
+  box-shadow: 0 0 8px 1px rgba(216, 176, 92, 0.6);
+}
 .sidebar-icon { width: 27px; height: 27px; flex-shrink: 0; }
 /* The Host crown reads small next to how often it's reached for (starting
    a new game) -- sized up on just this one icon rather than the shared
@@ -421,7 +461,21 @@ input.needs-attention {
   flex-direction: column;
 }
 
+/* A screen switch is a plain .hidden class toggle (see utils/dom.js's
+   showScreen) -- display:none -> block always restarts a CSS animation
+   defined on the now-matching selector, so this needs no JS of its own to
+   fire on every transition. Subtle on purpose (a quick settle, not a
+   slide-in) -- this fires on every single screen change in the app, so
+   anything more pronounced would get tiring fast. */
 .screen { width: 100%; }
+.screen:not(.hidden) { animation: screen-settle-in 0.22s var(--ease-out); }
+@keyframes screen-settle-in {
+  from { opacity: 0; transform: translateY(5px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .screen:not(.hidden) { animation: none; }
+}
 
 .panel {
   /* --panel-tint is overridden per context (auction/side-col panels below)
@@ -540,15 +594,19 @@ button {
   border: none;
   cursor: pointer;
   font-weight: 600;
-  transition: transform 0.08s ease, filter 0.15s ease, opacity 0.15s ease;
+  transition: transform 0.15s var(--ease-out), filter 0.15s ease, opacity 0.15s ease, box-shadow 0.15s var(--ease-out), background 0.15s ease;
   line-height: 1.2;
   margin-top: 0.5rem;
 }
 button:active { transform: translateY(1px); }
-button.primary { background: var(--accent); color: #fff; }
-button.primary:hover { filter: brightness(1.08); }
+/* A gentle lift on hover (translateY + a bigger, softer shadow) is the one
+   micro-interaction missing everywhere buttons already exist -- :active's
+   press-down was the only feedback a click ever got before this. */
+button.primary { background: var(--accent); color: #fff; box-shadow: 0 4px 14px rgba(185, 138, 47, 0.28); }
+button.primary:hover:not(:disabled) { filter: brightness(1.08); transform: translateY(-1px); box-shadow: 0 8px 22px rgba(185, 138, 47, 0.38); }
+button.primary:active:not(:disabled) { transform: translateY(0); box-shadow: 0 3px 10px rgba(185, 138, 47, 0.28); }
 button.secondary { background: transparent; border: 1px solid var(--panel-border); color: var(--text); }
-button.secondary:hover { background: var(--panel-bg-soft); }
+button.secondary:hover:not(:disabled) { background: var(--panel-bg-soft); border-color: var(--accent-light); transform: translateY(-1px); box-shadow: var(--shadow-sm); }
 button.danger { background: var(--danger-soft); color: var(--danger); border: 1px solid transparent; }
-button.danger:hover { background: var(--danger); color: #fff; }
-button:disabled { opacity: 0.5; cursor: default; transform: none; }
+button.danger:hover:not(:disabled) { background: var(--danger); color: #fff; transform: translateY(-1px); box-shadow: 0 8px 20px rgba(163, 48, 42, 0.3); }
+button:disabled { opacity: 0.5; cursor: default; transform: none; box-shadow: none; }
