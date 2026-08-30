@@ -350,7 +350,7 @@
   grid-template-columns: 1.3fr 1fr;
   gap: 1.75rem;
   max-width: 900px;
-  margin: 3rem auto 0;
+  margin: var(--screen-top-gap) auto 0;
   align-items: start;
 }
 @media (max-width: 780px) {
@@ -844,7 +844,10 @@
 .error-page { display: flex; justify-content: center; }
 .error-panel {
   max-width: 440px;
-  margin: 4rem auto;
+  /* Was 4rem, alone -- every sibling screen (Login, Join, Host, Account,
+     Leaderboard, ...) already used 3rem before this pass, and now they
+     all share --screen-top-gap so this can't quietly drift again. */
+  margin: var(--screen-top-gap) auto;
   box-shadow: var(--shadow);
   text-align: center;
 }
