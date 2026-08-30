@@ -628,33 +628,36 @@
                    onCreateGame already reads -- see onBotStepperClick
                    (app.js). The real <input> stays in the DOM (type=hidden)
                    rather than becoming a separate piece of state to keep in
-                   sync with the display. -->
-              <div class="host-stepper" data-bot-tier="easy">
+                   sync with the display. data-target names the input
+                   directly (rather than a tier keyword) so the same
+                   handler also drives the differently-stepped Bot think
+                   time control below. -->
+              <div class="host-stepper" data-target="bot-easy">
                 <span class="host-stepper-label">Easy</span>
                 <div class="host-stepper-controls">
                   <button type="button" class="host-stepper-btn" data-delta="-1" aria-label="Fewer easy bots">−</button>
                   <span class="host-stepper-value">0</span>
                   <button type="button" class="host-stepper-btn" data-delta="1" aria-label="More easy bots">+</button>
                 </div>
-                <input type="hidden" id="bot-easy" min="0" max="4" value="0">
+                <input type="hidden" id="bot-easy" min="0" max="4" step="1" value="0">
               </div>
-              <div class="host-stepper" data-bot-tier="medium">
+              <div class="host-stepper" data-target="bot-medium">
                 <span class="host-stepper-label">Medium</span>
                 <div class="host-stepper-controls">
                   <button type="button" class="host-stepper-btn" data-delta="-1" aria-label="Fewer medium bots">−</button>
                   <span class="host-stepper-value">1</span>
                   <button type="button" class="host-stepper-btn" data-delta="1" aria-label="More medium bots">+</button>
                 </div>
-                <input type="hidden" id="bot-medium" min="0" max="4" value="1">
+                <input type="hidden" id="bot-medium" min="0" max="4" step="1" value="1">
               </div>
-              <div class="host-stepper" data-bot-tier="hard">
+              <div class="host-stepper" data-target="bot-hard">
                 <span class="host-stepper-label">Hard</span>
                 <div class="host-stepper-controls">
                   <button type="button" class="host-stepper-btn" data-delta="-1" aria-label="Fewer hard bots">−</button>
                   <span class="host-stepper-value">0</span>
                   <button type="button" class="host-stepper-btn" data-delta="1" aria-label="More hard bots">+</button>
                 </div>
-                <input type="hidden" id="bot-hard" min="0" max="4" value="0">
+                <input type="hidden" id="bot-hard" min="0" max="4" step="1" value="0">
               </div>
             </div>
             <p class="hint host-hint-icon">
@@ -687,21 +690,124 @@
                  because they're irreversible once the game starts -- see
                  issue #9's own history; the user's revisited call this
                  round is to fold them back in, defaults unchanged). -->
-            <fieldset class="bot-mix">
-              <legend>Table settings</legend>
-              <div class="bot-row">
-                <label class="radio-label"><input type="checkbox" id="host-reveal-cards" checked> Show opponents' paintings</label>
-                <label class="radio-label"><input type="checkbox" id="host-show-logs" checked> Show game log</label>
+            <div class="host-field-group">
+              <div class="host-field-header">
+                <span class="host-field-label">
+                  <span class="host-icon-badge">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                      <rect x="4" y="6" width="16" height="3" rx="1"/>
+                      <path d="M6.5 9v9M17.5 9v9"/>
+                    </svg>
+                  </span>
+                  Table settings
+                </span>
               </div>
-              <p class="hint">Fixed for the whole table once the game starts. Not adjustable mid-game.</p>
-            </fieldset>
-            <label>Bot think time (seconds)
-              <input type="number" id="host-think-time" min="0" step="0.1" value="1.5">
-            </label>
-            <label>Random seed (optional)
-              <input type="number" id="host-seed" step="1" placeholder="random">
-            </label>
-            <p class="hint">Leave blank for a random game. Setting a seed makes the deck reproducible, useful for reporting a bug ("it happened in seed 12345"). Shown in-game once the round starts.</p>
+              <div class="host-toggle-cards">
+                <label class="host-toggle-card">
+                  <input type="checkbox" id="host-reveal-cards" checked>
+                  <span class="host-toggle-check">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5 9.5 17 19 7.5"/></svg>
+                  </span>
+                  <span class="host-toggle-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                      <rect x="4.5" y="5" width="15" height="14" rx="2"/>
+                      <circle cx="9" cy="9.5" r="1.3"/>
+                      <path d="M6 16.5l3.5-3.5 2.8 2.8 3-4 3.2 4.2"/>
+                    </svg>
+                  </span>
+                  <span class="host-toggle-text"><strong>Show opponents' paintings</strong><span class="hint">Displays opponents' won paintings.</span></span>
+                </label>
+                <label class="host-toggle-card">
+                  <input type="checkbox" id="host-show-logs" checked>
+                  <span class="host-toggle-check">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5 9.5 17 19 7.5"/></svg>
+                  </span>
+                  <span class="host-toggle-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                      <path d="M8 6.5h11"/>
+                      <path d="M8 12h11"/>
+                      <path d="M8 17.5h11"/>
+                      <circle cx="4.3" cy="6.5" r="1" fill="currentColor" stroke="none"/>
+                      <circle cx="4.3" cy="12" r="1" fill="currentColor" stroke="none"/>
+                      <circle cx="4.3" cy="17.5" r="1" fill="currentColor" stroke="none"/>
+                    </svg>
+                  </span>
+                  <span class="host-toggle-text"><strong>Show game log</strong><span class="hint">Displays key actions and events.</span></span>
+                </label>
+              </div>
+              <p class="hint host-hint-icon host-hint-boxed">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <circle cx="12" cy="12" r="8.3"/>
+                  <path d="M12 11v5.3"/>
+                  <circle cx="12" cy="8" r="0.9" fill="currentColor" stroke="none"/>
+                </svg>
+                These settings are fixed for the whole table once the game starts and cannot be changed mid-game.
+              </p>
+            </div>
+
+            <div class="host-field-group">
+              <div class="host-field-header">
+                <span class="host-field-label">
+                  <span class="host-icon-badge">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                      <circle cx="12" cy="12" r="8.3"/>
+                      <path d="M12 7.3V12l3 2"/>
+                    </svg>
+                  </span>
+                  Bot think time (seconds)
+                </span>
+              </div>
+              <div class="host-stepper-row">
+                <div class="host-stepper host-stepper-wide" data-target="host-think-time">
+                  <div class="host-stepper-controls">
+                    <button type="button" class="host-stepper-btn" data-delta="-0.1" aria-label="Decrease bot think time">−</button>
+                    <span class="host-stepper-value">1.5</span>
+                    <button type="button" class="host-stepper-btn" data-delta="0.1" aria-label="Increase bot think time">+</button>
+                  </div>
+                  <input type="hidden" id="host-think-time" min="0" max="5" step="0.1" value="1.5">
+                </div>
+                <p class="hint host-stepper-desc">How long bots take to make a decision.</p>
+              </div>
+            </div>
+
+            <div class="host-field-group">
+              <div class="host-field-header">
+                <span class="host-field-label">
+                  <span class="host-icon-badge">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                      <rect x="4.5" y="4.5" width="15" height="15" rx="3"/>
+                      <circle cx="9" cy="9" r="1" fill="currentColor" stroke="none"/>
+                      <circle cx="15" cy="9" r="1" fill="currentColor" stroke="none"/>
+                      <circle cx="9" cy="15" r="1" fill="currentColor" stroke="none"/>
+                      <circle cx="15" cy="15" r="1" fill="currentColor" stroke="none"/>
+                      <circle cx="12" cy="12" r="1" fill="currentColor" stroke="none"/>
+                    </svg>
+                  </span>
+                  Random seed (optional)
+                </span>
+              </div>
+              <div class="host-stepper-row">
+                <div class="host-icon-input">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <rect x="4.5" y="4.5" width="15" height="15" rx="3"/>
+                    <circle cx="9" cy="9" r="1" fill="currentColor" stroke="none"/>
+                    <circle cx="15" cy="9" r="1" fill="currentColor" stroke="none"/>
+                    <circle cx="9" cy="15" r="1" fill="currentColor" stroke="none"/>
+                    <circle cx="15" cy="15" r="1" fill="currentColor" stroke="none"/>
+                    <circle cx="12" cy="12" r="1" fill="currentColor" stroke="none"/>
+                  </svg>
+                  <input type="number" id="host-seed" step="1" placeholder="Leave blank for random">
+                </div>
+                <p class="hint host-stepper-desc">Setting a seed makes the deck reproducible, useful for reporting a bug ("it happened in seed 12345"). Shown in-game once the round starts.</p>
+              </div>
+            </div>
+
+            <p class="host-tip">
+              <svg viewBox="0 0 24 24" fill="currentColor" stroke="none" aria-hidden="true">
+                <path d="M12 2.5l1.7 5.3 5.3 1.7-5.3 1.7L12 16.5l-1.7-5.3-5.3-1.7 5.3-1.7L12 2.5z"/>
+              </svg>
+              <span><strong>Tip:</strong> These advanced options are for experienced players and debugging.</span>
+            </p>
           </div>
         </details>
 

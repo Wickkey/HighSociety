@@ -484,6 +484,18 @@ export function onSeatCountButtonClick(e) {
   $('host-seats').value = btn.dataset.value;
 }
 
+// Rounds to the same number of decimal places as `step` (e.g. step="0.1"
+// -> 1 decimal, step="1" -> 0) -- without this, repeatedly adding/
+// subtracting a fractional delta in plain JS floating point drifts (e.g.
+// 1.5 - 0.1 becomes 1.4000000000000001), which would both display wrong
+// and eventually round-trip through onCreateGame's parseFloat as noise.
+function roundToStep(value, step) {
+  const stepStr = String(step);
+  const dot = stepStr.indexOf('.');
+  const decimals = dot === -1 ? 0 : stepStr.length - dot - 1;
+  return Number(value.toFixed(decimals));
+}
+
 // Disables whichever of a stepper's +/- buttons would push its value past
 // the underlying input's own min/max -- shared by onBotStepperClick (after
 // every click) and initHostBotSteppers (once at boot), so the very first
@@ -491,10 +503,13 @@ export function onSeatCountButtonClick(e) {
 // the first click. Easy/Hard both start at their min (0), so without the
 // boot-time call their "-" button would render enabled despite doing
 // nothing if clicked.
-function syncStepperButtons(stepper, value, min, max) {
+function syncStepperButtons(stepper, input) {
+  const min = parseFloat(input.min);
+  const max = parseFloat(input.max);
+  const value = parseFloat(input.value);
   stepper.querySelector('.host-stepper-value').textContent = value;
   stepper.querySelectorAll('.host-stepper-btn').forEach((b) => {
-    const wouldBe = value + parseInt(b.dataset.delta, 10);
+    const wouldBe = roundToStep(value + parseFloat(b.dataset.delta), input.step);
     b.disabled = wouldBe < min || wouldBe > max;
   });
 }
@@ -503,27 +518,26 @@ function syncStepperButtons(stepper, value, min, max) {
 // disabled state to each stepper's starting value.
 export function initHostBotSteppers() {
   document.querySelectorAll('.host-stepper').forEach((stepper) => {
-    const input = $(`bot-${stepper.dataset.botTier}`);
-    syncStepperButtons(stepper, parseInt(input.value, 10), parseInt(input.min, 10), parseInt(input.max, 10));
+    syncStepperButtons(stepper, $(stepper.dataset.target));
   });
 }
 
-// The +/- steppers for the "fill empty seats with bots" section -- each
-// writes straight into the same plain #bot-<tier> number input
-// onCreateGame already reads, clamped to that input's own min/max so the
-// stepper can't be clicked past what the hidden input (and the server-side
-// validation behind it) actually allows.
+// The +/- steppers -- both the integer "fill seats with bots" counts and
+// the 0.1-stepped Bot think time control share this one handler, each
+// writing straight into the same plain <input> onCreateGame already reads
+// (named directly via data-target on the .host-stepper wrapper), clamped
+// to that input's own min/max so the stepper can't be clicked past what
+// the hidden input (and the server-side validation behind it) allows.
 export function onBotStepperClick(e) {
   const btn = e.target.closest('.host-stepper-btn');
   if (!btn) return;
   const stepper = btn.closest('.host-stepper');
-  const tier = stepper.dataset.botTier;
-  const input = $(`bot-${tier}`);
-  const min = parseInt(input.min, 10);
-  const max = parseInt(input.max, 10);
-  const next = Math.min(max, Math.max(min, parseInt(input.value, 10) + parseInt(btn.dataset.delta, 10)));
+  const input = $(stepper.dataset.target);
+  const min = parseFloat(input.min);
+  const max = parseFloat(input.max);
+  const next = Math.min(max, Math.max(min, roundToStep(parseFloat(input.value) + parseFloat(btn.dataset.delta), input.step)));
   input.value = next;
-  syncStepperButtons(stepper, next, min, max);
+  syncStepperButtons(stepper, input);
 }
 
 export async function onCreateGame() {
