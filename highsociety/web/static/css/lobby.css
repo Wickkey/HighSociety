@@ -386,8 +386,24 @@
   backdrop-filter: blur(6px);
   z-index: 20;
 }
-.home-global-stat { display: flex; flex-direction: column; align-items: center; gap: 0.15rem; }
-.home-global-stat-value { font-size: 1.5rem; font-weight: 800; color: var(--accent-strong); }
+/* An icon badge alongside the number/label, not just the two stacked
+   alone -- matches the icon-led language the rest of this footer's own
+   sibling screens (Home tiles, Host form) already use. */
+.home-global-stat { display: flex; align-items: center; gap: 0.6rem; }
+.home-global-stat-icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--accent-light);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.home-global-stat-icon svg { width: 18px; height: 18px; }
+.home-global-stat-text { display: flex; flex-direction: column; gap: 0.1rem; text-align: left; }
+.home-global-stat-value { font-size: 1.5rem; font-weight: 800; color: var(--accent-strong); line-height: 1; }
 .home-global-stat-label { font-size: 0.78rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
 /* A horizontal row (icon, title+subtitle, arrow) rather than a centered
    column -- reads as a real action list next to Recent Games, not a
