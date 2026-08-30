@@ -15,7 +15,8 @@ import {
   onAccountEditUsernameClick, onAccountCancelEditClick,
 } from './account/account.js';
 import {
-  showHomeTile, showHomeTiles, onHomeLinkClick, navigateFromSidebar, onCreateGame, onJoinByCode, onTimeLimitButtonClick,
+  showHomeTile, showHomeTiles, onHomeLinkClick, navigateFromSidebar, onCreateGame, onJoinByCode,
+  onTimeLimitButtonClick, onSeatCountButtonClick, onBotStepperClick, initHostBotSteppers,
   onCopyRoomLink, onJoin, onSpectateJoin, onChangeJoinIdentity, onChangeSpectateIdentity,
   startRoomsPolling, currentRoomCode, isActivelyPlayingLiveGame,
   applySpectateIdentityDefaults, refreshStatus, leaveToHome, setCurrentRoomCode,
@@ -74,6 +75,11 @@ function wireStaticHandlers() {
   $('btn-leave-lobby-back').addEventListener('click', onHomeLinkClick);
   $('btn-create-game').addEventListener('click', onCreateGame);
   $('host-turn-time-buttons').addEventListener('click', onTimeLimitButtonClick);
+  $('host-seats-buttons').addEventListener('click', onSeatCountButtonClick);
+  document.querySelectorAll('.host-stepper-btn').forEach((btn) => {
+    btn.addEventListener('click', onBotStepperClick);
+  });
+  initHostBotSteppers();
   $('btn-join-by-code').addEventListener('click', onJoinByCode);
   $('btn-copy-room-link').addEventListener('click', onCopyRoomLink);
   $('room-link-input').addEventListener('focus', (e) => e.target.select());

@@ -460,14 +460,70 @@ export function onChangeSpectateIdentity() {
 // Chess.com-style button rows replacing the old <select> (see
 // FRONTEND_FIXES.MD) -- one click toggles which button carries
 // .selected and writes its value into the hidden #host-turn-time input
-// underneath, which onCreateGame already reads unchanged.
+// underneath, which onCreateGame already reads unchanged. Shares the
+// .pill-choice-btn look with the seat-count picker below (see lobby.css)
+// but is wired up separately since it targets a different hidden input.
 export function onTimeLimitButtonClick(e) {
-  const btn = e.target.closest('.time-limit-btn');
+  const btn = e.target.closest('.pill-choice-btn');
   if (!btn) return;
-  document.querySelectorAll('#host-turn-time-buttons .time-limit-btn').forEach((b) => {
+  document.querySelectorAll('#host-turn-time-buttons .pill-choice-btn').forEach((b) => {
     b.classList.toggle('selected', b === btn);
   });
   $('host-turn-time').value = btn.dataset.value;
+}
+
+// Same pattern as onTimeLimitButtonClick above, for the 3/4/5 seat-count
+// picker (only offered 3-5 here even though the engine itself supports 2
+// seats -- see host-field-group's own template comment).
+export function onSeatCountButtonClick(e) {
+  const btn = e.target.closest('.pill-choice-btn');
+  if (!btn) return;
+  document.querySelectorAll('#host-seats-buttons .pill-choice-btn').forEach((b) => {
+    b.classList.toggle('selected', b === btn);
+  });
+  $('host-seats').value = btn.dataset.value;
+}
+
+// Disables whichever of a stepper's +/- buttons would push its value past
+// the underlying input's own min/max -- shared by onBotStepperClick (after
+// every click) and initHostBotSteppers (once at boot), so the very first
+// render already matches reality instead of only becoming correct after
+// the first click. Easy/Hard both start at their min (0), so without the
+// boot-time call their "-" button would render enabled despite doing
+// nothing if clicked.
+function syncStepperButtons(stepper, value, min, max) {
+  stepper.querySelector('.host-stepper-value').textContent = value;
+  stepper.querySelectorAll('.host-stepper-btn').forEach((b) => {
+    const wouldBe = value + parseInt(b.dataset.delta, 10);
+    b.disabled = wouldBe < min || wouldBe > max;
+  });
+}
+
+// Called once at boot (see app.js) to match syncStepperButtons' initial
+// disabled state to each stepper's starting value.
+export function initHostBotSteppers() {
+  document.querySelectorAll('.host-stepper').forEach((stepper) => {
+    const input = $(`bot-${stepper.dataset.botTier}`);
+    syncStepperButtons(stepper, parseInt(input.value, 10), parseInt(input.min, 10), parseInt(input.max, 10));
+  });
+}
+
+// The +/- steppers for the "fill empty seats with bots" section -- each
+// writes straight into the same plain #bot-<tier> number input
+// onCreateGame already reads, clamped to that input's own min/max so the
+// stepper can't be clicked past what the hidden input (and the server-side
+// validation behind it) actually allows.
+export function onBotStepperClick(e) {
+  const btn = e.target.closest('.host-stepper-btn');
+  if (!btn) return;
+  const stepper = btn.closest('.host-stepper');
+  const tier = stepper.dataset.botTier;
+  const input = $(`bot-${tier}`);
+  const min = parseInt(input.min, 10);
+  const max = parseInt(input.max, 10);
+  const next = Math.min(max, Math.max(min, parseInt(input.value, 10) + parseInt(btn.dataset.delta, 10)));
+  input.value = next;
+  syncStepperButtons(stepper, next, min, max);
 }
 
 export async function onCreateGame() {

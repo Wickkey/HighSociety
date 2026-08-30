@@ -478,89 +478,240 @@
         </div>
       </div>
 
-      <div id="home-panel-host" class="card panel home-panel hidden">
+      <div id="home-panel-host" class="card panel home-panel host-panel hidden">
         <button type="button" class="home-back">← Back</button>
-        <h2>Host a new game</h2>
+        <div class="host-header">
+          <div>
+            <h2>Host a new game</h2>
+            <p class="muted">Create a room and invite others to play High Society.</p>
+          </div>
+          <div class="host-header-cards" aria-hidden="true">
+            <span class="host-header-card host-header-card-1"></span>
+            <span class="host-header-card host-header-card-2">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M4.5 17.5 3 9l4.5 2.5L12 5l4.5 6.5L21 9l-1.5 8.5z"/>
+              </svg>
+            </span>
+          </div>
+        </div>
 
-        <label>Total seats
-          <input type="number" id="host-seats" min="2" max="5" value="3">
-        </label>
+        <div class="host-field-group">
+          <div class="host-field-header">
+            <span class="host-field-label">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <circle cx="9" cy="8.2" r="2.6"/>
+                <path d="M4 19c0-3 2.2-5 5-5s5 2 5 5"/>
+                <circle cx="17" cy="9.3" r="2.1"/>
+                <path d="M15.2 19c.1-2.4 1.5-4 3.4-4 1.7 0 3.1 1.1 3.4 3"/>
+              </svg>
+              Total seats
+            </span>
+            <span class="host-field-hint">Choose 3–5 players</span>
+          </div>
+          <!-- Same pattern as the time-per-move picker below: plain buttons
+               driving a real, unchanged hidden input underneath, so
+               onCreateGame's own "$('host-seats').value" read needs no
+               change at all. Only 3-5 offered here even though the engine
+               itself supports 2 (see HSConfig's min_players) -- the user's
+               own explicit call for this redesign, not an oversight. -->
+          <div id="host-seats-buttons" class="pill-choice-grid">
+            <div class="pill-choice-row">
+              <button type="button" class="pill-choice-btn selected" data-value="3">3</button>
+              <button type="button" class="pill-choice-btn" data-value="4">4</button>
+              <button type="button" class="pill-choice-btn" data-value="5">5</button>
+            </div>
+          </div>
+          <input type="hidden" id="host-seats" value="3">
+        </div>
 
-        <div class="field-block">
-          <span class="field-block-label">Time per move</span>
+        <div class="host-field-group">
+          <div class="host-field-header">
+            <span class="host-field-label">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <circle cx="12" cy="12" r="8.3"/>
+                <path d="M12 7.3V12l3 2"/>
+              </svg>
+              Time per move
+            </span>
+            <span class="host-field-hint">Auto-pass when time runs out</span>
+          </div>
           <!-- Replaces a <select> dropdown (chess.com-style button rows,
                per FRONTEND_FIXES.MD) -- #host-turn-time stays a real,
                unchanged hidden input underneath so onCreateGame's own
                reading of "$('host-turn-time').value" needs no change at
                all; onTimeLimitButtonClick (app.js) is the only thing new
                that writes to it. -->
-          <div id="host-turn-time-buttons" class="time-limit-buttons">
-            <div class="time-limit-row">
-              <button type="button" class="time-limit-btn selected" data-value="">No limit</button>
+          <div id="host-turn-time-buttons" class="pill-choice-grid">
+            <div class="pill-choice-row">
+              <button type="button" class="pill-choice-btn selected" data-value="">No limit</button>
+              <button type="button" class="pill-choice-btn" data-value="15">15s</button>
+              <button type="button" class="pill-choice-btn" data-value="30">30s</button>
             </div>
-            <div class="time-limit-row">
-              <button type="button" class="time-limit-btn" data-value="15">15s</button>
-              <button type="button" class="time-limit-btn" data-value="30">30s</button>
-              <button type="button" class="time-limit-btn" data-value="60">60s</button>
-            </div>
-            <div class="time-limit-row">
-              <button type="button" class="time-limit-btn" data-value="90">90s</button>
-              <button type="button" class="time-limit-btn" data-value="120">2 min</button>
+            <div class="pill-choice-row">
+              <button type="button" class="pill-choice-btn" data-value="60">60s</button>
+              <button type="button" class="pill-choice-btn" data-value="90">90s</button>
+              <button type="button" class="pill-choice-btn" data-value="120">2 min</button>
             </div>
           </div>
           <input type="hidden" id="host-turn-time" value="">
         </div>
-        <p class="hint">If set, each player gets this many seconds per bid/pass before they're auto-passed.</p>
 
-        <fieldset class="bot-mix">
-          <legend>Who can join?</legend>
-          <div class="bot-row">
-            <label class="radio-label">
+        <div class="host-field-group">
+          <div class="host-field-header">
+            <span class="host-field-label">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <circle cx="12" cy="12" r="8.3"/>
+                <path d="M3.7 12h16.6"/>
+                <path d="M12 3.7c2.5 2.2 3.9 5.2 3.9 8.3s-1.4 6.1-3.9 8.3c-2.5-2.2-3.9-5.2-3.9-8.3s1.4-6.1 3.9-8.3z"/>
+              </svg>
+              Room visibility
+            </span>
+          </div>
+          <div class="host-visibility-cards">
+            <label class="host-visibility-card">
               <input type="radio" name="host-visibility" id="host-visibility-public" value="public" checked>
-              <span class="radio-label-text"><strong>Public</strong><span class="hint">Anyone can join</span></span>
+              <span class="host-visibility-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <circle cx="12" cy="12" r="8.3"/>
+                  <path d="M3.7 12h16.6"/>
+                  <path d="M12 3.7c2.5 2.2 3.9 5.2 3.9 8.3s-1.4 6.1-3.9 8.3c-2.5-2.2-3.9-5.2-3.9-8.3s1.4-6.1 3.9-8.3z"/>
+                </svg>
+              </span>
+              <span class="host-visibility-text"><strong>Public</strong><span class="hint">Anyone can join</span></span>
+              <span class="host-visibility-badge">
+                <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M5 12.5 9.5 17 19 7.5"/>
+                </svg>
+              </span>
             </label>
-            <label class="radio-label">
+            <label class="host-visibility-card">
               <input type="radio" name="host-visibility" id="host-visibility-private" value="private">
-              <span class="radio-label-text"><strong>Private</strong><span class="hint">Requires room code</span></span>
+              <span class="host-visibility-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <rect x="5.3" y="10.3" width="13.4" height="9.7" rx="2.2"/>
+                  <path d="M8 10.3V7.3a4 4 0 0 1 8 0v3"/>
+                </svg>
+              </span>
+              <span class="host-visibility-text"><strong>Private</strong><span class="hint">Requires room code</span></span>
+              <span class="host-visibility-badge">
+                <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M5 12.5 9.5 17 19 7.5"/>
+                </svg>
+              </span>
             </label>
           </div>
-        </fieldset>
+        </div>
 
-        <fieldset class="bot-mix">
-          <legend>Fill seats with bots (optional)</legend>
-          <div class="bot-row">
-            <label>Easy <input type="number" id="bot-easy" min="0" max="4" value="0"></label>
-            <label>Medium <input type="number" id="bot-medium" min="0" max="4" value="1"></label>
-            <label>Hard <input type="number" id="bot-hard" min="0" max="4" value="0"></label>
-          </div>
-          <p class="hint">At least one seat must be left for a human (you).</p>
-        </fieldset>
-
-        <details class="advanced">
-          <summary>Advanced</summary>
-          <!-- Moved back into Advanced per FRONTEND_FIXES.MD (an earlier
-               round had promoted these out of Advanced specifically
-               because they're irreversible once the game starts -- see
-               issue #9's own history; the user's revisited call this
-               round is to fold them back in, defaults unchanged). -->
-          <fieldset class="bot-mix">
-            <legend>Table settings</legend>
-            <div class="bot-row">
-              <label class="radio-label"><input type="checkbox" id="host-reveal-cards" checked> Show opponents' paintings</label>
-              <label class="radio-label"><input type="checkbox" id="host-show-logs" checked> Show game log</label>
+        <details class="host-collapsible" open>
+          <summary>
+            <span class="host-field-label">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <rect x="5" y="8.7" width="14" height="10" rx="2.5"/>
+                <path d="M12 8.7V5.9"/>
+                <circle cx="12" cy="4.4" r="1"/>
+                <circle cx="9.2" cy="13.2" r="1"/>
+                <circle cx="14.8" cy="13.2" r="1"/>
+                <path d="M9 16.6h6"/>
+                <path d="M3 12.7h2"/>
+                <path d="M19 12.7h2"/>
+              </svg>
+              Fill empty seats with bots (optional)
+            </span>
+            <svg class="host-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M6 9l6 6 6-6"/>
+            </svg>
+          </summary>
+          <div class="host-collapsible-body">
+            <div class="host-steppers">
+              <!-- Each stepper's +/- buttons write straight into the same
+                   plain #bot-easy/#bot-medium/#bot-hard number inputs
+                   onCreateGame already reads -- see onBotStepperClick
+                   (app.js). The real <input> stays in the DOM (type=hidden)
+                   rather than becoming a separate piece of state to keep in
+                   sync with the display. -->
+              <div class="host-stepper" data-bot-tier="easy">
+                <span class="host-stepper-label">Easy</span>
+                <div class="host-stepper-controls">
+                  <button type="button" class="host-stepper-btn" data-delta="-1" aria-label="Fewer easy bots">−</button>
+                  <span class="host-stepper-value">0</span>
+                  <button type="button" class="host-stepper-btn" data-delta="1" aria-label="More easy bots">+</button>
+                </div>
+                <input type="hidden" id="bot-easy" min="0" max="4" value="0">
+              </div>
+              <div class="host-stepper" data-bot-tier="medium">
+                <span class="host-stepper-label">Medium</span>
+                <div class="host-stepper-controls">
+                  <button type="button" class="host-stepper-btn" data-delta="-1" aria-label="Fewer medium bots">−</button>
+                  <span class="host-stepper-value">1</span>
+                  <button type="button" class="host-stepper-btn" data-delta="1" aria-label="More medium bots">+</button>
+                </div>
+                <input type="hidden" id="bot-medium" min="0" max="4" value="1">
+              </div>
+              <div class="host-stepper" data-bot-tier="hard">
+                <span class="host-stepper-label">Hard</span>
+                <div class="host-stepper-controls">
+                  <button type="button" class="host-stepper-btn" data-delta="-1" aria-label="Fewer hard bots">−</button>
+                  <span class="host-stepper-value">0</span>
+                  <button type="button" class="host-stepper-btn" data-delta="1" aria-label="More hard bots">+</button>
+                </div>
+                <input type="hidden" id="bot-hard" min="0" max="4" value="0">
+              </div>
             </div>
-            <p class="hint">Fixed for the whole table once the game starts. Not adjustable mid-game.</p>
-          </fieldset>
-          <label>Bot think time (seconds)
-            <input type="number" id="host-think-time" min="0" step="0.1" value="1.5">
-          </label>
-          <label>Random seed (optional)
-            <input type="number" id="host-seed" step="1" placeholder="random">
-          </label>
-          <p class="hint">Leave blank for a random game. Setting a seed makes the deck reproducible, useful for reporting a bug ("it happened in seed 12345"). Shown in-game once the round starts.</p>
+            <p class="hint host-hint-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <circle cx="12" cy="12" r="8.3"/>
+                <path d="M12 11v5.3"/>
+                <circle cx="12" cy="8" r="0.9" fill="currentColor" stroke="none"/>
+              </svg>
+              Leave at least one seat for a human (you).
+            </p>
+          </div>
         </details>
 
-        <button id="btn-create-game" class="primary">Host Game</button>
+        <details class="host-collapsible">
+          <summary>
+            <span class="host-field-label">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <circle cx="12" cy="12" r="3"/>
+                <path d="M12 3.5v2.3M12 18.2v2.3M20.5 12h-2.3M5.8 12H3.5M17.7 6.3l-1.6 1.6M7.9 16.1l-1.6 1.6M17.7 17.7l-1.6-1.6M7.9 7.9 6.3 6.3"/>
+              </svg>
+              Advanced settings
+            </span>
+            <svg class="host-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M6 9l6 6 6-6"/>
+            </svg>
+          </summary>
+          <div class="host-collapsible-body">
+            <!-- Moved back into Advanced per FRONTEND_FIXES.MD (an earlier
+                 round had promoted these out of Advanced specifically
+                 because they're irreversible once the game starts -- see
+                 issue #9's own history; the user's revisited call this
+                 round is to fold them back in, defaults unchanged). -->
+            <fieldset class="bot-mix">
+              <legend>Table settings</legend>
+              <div class="bot-row">
+                <label class="radio-label"><input type="checkbox" id="host-reveal-cards" checked> Show opponents' paintings</label>
+                <label class="radio-label"><input type="checkbox" id="host-show-logs" checked> Show game log</label>
+              </div>
+              <p class="hint">Fixed for the whole table once the game starts. Not adjustable mid-game.</p>
+            </fieldset>
+            <label>Bot think time (seconds)
+              <input type="number" id="host-think-time" min="0" step="0.1" value="1.5">
+            </label>
+            <label>Random seed (optional)
+              <input type="number" id="host-seed" step="1" placeholder="random">
+            </label>
+            <p class="hint">Leave blank for a random game. Setting a seed makes the deck reproducible, useful for reporting a bug ("it happened in seed 12345"). Shown in-game once the round starts.</p>
+          </div>
+        </details>
+
+        <button id="btn-create-game" class="primary host-submit-btn">
+          <span>Host Game</span>
+          <svg class="host-submit-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M5 12h13"/>
+            <path d="M13 6l6 6-6 6"/>
+          </svg>
+        </button>
         <p id="host-error" class="error hidden"></p>
       </div>
     </section>

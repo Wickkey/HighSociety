@@ -499,30 +499,6 @@ label input:focus, label select:focus {
   border-color: var(--accent);
 }
 
-/* Time-per-move picker (chess.com-style button rows, replacing a plain
-   <select> -- see FRONTEND_FIXES.MD). Mirrors plain `label`'s own
-   spacing/weight above so it sits identically among the other host-form
-   fields despite not literally being a <label>. */
-.field-block { display: block; margin-bottom: 0.85rem; font-size: 0.9rem; font-weight: 500; }
-.field-block-label { display: block; margin-bottom: 0.4rem; }
-.time-limit-buttons { display: flex; flex-direction: column; gap: 0.5rem; }
-.time-limit-row { display: flex; gap: 0.5rem; }
-.time-limit-btn {
-  flex: 1;
-  margin: 0;
-  padding: 0.5rem 0.4rem;
-  font-size: 0.9rem;
-  font-weight: 500;
-  background: var(--panel-bg-soft);
-  border: 1px solid var(--panel-border);
-  border-radius: var(--radius-sm);
-  color: var(--text);
-  cursor: pointer;
-  transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
-}
-.time-limit-btn:hover { border-color: var(--accent-light); }
-.time-limit-btn.selected { background: var(--accent); border-color: var(--accent); color: #fff; }
-
 fieldset.bot-mix {
   border: 1px solid var(--panel-border);
   border-radius: var(--radius-sm);
