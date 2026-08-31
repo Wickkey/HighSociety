@@ -37,6 +37,37 @@ export const GLOBAL_STATS_FOOTER_SCREENS = new Set([
   'screen-account', 'screen-achievements', 'screen-game-history',
 ]);
 
+// Maps setScreenPath's own path argument to the sidebar item it should
+// highlight as "active" -- driven from the path rather than the screen id
+// because Home's three sub-panels (Join/Host/Rules) all share one screen
+// id (screen-host-setup, see lobby.js's showHomeTile) and are only told
+// apart by which path each one sets. '/' and '/my-games' deliberately have
+// no direct entry: Home has no sidebar icon of its own (the wordmark is
+// that link), and My Games is reached via Account, not the sidebar, but
+// still highlights Account itself since it's conceptually part of it.
+export const SIDEBAR_ACTIVE_BY_PATH = {
+  '/play': 'sidebar-play',
+  '/join': 'sidebar-join',
+  '/host': 'sidebar-host',
+  '/rules': 'sidebar-rules',
+  '/leaderboard': 'sidebar-leaderboard',
+  '/account': 'sidebar-account',
+  '/achievements': 'sidebar-achievements',
+  '/my-games': 'sidebar-account',
+};
+
+// Entering an actual room (waiting lobby, live game, spectating, results)
+// leaves every top-level nav destination behind -- none of the sidebar's
+// tabs describe "you're inside this specific room" -- so the active
+// highlight should clear rather than keep showing whichever tab was last
+// visited before the room was entered. screen-game already hides the
+// sidebar entirely (see SIDEBAR_HIDDEN_SCREENS) but is included here too,
+// for when it's later shown again mid-session with a stale highlight
+// otherwise still sitting underneath.
+export const SIDEBAR_ACTIVE_CLEARING_SCREENS = new Set([
+  'screen-join', 'screen-spectate-join', 'screen-spectate', 'screen-finished', 'screen-game',
+]);
+
 const TOAST_DURATION_MS = 1500; // long enough to actually read before it clears
 // "X bought Y for Z" / "X is stuck with Y" packs in more to actually read
 // (who, what card, how much) than a routine bid/pass update — this was

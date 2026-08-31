@@ -712,8 +712,9 @@ def get_player_achievements(username: str) -> list:
 def get_player_profile_stats(username: str) -> Optional[dict]:
     """
     {"games_played", "wins", "win_rate", "avg_placement", "avg_points",
-    "avg_money_remaining", "elo"} for any known username, guest or
-    Google-linked -- unlike achievements, profile stats aren't gated to
+    "avg_money_remaining", "elo", "created_at", "last_played_at"} for any
+    known username, guest or Google-linked -- unlike achievements, profile
+    stats aren't gated to
     linked accounts, since this is just a factual record of games already
     played under that exact username, nothing tied to a persistent
     identity guarantee. None if the username has no players row at all
@@ -769,11 +770,26 @@ def get_player_profile_stats(username: str) -> Optional[dict]:
                 (player_id,),
             )
             avg_placement, avg_points, avg_money_remaining = cur.fetchone()
+            # Read fresh by player_id regardless of the id/elo cache hit
+            # above -- last_seen_at changes on every game this player
+            # finishes (see _upsert_player), so serving it from that cache
+            # (which only ever stores id/elo) would show a stale value for
+            # the rest of this process's life once cached once.
+            cur.execute("SELECT created_at, last_seen_at FROM players WHERE id = %s", (player_id,))
+            created_at, last_seen_at = cur.fetchone()
             return {
                 "games_played": games_played, "wins": wins, "win_rate": win_rate, "elo": elo,
                 "avg_placement": float(avg_placement) if avg_placement is not None else None,
                 "avg_points": float(avg_points) if avg_points is not None else None,
                 "avg_money_remaining": float(avg_money_remaining) if avg_money_remaining is not None else None,
+                "created_at": created_at.isoformat(),
+                # Deliberately named for what this data actually is --
+                # last_seen_at only updates when a game finishes (see
+                # _upsert_player), not on every page load/heartbeat, so
+                # it's "last time this player finished a game", not real
+                # presence. The UI should present it that way, not as a
+                # live online/offline indicator.
+                "last_played_at": last_seen_at.isoformat(),
             }
     except Exception as e:  # noqa: BLE001
         LoggingManager.warning(f"game_history.get_player_profile_stats failed: {e}")
@@ -821,14 +837,19 @@ def get_global_stats() -> Optional[dict]:
 def get_recent_games(username: str, limit: int = 20, offset: int = 0) -> dict:
     """
     This player's most recent games, newest first -- {"games": [{"game_id",
-    "finished_at", "placement", "opponents": [{"name", "is_bot",
-    "is_winner"}, ...]}, ...], "has_more": bool}. `opponents` includes
-    every seat at the table (not just non-`username` ones) since the
-    caller (the "My Games" list, and the home screen's Recent Games
-    widget) wants to show who was actually at the table, this player
-    included. {"games": [], "has_more": False} on any failure or no
-    database -- an empty list renders as "no games yet", never an error,
-    for what's a purely supplementary view.
+    "finished_at", "placement", "is_winner", "rating_change", "opponents":
+    [{"name", "is_bot", "is_winner"}, ...]}, ...], "has_more": bool}.
+    `opponents` includes every seat at the table (not just non-`username`
+    ones) since the caller (the "My Games" list, and the home screen's
+    Recent Games widget) wants to show who was actually at the table, this
+    player included. The top-level `is_winner`/`rating_change` are this
+    specific player's own outcome for that game (for the Account screen's
+    Recent Activity feed) -- `rating_change` is null for any game they
+    weren't rated in (guest account, all-bot practice game, or a game that
+    predates the ratings table), never a fake 0. {"games": [],
+    "has_more": False} on any failure or no database -- an empty list
+    renders as "no games yet", never an error, for what's a purely
+    supplementary view.
 
     `offset`/`has_more` back "My Games"' pagination (see FRONTEND_FIXES.MD --
     10 at a time rather than loading a player's whole history in one
@@ -886,6 +907,28 @@ def get_recent_games(username: str, limit: int = 20, offset: int = 0) -> dict:
                     {"name": name, "is_bot": is_bot, "is_winner": is_winner})
             for g in games:
                 g["opponents"] = opponents_by_game.get(g["game_id"], [])
+            # This player's own outcome + Elo delta for each game, for the
+            # Account screen's Recent Activity feed -- one more batched,
+            # indexed query (game_id = ANY(...), same pattern as the
+            # opponents query above) rather than one query per game.
+            # rating_change is null for any game this specific player
+            # wasn't rated in (a guest account, an all-bot practice game,
+            # or a game that predates the ratings table) -- the caller
+            # should render that as "no Elo change shown", never a fake 0.
+            cur.execute(
+                """
+                SELECT pg.game_id, pg.is_winner, r.rating_change
+                FROM player_games pg
+                LEFT JOIN ratings r ON r.game_id = pg.game_id AND r.user_id = pg.player_id
+                WHERE pg.player_id = %s AND pg.game_id = ANY(%s)
+                """,
+                (player_id, game_ids),
+            )
+            own_result_by_game = {gid: (is_winner, rating_change) for gid, is_winner, rating_change in cur.fetchall()}
+            for g in games:
+                is_winner, rating_change = own_result_by_game.get(g["game_id"], (None, None))
+                g["is_winner"] = is_winner
+                g["rating_change"] = rating_change
             return {"games": games, "has_more": has_more}
     except Exception as e:  # noqa: BLE001
         LoggingManager.warning(f"game_history.get_recent_games failed: {e}")

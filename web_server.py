@@ -826,6 +826,8 @@ def api_profile(username):
         "avg_points": stats["avg_points"],
         "avg_money_remaining": stats["avg_money_remaining"],
         "elo": stats["elo"],
+        "created_at": stats["created_at"],
+        "last_played_at": stats["last_played_at"],
     })
 
 

@@ -1,8 +1,15 @@
-// Account screen: profile editing, achievements grid, public stats.
+// Account screen: profile editing, achievements grid, public stats, the
+// Elo history chart, and the Recent Activity feed.
 import { $, hide, show, showError, showScreen, setScreenPath } from '../utils/dom.js';
-import { escapeHtml } from '../utils/formatting.js';
+import { escapeHtml, timeAgo } from '../utils/formatting.js';
 import { loadProfile, saveProfile, renderProfileChip } from '../auth/profile.js';
 import { fetchJSON } from '../lobby/lobby.js';
+// Circular with gameHistory.js (which imports getPrefetchedStats from
+// here) -- safe by this project's own established convention: both sides
+// only ever touch the other's export inside a function body, never at
+// this module's own top-level evaluation. See gameHistory.js's identical
+// note on its own import from here.
+import { fetchGamesPage, renderIfChanged } from '../lobby/gameHistory.js';
 import { showToast } from '../ui/notifications.js';
 
 // Static catalog mirroring highsociety/code/common/achievements.py's
@@ -49,11 +56,25 @@ const ACHIEVEMENTS = [
         + '<path d="M9 16c1.5-1.3 4.5-1.3 6 0"/>' },
 ];
 
+// A locked tile's own icon badge gets a small lock pin (rather than
+// leaving "why is this grayed out" to be inferred from opacity alone),
+// and every tile gets a styled, instant hover/focus tooltip with exactly
+// how to unlock it -- replaces the old plain title="..." (a native
+// tooltip's ~1s hover delay and inconsistent cross-browser look, on
+// content worth reading immediately). tabindex so a keyboard user can
+// reach the same tooltip via focus, not just a mouse hover; aria-label
+// carries the same text for screen readers regardless of either.
 function renderAchievementTile(a, unlocked) {
-  return `<div class="achievement-tile ${unlocked ? 'unlocked' : 'locked'}" title="${escapeHtml(a.description)}">`
+  const lockBadge = unlocked ? '' : `<span class="achievement-lock">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <rect x="5.5" y="10.5" width="13" height="9.5" rx="2"/><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3"/>
+    </svg>
+  </span>`;
+  return `<div class="achievement-tile ${unlocked ? 'unlocked' : 'locked'}" tabindex="0" aria-label="${escapeHtml(a.name)}: ${escapeHtml(a.description)}">`
     + `<span class="achievement-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" `
-    + `stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${a.icon}</svg></span>`
-    + `<span class="achievement-name">${escapeHtml(a.name)}</span></div>`;
+    + `stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${a.icon}</svg>${lockBadge}</span>`
+    + `<span class="achievement-name">${escapeHtml(a.name)}</span>`
+    + `<span class="achievement-tooltip" aria-hidden="true">${escapeHtml(a.description)}</span></div>`;
 }
 
 // Fired once as soon as boot knows who's signed in (see login.js's
@@ -72,6 +93,18 @@ export function prefetchAccountStats() {
   if (!profile) return;
   _statsPrefetchUsername = profile.username;
   _statsPrefetch = fetchJSON(`/api/profile/${encodeURIComponent(profile.username)}`).catch(() => null);
+}
+
+// Shared read-only access to that same prefetch -- lets gameHistory.js's
+// Home widget show the current Elo rating alongside Recent Games without
+// firing a second request for data already in flight. Falls back to a
+// fresh fetch only if the prefetch doesn't exist yet or was for a
+// different username (a very early call before login's own prefetch
+// fired, or a mid-session identity change) -- correctness over always
+// reusing the cache.
+export function getPrefetchedStats(username) {
+  if (_statsPrefetch && _statsPrefetchUsername === username) return _statsPrefetch;
+  return fetchJSON(`/api/profile/${encodeURIComponent(username)}`).catch(() => null);
 }
 
 // account-stats-row.loading CSS) the instant the screen opens, then
@@ -97,6 +130,15 @@ function renderAccountStats(stats, profile) {
   $('account-stat-avg-points').textContent = stats.avg_points != null ? stats.avg_points.toFixed(1) : '—';
   $('account-stat-avg-money').textContent = stats.avg_money_remaining != null ? stats.avg_money_remaining.toFixed(1) : '—';
   $('account-stats-row').classList.remove('loading');
+
+  const dateLabel = (iso) => new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  $('account-player-since').textContent = dateLabel(stats.created_at);
+  // "Last played", not live presence -- see get_player_profile_stats' own
+  // comment on why last_seen_at only updates when a game finishes, not on
+  // every visit. timeAgo reads more like an actual "last active" glance
+  // (e.g. "2h ago") than a bare date would for anything recent.
+  $('account-last-played').textContent = timeAgo(stats.last_played_at);
+  $('account-meta-row').classList.remove('loading');
 }
 
 // Stale-while-revalidate, deliberately: the login-time prefetch is only
@@ -124,6 +166,236 @@ async function loadAccountStats() {
   try {
     renderAccountStats(await fetchJSON(`/api/profile/${encodeURIComponent(profile.username)}`), profile);
   } catch (e) { /* 404: no games recorded yet -- leave whatever's already rendered (or the skeleton) */ }
+}
+
+// ------------------------------------------------------------ Elo chart --
+//
+// Drawn with ApexCharts (MIT-licensed, one of the most widely used JS
+// charting libraries) -- switched from Chart.js specifically for its
+// area-chart look: a real gradient fill under the line, a built-in
+// datetime x-axis (no separate date-adapter package needed, unlike
+// Chart.js's own "time" scale), and a themeable tooltip/crosshair,
+// closer to what a polished rating-history chart is expected to look
+// like out of the box. Vendored locally as a single UMD bundle
+// (highsociety/web/static/js/vendor/apexcharts.min.js) rather than
+// pulled from a CDN or given a build step -- self-registers
+// window.ApexCharts from a classic <script>, loaded lazily (see
+// loadApexCharts below) only the first time this screen actually needs
+// it, so every other screen never pays for it.
+let apexChartsLoadPromise = null;
+
+function loadApexCharts() {
+  if (window.ApexCharts) return Promise.resolve();
+  if (!apexChartsLoadPromise) {
+    apexChartsLoadPromise = new Promise((resolve, reject) => {
+      const script = document.createElement('script');
+      script.src = '/static/js/vendor/apexcharts.min.js';
+      script.onload = resolve;
+      script.onerror = () => { apexChartsLoadPromise = null; reject(new Error('Failed to load apexcharts')); };
+      document.head.appendChild(script);
+    });
+  }
+  return apexChartsLoadPromise;
+}
+
+// A CSS custom property's raw value (e.g. "#1f7a4d") -- ApexCharts draws
+// on inline SVG, which has no idea what a CSS variable is either, so
+// every color handed to it has to already be a resolved literal.
+function cssVar(name) {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+}
+
+let eloChart = null; // the live ApexCharts instance, if any -- see renderEloChart
+let fullEloHistory = []; // the unfiltered fetch, so the 7D/30D/All toggle can re-slice without a new request -- see loadEloChart/onEloChartRangeClick
+
+// Client-side only -- get_rating_history already returns everything, so
+// narrowing to a window is just a filter on timestamps already in hand,
+// never a re-fetch.
+function filterHistoryByRange(history, range) {
+  if (range === 'all') return history;
+  const days = range === '7' ? 7 : 30;
+  const cutoffMs = Date.now() - days * 24 * 60 * 60 * 1000;
+  return history.filter((h) => new Date(h.created_at).getTime() >= cutoffMs);
+}
+
+export function onEloChartRangeClick(e) {
+  const btn = e.target.closest('.account-elo-chart-range-btn');
+  if (!btn) return;
+  document.querySelectorAll('#account-elo-chart-range-toggle .account-elo-chart-range-btn').forEach((b) => {
+    b.classList.toggle('selected', b === btn);
+  });
+  renderEloChart(filterHistoryByRange(fullEloHistory, btn.dataset.range));
+}
+
+// `history`: [{old_rating, new_rating, created_at}, ...] oldest first (see
+// get_rating_history), already narrowed to whatever range is currently
+// selected (see filterHistoryByRange) -- an empty array here means "no
+// games in this window", which shows a small inline message rather than
+// hiding the whole tile (the range toggle above it should stay reachable
+// so a different window can still be picked). Plots every new_rating,
+// prefixed by the very first entry's old_rating so the line actually
+// starts somewhere instead of jumping in mid-air on its first point.
+//
+// A real datetime x-axis (each point keeps its actual timestamp) rather
+// than evenly-spaced-by-index -- an index-based layout would spread a
+// burst of several games played in one evening across the *entire*
+// width, identical to if they'd been spread across months, which is what
+// made the old sparkline look like a meaningless zigzag rather than an
+// actual rating history. The prefixed old_rating point sits at a
+// synthetic time just before the first real game (5% of the whole span
+// back) purely so the line has a visible starting slope -- it's never a
+// real game's own timestamp.
+async function renderEloChart(history) {
+  const container = $('account-elo-chart');
+  if (eloChart) { eloChart.destroy(); eloChart = null; }
+  container.classList.remove('loading');
+  if (history.length === 0) {
+    container.innerHTML = '<p class="muted account-elo-chart-empty">No games in this range.</p>';
+    return;
+  }
+  container.innerHTML = '';
+  try {
+    await loadApexCharts();
+  } catch (e) {
+    // ApexCharts genuinely failed to load (offline, ad-blocker, ...) --
+    // unlike the empty-range case above, there's no chart at all to show
+    // regardless of range, so this hides the whole tile, range toggle
+    // included.
+    hide($('account-elo-chart-section'));
+    return;
+  }
+
+  const gameTimes = history.map((h) => new Date(h.created_at).getTime());
+  const span = gameTimes[gameTimes.length - 1] - gameTimes[0] || 1;
+  const times = [gameTimes[0] - span * 0.05, ...gameTimes];
+  const values = [history[0].old_rating, ...history.map((h) => h.new_rating)];
+  const trendUp = values[values.length - 1] >= values[0];
+  const lineColor = trendUp ? cssVar('--chip-money') : cssVar('--danger');
+  const gridColor = cssVar('--panel-border');
+  const textColor = cssVar('--muted');
+
+  eloChart = new window.ApexCharts(container, {
+    chart: {
+      type: 'area',
+      // A numeric pixel height, not '100%' -- ApexCharts resolves a
+      // percentage height against the parent at mount time, and that
+      // measurement came out taller than the container's own 200px
+      // (275px, observed), which the container (no overflow:hidden)
+      // doesn't clip -- the extra height visibly spilled out of the
+      // tile and over whatever sat below it. A concrete number matching
+      // the CSS height in lobby.css always lands exactly on-target.
+      height: 200,
+      fontFamily: 'inherit',
+      background: 'transparent',
+      toolbar: { show: false },
+      zoom: { enabled: false },
+      animations: { speed: 400 },
+    },
+    // A legend is pure clutter for a single named series -- it also ate
+    // into the height budget above, part of why the chart rendered
+    // taller than intended.
+    legend: { show: false },
+    series: [{ name: 'Rating', data: times.map((t, i) => [t, values[i]]) }],
+    colors: [lineColor],
+    stroke: { curve: 'smooth', width: 2.5 },
+    // The gradient fill under the line is the single biggest visual
+    // upgrade a real area chart brings over a bare line. Fading all the
+    // way to fully transparent (opacityTo: 0) read as only partially
+    // shaded -- the lower portion of the area looked empty. Without an
+    // explicit gradientToColors, ApexCharts fades the bottom stop to
+    // white rather than to the series' own color, which against this
+    // app's light cream panel background read as no fill at all -- so
+    // this pins both gradient stops to the same lineColor and only
+    // varies the opacity, keeping a visible tinted floor the whole way
+    // down instead of washing out to white.
+    fill: {
+      type: 'gradient',
+      gradient: { shadeIntensity: 1, gradientToColors: [lineColor], opacityFrom: 0.4, opacityTo: 0.12, stops: [0, 100] },
+    },
+    markers: { size: 0, hover: { size: 5 } },
+    dataLabels: { enabled: false },
+    grid: {
+      borderColor: gridColor,
+      strokeDashArray: 0,
+      xaxis: { lines: { show: false } },
+      yaxis: { lines: { show: true } },
+      padding: { left: 8, right: 8 },
+    },
+    xaxis: {
+      type: 'datetime',
+      labels: { style: { colors: textColor, fontSize: '11px' }, datetimeUTC: false },
+      axisBorder: { show: false },
+      axisTicks: { show: false },
+    },
+    yaxis: {
+      labels: { style: { colors: textColor, fontSize: '11px' }, formatter: (v) => Math.round(v) },
+    },
+    tooltip: {
+      theme: 'dark',
+      x: { format: 'MMM d, yyyy' },
+      y: { formatter: (v) => `Rating: ${Math.round(v)}` },
+    },
+  });
+  await eloChart.render();
+}
+
+// Guests never accrue real rating history (record_finished_game only
+// rates google_id-linked players -- same gate account-elo's own Unrated
+// label already uses), so there's nothing meaningful to plot -- the
+// section stays hidden rather than showing an empty chart.
+// The section's own visibility for the "no profile / not Google-linked"
+// case is already decided synchronously in showAccountScreen (before this
+// even starts) -- checked again here only defensively, in case this is
+// ever called from somewhere that skipped that step.
+async function loadEloChart(profile) {
+  const section = $('account-elo-chart-section');
+  if (!profile || !profile.google_id) { hide(section); return; }
+  try {
+    const result = await fetchJSON(`/api/profile/${encodeURIComponent(profile.username)}/rating_history`);
+    fullEloHistory = result.history || [];
+    if (fullEloHistory.length === 0) { hide(section); return; }
+    // A fresh load (a different profile, or just re-opening this screen)
+    // always starts from "All" -- a 7D/30D selection left over from a
+    // previous visit silently carrying over would show a narrower window
+    // than the toggle itself appears to say, with nothing indicating why.
+    document.querySelectorAll('#account-elo-chart-range-toggle .account-elo-chart-range-btn').forEach((b) => {
+      b.classList.toggle('selected', b.dataset.range === 'all');
+    });
+    show(section);
+    await renderEloChart(fullEloHistory);
+  } catch (e) {
+    hide(section);
+  }
+}
+
+// -------------------------------------------------------- recent activity --
+//
+// Renders through gameHistory.js's own renderIfChanged/gamesListHtml --
+// the exact same row markup Home's Recent Games widget and the My Games
+// screen use -- rather than a bespoke design of its own, per explicit
+// feedback that this used to look like a visually different component.
+// Also shares fetchGamesPage's own cache with that same widget rather
+// than a separate fetch of its own -- Home is the app's own landing
+// screen, so by the time anyone opens Account this data has almost
+// always already been fetched and cached this session, making this paint
+// instantly with zero added network wait. Only a genuinely first-ever
+// fetch this session (e.g. a deep link straight to /account) pays for a
+// real round trip, same as Home's own widget would have anyway.
+async function loadRecentActivity(profile) {
+  const section = $('account-recent-activity-section');
+  const list = $('account-recent-activity-list');
+  if (!profile) { hide(section); return; }
+  const paint = (page) => {
+    const games = page.games.slice(0, 5);
+    if (games.length === 0) { hide(section); return; }
+    renderIfChanged(list, games, profile.username);
+    show(section);
+  };
+  const { cached, freshPromise } = fetchGamesPage(profile.username, 0);
+  if (cached) paint(cached);
+  const fresh = await freshPromise;
+  if (fresh) paint(fresh);
+  else if (!cached) hide(section);
 }
 
 // Cached per username, in memory for this tab's lifetime -- an unlocked
@@ -199,9 +471,39 @@ export function showAccountScreen() {
   hide($('account-username-edit')); // collapsed by default -- see onAccountEditUsernameClick
   hide($('account-error'));
   hide($('account-saved'));
+  $('account-meta-row').classList.add('loading');
+  // The chart tile's own visibility is decided synchronously, right here,
+  // rather than staying hidden until its (slower) async fetch resolves --
+  // a real, reported bug: whenever the chart happened to take longer to
+  // load than Recent Activity below it (a fresh network fetch plus a real
+  // ~500KB charting library, vs. Recent Activity's near-instant cached
+  // paint), the chart tile would pop into existence *after* the screen had
+  // already settled, visibly shoving Recent Activity down without warning.
+  // google_id is already known synchronously (it's on the local profile,
+  // no fetch needed) and is the same condition loadEloChart's own guard
+  // uses, so reserving the space for it up front is safe in the common
+  // case; the rare remaining edge case (a Google account with zero rated
+  // games so far) still collapses it back down once the fetch confirms
+  // that, but that's a far rarer, smaller correction than every single
+  // successful load shifting late. See loadEloChart/renderEloChart's own
+  // comments for the other half of this.
+  $('account-elo-chart').classList.add('loading');
+  $('account-elo-chart-section').classList.toggle('hidden', !(profile && profile.google_id));
+  // Recent Activity has no equivalent slow-external-library concern, so
+  // it keeps the simpler "hidden until its own data says otherwise"
+  // behavior -- reset here for the same account-switch reason as before
+  // (logging out of a Google account with real data, back in as a fresh
+  // guest, shouldn't flash the previous profile's feed for a moment).
+  hide($('account-recent-activity-section'));
   showScreen('screen-account');
   setScreenPath('/account');
+  // All three run independently/in parallel, same as the stats prefetch
+  // already did -- none of them awaits or blocks another, so the screen's
+  // fast initial paint (stats, from the login-time prefetch) is never held
+  // up waiting on the chart or activity feed to resolve.
   loadAccountStats();
+  loadEloChart(profile);
+  loadRecentActivity(profile);
 }
 
 // The pencil next to the username -- reveals the same input+Save that

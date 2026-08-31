@@ -220,9 +220,19 @@
 
     <!-- ===================== ACCOUNT ===================== -->
     <section id="screen-account" class="screen hidden">
-      <div class="card panel account-panel">
+      <!-- Three separate tiles (profile+stats, Elo chart, Recent Activity)
+           rather than one long panel holding everything -- per explicit
+           feedback that a single giant tile read as an undifferentiated
+           wall, plus a reference mockup showing this same content
+           segregated into its own cards. Each card keeps managing its own
+           visibility independently (chart/activity hide via their own
+           .hidden class, same as before) -- this only changes how they're
+           grouped/spaced when shown, not when each one appears. -->
+      <div class="account-screen-wrap">
         <button type="button" class="screen-back" id="btn-account-back">← Back</button>
-        <div class="account-header">
+
+        <div class="card panel account-panel">
+          <div class="account-header">
           <span id="account-avatar" class="profile-chip-avatar account-avatar"></span>
           <div>
             <div class="account-name-row">
@@ -263,6 +273,27 @@
               <span id="account-elo" class="account-elo-value">1000</span>
               <span class="account-elo-label">Elo Rating</span>
             </div>
+            <!-- players.created_at/last_seen_at (see get_player_profile_stats)
+                 -- "last played", not live presence: last_seen_at only
+                 updates when a game actually finishes, not on every visit,
+                 so this deliberately doesn't claim to be an online/offline
+                 indicator the way it might first read. Hidden until
+                 loadAccountStats has real dates to show (see its own
+                 account-meta-row.loading class). -->
+            <div id="account-meta-row" class="account-meta-row loading">
+              <span class="account-meta-item">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <rect x="3.5" y="5" width="17" height="15.5" rx="2"/><path d="M3.5 9.5h17M8 3v3.5M16 3v3.5"/>
+                </svg>
+                Player since <span id="account-player-since">—</span>
+              </span>
+              <span class="account-meta-item">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <circle cx="12" cy="12" r="8.3"/><path d="M12 7.3V12l3 2"/>
+                </svg>
+                Last played <span id="account-last-played">—</span>
+              </span>
+            </div>
           </div>
         </div>
 
@@ -278,35 +309,144 @@
         </div>
         <p id="account-saved" class="account-saved hidden">Saved.</p>
 
+        <!-- Each card's own leading icon is purely decorative (the label
+             below the number already says what it is) -- added because a
+             bare number+label read as noticeably less finished next to
+             every other icon-led element on this app (Home tiles, the
+             Host form's field headers, this very screen's own section
+             headings). Distinct, simple, bold-enough-at-12px glyphs per
+             stat rather than one repeated icon everywhere. -->
         <div id="account-stats-row" class="account-stats-row account-stats-grid loading">
           <div class="account-stat">
+            <span class="account-stat-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="4" y="4" width="16" height="16" rx="3"/>
+                <circle cx="8.5" cy="8.5" r="1.2" fill="currentColor" stroke="none"/>
+                <circle cx="12" cy="12" r="1.2" fill="currentColor" stroke="none"/>
+                <circle cx="15.5" cy="15.5" r="1.2" fill="currentColor" stroke="none"/>
+              </svg>
+            </span>
             <span id="account-stat-games" class="account-stat-value">—</span>
             <span class="account-stat-label">Games played</span>
           </div>
           <div class="account-stat">
+            <span class="account-stat-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="currentColor" stroke="none">
+                <path d="M12 3.4l2.5 5.4 5.9.6-4.4 4 1.3 5.8L12 16.2l-5.3 3-1.3.9 1.3-5.8-4.4-4 5.9-.6z"/>
+              </svg>
+            </span>
             <span id="account-stat-wins" class="account-stat-value">—</span>
             <span class="account-stat-label">Wins</span>
           </div>
           <div class="account-stat">
+            <span class="account-stat-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="8.3"/><circle cx="12" cy="12" r="4.3"/><circle cx="12" cy="12" r="1" fill="currentColor" stroke="none"/>
+              </svg>
+            </span>
             <span id="account-stat-winrate" class="account-stat-value">—</span>
             <span class="account-stat-label">Win rate</span>
           </div>
           <div class="account-stat">
+            <span class="account-stat-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="3.5" y="14.5" width="4.5" height="6" rx="1"/><rect x="9.75" y="9.5" width="4.5" height="11" rx="1"/><rect x="16" y="4.5" width="4.5" height="16" rx="1"/>
+              </svg>
+            </span>
             <span id="account-stat-avg-placement" class="account-stat-value">—</span>
             <span class="account-stat-label">Avg. placement</span>
           </div>
           <div class="account-stat">
+            <span class="account-stat-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="currentColor" stroke="none">
+                <path d="M12 3l7 7-7 11-7-11z"/>
+              </svg>
+            </span>
             <span id="account-stat-avg-points" class="account-stat-value">—</span>
             <span class="account-stat-label">Avg. points</span>
           </div>
           <div class="account-stat">
+            <span class="account-stat-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="8.3"/>
+                <path d="M12 7.5v9M9.3 9.4c0-1.1 1-2 2.7-2s2.7.9 2.7 1.9c0 2.6-5.4 1.4-5.4 4 0 1.1 1.2 2 2.7 2s2.7-.8 2.7-1.9"/>
+              </svg>
+            </span>
             <span id="account-stat-avg-money" class="account-stat-value">—</span>
             <span class="account-stat-label">Avg. money left</span>
           </div>
         </div>
 
-        <button type="button" id="btn-account-my-games" class="secondary standalone">My Games</button>
-        <button type="button" id="btn-account-logout" class="secondary standalone">Log out</button>
+        </div>
+
+        <!-- Elo history -- ApexCharts (see account.js's loadEloChart), the
+             same real plotting library already vendored for this exact
+             purpose (moved here from the Leaderboard screen, where it was
+             built then asked to be pulled back out and relocated -- this
+             is that relocation). Hidden for a guest (elo never moves) or
+             anyone with no rated games yet -- see loadEloChart's own guard. -->
+        <div id="account-elo-chart-section" class="card panel account-panel hidden">
+          <h3>
+            <span class="section-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M3.5 18.5l5.5-6 4 3.5 6.5-8"/><path d="M15.5 7.5h4.5V12"/>
+              </svg>
+            </span>
+            Elo progress
+          </h3>
+          <!-- Purely a client-side filter over history already fetched in
+               full -- see account.js's onEloChartRangeClick -- switching
+               ranges never re-fetches. -->
+          <div id="account-elo-chart-range-toggle" class="account-elo-chart-range-toggle">
+            <button type="button" class="account-elo-chart-range-btn" data-range="7">7D</button>
+            <button type="button" class="account-elo-chart-range-btn" data-range="30">30D</button>
+            <button type="button" class="account-elo-chart-range-btn selected" data-range="all">All</button>
+          </div>
+          <div id="account-elo-chart" class="account-elo-chart loading"></div>
+        </div>
+
+        <!-- Named "Game History" (not "Recent Activity") to match Home's
+             own widget -- both open the exact same My Games screen via
+             "See more", so they need the exact same name, not two names
+             for one destination. Also the exact same recent-games-list/
+             recent-game-row markup (and rendering code, gameHistory.js's
+             renderIfChanged) as Home's widget and the My Games screen
+             itself, per explicit feedback that this used to look like a
+             different, bespoke component instead of the same one reused
+             everywhere. Also shares that same fetch's in-memory cache
+             (see account.js's loadRecentActivity) -- so this paints
+             instantly with zero added network wait whenever Home was
+             visited this session, which is effectively always (it's the
+             app's own landing screen). The rating_change badge each row
+             can show comes from that same shared response (see
+             get_recent_games' own docstring) and renders identically
+             wherever this component appears, not just here. -->
+        <div id="account-recent-activity-section" class="card panel account-panel hidden">
+          <div class="home-recent-games-header">
+            <h3>
+              <span class="section-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                  <circle cx="12" cy="12" r="8.3"/><path d="M12 7.5V12l3 2"/>
+                </svg>
+              </span>
+              Game History
+            </h3>
+            <div class="home-recent-games-header-right">
+              <!-- Opens the exact same full history screen "My Games"
+                   already is (showGameHistoryScreen, unchanged) -- this
+                   widget's own rows are just the most recent slice of
+                   that same list, not a different data source. No Elo
+                   badge here unlike Home's copy of this header -- the
+                   profile tile right above this one already shows Elo
+                   prominently, so repeating it here would be redundant. -->
+              <button type="button" id="btn-account-recent-activity-see-more" class="home-recent-games-see-more">
+                See more
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18l6-6-6-6"/></svg>
+              </button>
+            </div>
+          </div>
+          <div id="account-recent-activity-list" class="recent-games-list"></div>
+        </div>
       </div>
     </section>
 
@@ -415,46 +555,98 @@
 
     <!-- ===================== HOST SETUP ===================== -->
     <section id="screen-host-setup" class="screen hidden">
-      <div id="home-tiles" class="home-tiles">
-        <button type="button" class="home-tile" data-home-target="join">
-          <span id="home-tile-live-badge" class="home-tile-live-badge hidden"></span>
-          <span class="home-tile-icon">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <path d="M10.5 20H6.5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h4"/>
-              <path d="M15.2 8.3 19 12l-3.8 3.7"/>
-              <path d="M19 12H9.5"/>
-            </svg>
-          </span>
-          <span class="home-tile-title">Join a Game</span>
-          <span id="home-tile-join-sub" class="home-tile-sub">Public games or a room code</span>
-        </button>
-        <button type="button" class="home-tile" data-home-target="host">
-          <span class="home-tile-icon">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <path d="M4 18 L5 10 L8.5 13.5 L12 6.5 L15.5 13.5 L19 10 L20 18 Z"/>
-              <path d="M6 21h12"/>
-            </svg>
-          </span>
-          <span class="home-tile-title">Host a New Game</span>
-          <span class="home-tile-sub">Set up seats, bots, and rules</span>
-        </button>
-        <button type="button" class="home-tile" data-home-target="rules">
-          <span class="home-tile-icon">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <path d="M12 7.2c-2.1-1.4-4.9-1.9-8.2-1.6v13c3.3-.3 6.1.2 8.2 1.6 2.1-1.4 4.9-1.9 8.2-1.6v-13c-3.3-.3-6.1.2-8.2 1.6z"/>
-              <path d="M12 7.2v13"/>
-            </svg>
-          </span>
-          <span class="home-tile-title">Game Rules</span>
-          <span class="home-tile-sub">New to High Society? Start here</span>
-        </button>
-      </div>
+      <!-- Actions (left) + Recent Games (right) as one balanced two-column
+           layout, instead of three small tiles floating at the top of an
+           otherwise-empty screen with Recent Games/global-stats crammed in
+           underneath -- both halves are already independently toggled via
+           their own .hidden class (see showHomeTile/loadHomeRecentGames),
+           so wrapping them in one grid changes nothing about when either
+           shows, only how they're laid out together when both do. -->
+      <div id="home-grid" class="home-grid">
+        <div id="home-tiles" class="home-tiles">
+          <button type="button" class="home-tile" data-home-target="join">
+            <span id="home-tile-live-badge" class="home-tile-live-badge hidden"></span>
+            <span class="home-tile-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M10.5 20H6.5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h4"/>
+                <path d="M15.2 8.3 19 12l-3.8 3.7"/>
+                <path d="M19 12H9.5"/>
+              </svg>
+            </span>
+            <span class="home-tile-text">
+              <span class="home-tile-title">Join a Game</span>
+              <span id="home-tile-join-sub" class="home-tile-sub">Public games or a room code</span>
+            </span>
+            <svg class="home-tile-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18l6-6-6-6"/></svg>
+          </button>
+          <button type="button" class="home-tile home-tile-primary" data-home-target="host">
+            <span class="home-tile-badge">Most popular</span>
+            <span class="home-tile-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M4 18 L5 10 L8.5 13.5 L12 6.5 L15.5 13.5 L19 10 L20 18 Z"/>
+                <path d="M6 21h12"/>
+              </svg>
+            </span>
+            <span class="home-tile-text">
+              <span class="home-tile-title">Host a New Game</span>
+              <span class="home-tile-sub">Set up seats, bots, and rules</span>
+            </span>
+            <svg class="home-tile-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18l6-6-6-6"/></svg>
+          </button>
+          <button type="button" class="home-tile" data-home-target="rules">
+            <span class="home-tile-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M12 7.2c-2.1-1.4-4.9-1.9-8.2-1.6v13c3.3-.3 6.1.2 8.2 1.6 2.1-1.4 4.9-1.9 8.2-1.6v-13c-3.3-.3-6.1.2-8.2 1.6z"/>
+                <path d="M12 7.2v13"/>
+              </svg>
+            </span>
+            <span class="home-tile-text">
+              <span class="home-tile-title">Game Rules</span>
+              <span class="home-tile-sub">New to High Society? Start here</span>
+            </span>
+            <svg class="home-tile-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18l6-6-6-6"/></svg>
+          </button>
+        </div>
 
-      <!-- Hidden until loadHomeRecentGames actually has rows -- a guest/
-           new player with no games yet just never sees this section. -->
-      <div id="home-recent-games" class="card panel home-recent-games hidden">
-        <h3>Recent Games</h3>
-        <div id="home-recent-games-list" class="recent-games-list"></div>
+        <!-- Hidden until loadHomeRecentGames actually has rows -- a guest/
+             new player with no games yet just never sees this section.
+             Named "Game History" (not "Recent Games") to match what "See
+             more" actually opens -- the full My Games screen, which is
+             this same history, just further back than 5 rows. -->
+        <div id="home-recent-games" class="card panel home-recent-games hidden">
+          <div class="home-recent-games-header">
+            <h3>
+              <span class="section-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                  <circle cx="12" cy="12" r="8.3"/><path d="M12 7.5V12l3 2"/>
+                </svg>
+              </span>
+              Game History
+            </h3>
+            <div class="home-recent-games-header-right">
+              <!-- Elo shown right on Home, not just buried on Account --
+                   reuses account.js's own login-time stats prefetch (see
+                   getPrefetchedEloBadge) rather than a second network call
+                   for the same data. Hidden for a guest, same Unrated gate
+                   the Account screen's own Elo hero uses. -->
+              <span id="home-recent-games-elo" class="home-recent-games-elo hidden">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M3.5 18.5l5.5-6 4 3.5 6.5-8"/><path d="M15.5 7.5h4.5V12"/>
+                </svg>
+                <span id="home-recent-games-elo-value">—</span>
+              </span>
+              <!-- Opens the exact same full history screen "My Games"
+                   already is (showGameHistoryScreen, unchanged) -- this
+                   widget's own 5 rows are just the most recent slice of
+                   that same list, not a different data source. -->
+              <button type="button" id="btn-home-recent-games-see-more" class="home-recent-games-see-more">
+                See more
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18l6-6-6-6"/></svg>
+              </button>
+            </div>
+          </div>
+          <div id="home-recent-games-list" class="recent-games-list"></div>
+        </div>
       </div>
 
       <div id="home-panel-join" class="card panel home-panel hidden">
@@ -465,102 +657,373 @@
           <p class="muted">Loading public games…</p>
         </div>
         <label>Room code
-          <input type="text" id="join-room-code" placeholder="e.g. AB3D9" autocomplete="off" maxlength="10">
+          <input type="text" id="join-room-code" class="room-code-input" placeholder="e.g. AB3D9" autocomplete="off" maxlength="5">
         </label>
-        <button id="btn-join-by-code" class="secondary">Join</button>
+        <button id="btn-join-by-code" class="primary" disabled>Join</button>
       </div>
 
       <div id="home-panel-rules" class="card panel home-panel hidden">
         <button type="button" class="home-back">← Back</button>
         <h2>How to play</h2>
         <div class="how-to-play-body">
+          <!-- htp_jump_links only true for this, the "full page" instance
+               of this shared partial (also included, unlabeled, in the
+               Join screen's own collapsed "how to play" -- see below).
+               Guards both the jump-nav bar and the section ids it targets,
+               since this partial renders twice on the same page and two
+               elements sharing one id would be invalid HTML (and
+               scrollIntoView would only ever find the first one). -->
+          {% set htp_jump_links = true %}
           {% include "_how_to_play_body.html" %}
         </div>
       </div>
 
-      <div id="home-panel-host" class="card panel home-panel hidden">
+      <div id="home-panel-host" class="card panel home-panel host-panel hidden">
         <button type="button" class="home-back">← Back</button>
-        <h2>Host a new game</h2>
+        <div class="host-header">
+          <div>
+            <h2>Host a new game</h2>
+            <p class="muted">Create a room and invite others to play High Society.</p>
+          </div>
+          <div class="host-header-cards" aria-hidden="true">
+            <span class="host-header-card host-header-card-1"></span>
+            <span class="host-header-card host-header-card-2">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M4.5 17.5 3 9l4.5 2.5L12 5l4.5 6.5L21 9l-1.5 8.5z"/>
+              </svg>
+            </span>
+          </div>
+        </div>
 
-        <label>Total seats
-          <input type="number" id="host-seats" min="2" max="5" value="3">
-        </label>
+        <div class="host-field-group">
+          <div class="host-field-header">
+            <span class="host-field-label">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <circle cx="9" cy="8.2" r="2.6"/>
+                <path d="M4 19c0-3 2.2-5 5-5s5 2 5 5"/>
+                <circle cx="17" cy="9.3" r="2.1"/>
+                <path d="M15.2 19c.1-2.4 1.5-4 3.4-4 1.7 0 3.1 1.1 3.4 3"/>
+              </svg>
+              Total seats
+            </span>
+            <span class="host-field-hint">Choose 3–5 players</span>
+          </div>
+          <!-- Same pattern as the time-per-move picker below: plain buttons
+               driving a real, unchanged hidden input underneath, so
+               onCreateGame's own "$('host-seats').value" read needs no
+               change at all. Only 3-5 offered here even though the engine
+               itself supports 2 (see HSConfig's min_players) -- the user's
+               own explicit call for this redesign, not an oversight. -->
+          <div id="host-seats-buttons" class="pill-choice-grid">
+            <div class="pill-choice-row">
+              <button type="button" class="pill-choice-btn selected" data-value="3">3</button>
+              <button type="button" class="pill-choice-btn" data-value="4">4</button>
+              <button type="button" class="pill-choice-btn" data-value="5">5</button>
+            </div>
+          </div>
+          <input type="hidden" id="host-seats" value="3">
+        </div>
 
-        <div class="field-block">
-          <span class="field-block-label">Time per move</span>
+        <div class="host-field-group">
+          <div class="host-field-header">
+            <span class="host-field-label">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <circle cx="12" cy="12" r="8.3"/>
+                <path d="M12 7.3V12l3 2"/>
+              </svg>
+              Time per move
+            </span>
+            <span class="host-field-hint">Auto-pass when time runs out</span>
+          </div>
           <!-- Replaces a <select> dropdown (chess.com-style button rows,
                per FRONTEND_FIXES.MD) -- #host-turn-time stays a real,
                unchanged hidden input underneath so onCreateGame's own
                reading of "$('host-turn-time').value" needs no change at
                all; onTimeLimitButtonClick (app.js) is the only thing new
                that writes to it. -->
-          <div id="host-turn-time-buttons" class="time-limit-buttons">
-            <div class="time-limit-row">
-              <button type="button" class="time-limit-btn selected" data-value="">No limit</button>
+          <div id="host-turn-time-buttons" class="pill-choice-grid">
+            <div class="pill-choice-row">
+              <button type="button" class="pill-choice-btn selected" data-value="">No limit</button>
+              <button type="button" class="pill-choice-btn" data-value="15">15s</button>
+              <button type="button" class="pill-choice-btn" data-value="30">30s</button>
             </div>
-            <div class="time-limit-row">
-              <button type="button" class="time-limit-btn" data-value="15">15s</button>
-              <button type="button" class="time-limit-btn" data-value="30">30s</button>
-              <button type="button" class="time-limit-btn" data-value="60">60s</button>
-            </div>
-            <div class="time-limit-row">
-              <button type="button" class="time-limit-btn" data-value="90">90s</button>
-              <button type="button" class="time-limit-btn" data-value="120">2 min</button>
+            <div class="pill-choice-row">
+              <button type="button" class="pill-choice-btn" data-value="60">60s</button>
+              <button type="button" class="pill-choice-btn" data-value="90">90s</button>
+              <button type="button" class="pill-choice-btn" data-value="120">2 min</button>
             </div>
           </div>
           <input type="hidden" id="host-turn-time" value="">
         </div>
-        <p class="hint">If set, each player gets this many seconds per bid/pass before they're auto-passed.</p>
 
-        <fieldset class="bot-mix">
-          <legend>Who can join?</legend>
-          <div class="bot-row">
-            <label class="radio-label">
+        <div class="host-field-group">
+          <div class="host-field-header">
+            <span class="host-field-label">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <circle cx="12" cy="12" r="8.3"/>
+                <path d="M3.7 12h16.6"/>
+                <path d="M12 3.7c2.5 2.2 3.9 5.2 3.9 8.3s-1.4 6.1-3.9 8.3c-2.5-2.2-3.9-5.2-3.9-8.3s1.4-6.1 3.9-8.3z"/>
+              </svg>
+              Room visibility
+            </span>
+          </div>
+          <div class="host-visibility-cards">
+            <label class="host-visibility-card">
               <input type="radio" name="host-visibility" id="host-visibility-public" value="public" checked>
-              <span class="radio-label-text"><strong>Public</strong><span class="hint">Anyone can join</span></span>
+              <span class="host-visibility-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <circle cx="12" cy="12" r="8.3"/>
+                  <path d="M3.7 12h16.6"/>
+                  <path d="M12 3.7c2.5 2.2 3.9 5.2 3.9 8.3s-1.4 6.1-3.9 8.3c-2.5-2.2-3.9-5.2-3.9-8.3s1.4-6.1 3.9-8.3z"/>
+                </svg>
+              </span>
+              <span class="host-visibility-text"><strong>Public</strong><span class="hint">Anyone can join</span></span>
+              <span class="host-visibility-badge">
+                <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M5 12.5 9.5 17 19 7.5"/>
+                </svg>
+              </span>
             </label>
-            <label class="radio-label">
+            <label class="host-visibility-card">
               <input type="radio" name="host-visibility" id="host-visibility-private" value="private">
-              <span class="radio-label-text"><strong>Private</strong><span class="hint">Requires room code</span></span>
+              <span class="host-visibility-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <rect x="5.3" y="10.3" width="13.4" height="9.7" rx="2.2"/>
+                  <path d="M8 10.3V7.3a4 4 0 0 1 8 0v3"/>
+                </svg>
+              </span>
+              <span class="host-visibility-text"><strong>Private</strong><span class="hint">Requires room code</span></span>
+              <span class="host-visibility-badge">
+                <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M5 12.5 9.5 17 19 7.5"/>
+                </svg>
+              </span>
             </label>
           </div>
-        </fieldset>
+        </div>
 
-        <fieldset class="bot-mix">
-          <legend>Fill seats with bots (optional)</legend>
-          <div class="bot-row">
-            <label>Easy <input type="number" id="bot-easy" min="0" max="4" value="0"></label>
-            <label>Medium <input type="number" id="bot-medium" min="0" max="4" value="1"></label>
-            <label>Hard <input type="number" id="bot-hard" min="0" max="4" value="0"></label>
-          </div>
-          <p class="hint">At least one seat must be left for a human (you).</p>
-        </fieldset>
-
-        <details class="advanced">
-          <summary>Advanced</summary>
-          <!-- Moved back into Advanced per FRONTEND_FIXES.MD (an earlier
-               round had promoted these out of Advanced specifically
-               because they're irreversible once the game starts -- see
-               issue #9's own history; the user's revisited call this
-               round is to fold them back in, defaults unchanged). -->
-          <fieldset class="bot-mix">
-            <legend>Table settings</legend>
-            <div class="bot-row">
-              <label class="radio-label"><input type="checkbox" id="host-reveal-cards" checked> Show opponents' paintings</label>
-              <label class="radio-label"><input type="checkbox" id="host-show-logs" checked> Show game log</label>
+        <details class="host-collapsible" open>
+          <summary>
+            <span class="host-field-label">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <rect x="5" y="8.7" width="14" height="10" rx="2.5"/>
+                <path d="M12 8.7V5.9"/>
+                <circle cx="12" cy="4.4" r="1"/>
+                <circle cx="9.2" cy="13.2" r="1"/>
+                <circle cx="14.8" cy="13.2" r="1"/>
+                <path d="M9 16.6h6"/>
+                <path d="M3 12.7h2"/>
+                <path d="M19 12.7h2"/>
+              </svg>
+              Fill empty seats with bots (optional)
+            </span>
+            <svg class="host-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M6 9l6 6 6-6"/>
+            </svg>
+          </summary>
+          <div class="host-collapsible-body">
+            <div class="host-steppers">
+              <!-- Each stepper's +/- buttons write straight into the same
+                   plain #bot-easy/#bot-medium/#bot-hard number inputs
+                   onCreateGame already reads -- see onBotStepperClick
+                   (app.js). The real <input> stays in the DOM (type=hidden)
+                   rather than becoming a separate piece of state to keep in
+                   sync with the display. data-target names the input
+                   directly (rather than a tier keyword) so the same
+                   handler also drives the differently-stepped Bot think
+                   time control below. -->
+              <div class="host-stepper" data-target="bot-easy">
+                <span class="host-stepper-label">Easy</span>
+                <div class="host-stepper-controls">
+                  <button type="button" class="host-stepper-btn" data-delta="-1" aria-label="Fewer easy bots">−</button>
+                  <span class="host-stepper-value">0</span>
+                  <button type="button" class="host-stepper-btn" data-delta="1" aria-label="More easy bots">+</button>
+                </div>
+                <input type="hidden" id="bot-easy" min="0" max="4" step="1" value="0">
+              </div>
+              <div class="host-stepper" data-target="bot-medium">
+                <span class="host-stepper-label">Medium</span>
+                <div class="host-stepper-controls">
+                  <button type="button" class="host-stepper-btn" data-delta="-1" aria-label="Fewer medium bots">−</button>
+                  <span class="host-stepper-value">1</span>
+                  <button type="button" class="host-stepper-btn" data-delta="1" aria-label="More medium bots">+</button>
+                </div>
+                <input type="hidden" id="bot-medium" min="0" max="4" step="1" value="1">
+              </div>
+              <div class="host-stepper" data-target="bot-hard">
+                <span class="host-stepper-label">Hard</span>
+                <div class="host-stepper-controls">
+                  <button type="button" class="host-stepper-btn" data-delta="-1" aria-label="Fewer hard bots">−</button>
+                  <span class="host-stepper-value">0</span>
+                  <button type="button" class="host-stepper-btn" data-delta="1" aria-label="More hard bots">+</button>
+                </div>
+                <input type="hidden" id="bot-hard" min="0" max="4" step="1" value="0">
+              </div>
             </div>
-            <p class="hint">Fixed for the whole table once the game starts. Not adjustable mid-game.</p>
-          </fieldset>
-          <label>Bot think time (seconds)
-            <input type="number" id="host-think-time" min="0" step="0.1" value="1.5">
-          </label>
-          <label>Random seed (optional)
-            <input type="number" id="host-seed" step="1" placeholder="random">
-          </label>
-          <p class="hint">Leave blank for a random game. Setting a seed makes the deck reproducible, useful for reporting a bug ("it happened in seed 12345"). Shown in-game once the round starts.</p>
+            <!-- Replaces a static "leave one seat for a human" reminder --
+                 that information is now baked into this line itself once
+                 it's actually true ("3 of 3 seats filled"), which is more
+                 useful than a fixed sentence that doesn't know whether it
+                 currently applies. Text filled in by syncBotSeatCapacity
+                 (lobby.js), including at boot -- see initHostBotSteppers. -->
+            <p id="host-seat-summary" class="hint host-hint-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <circle cx="12" cy="12" r="8.3"/>
+                <path d="M12 11v5.3"/>
+                <circle cx="12" cy="8" r="0.9" fill="currentColor" stroke="none"/>
+              </svg>
+              <span class="host-seat-summary-text"></span>
+            </p>
+          </div>
         </details>
 
-        <button id="btn-create-game" class="primary">Host Game</button>
+        <details class="host-collapsible">
+          <summary>
+            <span class="host-field-label">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <circle cx="12" cy="12" r="3"/>
+                <path d="M12 3.5v2.3M12 18.2v2.3M20.5 12h-2.3M5.8 12H3.5M17.7 6.3l-1.6 1.6M7.9 16.1l-1.6 1.6M17.7 17.7l-1.6-1.6M7.9 7.9 6.3 6.3"/>
+              </svg>
+              Advanced settings
+            </span>
+            <svg class="host-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M6 9l6 6 6-6"/>
+            </svg>
+          </summary>
+          <div class="host-collapsible-body">
+            <!-- Moved back into Advanced per FRONTEND_FIXES.MD (an earlier
+                 round had promoted these out of Advanced specifically
+                 because they're irreversible once the game starts -- see
+                 issue #9's own history; the user's revisited call this
+                 round is to fold them back in, defaults unchanged). -->
+            <div class="host-field-group">
+              <div class="host-field-header">
+                <span class="host-field-label">
+                  <span class="host-icon-badge">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                      <rect x="4" y="6" width="16" height="3" rx="1"/>
+                      <path d="M6.5 9v9M17.5 9v9"/>
+                    </svg>
+                  </span>
+                  Table settings
+                </span>
+              </div>
+              <div class="host-toggle-cards">
+                <label class="host-toggle-card">
+                  <input type="checkbox" id="host-reveal-cards" checked>
+                  <span class="host-toggle-check">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5 9.5 17 19 7.5"/></svg>
+                  </span>
+                  <span class="host-toggle-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                      <rect x="4.5" y="5" width="15" height="14" rx="2"/>
+                      <circle cx="9" cy="9.5" r="1.3"/>
+                      <path d="M6 16.5l3.5-3.5 2.8 2.8 3-4 3.2 4.2"/>
+                    </svg>
+                  </span>
+                  <span class="host-toggle-text"><strong>Show opponents' paintings</strong><span class="hint">Displays opponents' won paintings.</span></span>
+                </label>
+                <label class="host-toggle-card">
+                  <input type="checkbox" id="host-show-logs" checked>
+                  <span class="host-toggle-check">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5 9.5 17 19 7.5"/></svg>
+                  </span>
+                  <span class="host-toggle-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                      <path d="M8 6.5h11"/>
+                      <path d="M8 12h11"/>
+                      <path d="M8 17.5h11"/>
+                      <circle cx="4.3" cy="6.5" r="1" fill="currentColor" stroke="none"/>
+                      <circle cx="4.3" cy="12" r="1" fill="currentColor" stroke="none"/>
+                      <circle cx="4.3" cy="17.5" r="1" fill="currentColor" stroke="none"/>
+                    </svg>
+                  </span>
+                  <span class="host-toggle-text"><strong>Show game log</strong><span class="hint">Displays key actions and events.</span></span>
+                </label>
+              </div>
+              <p class="hint host-hint-icon host-hint-boxed">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <circle cx="12" cy="12" r="8.3"/>
+                  <path d="M12 11v5.3"/>
+                  <circle cx="12" cy="8" r="0.9" fill="currentColor" stroke="none"/>
+                </svg>
+                These settings are fixed for the whole table once the game starts and cannot be changed mid-game.
+              </p>
+            </div>
+
+            <div class="host-field-group">
+              <div class="host-field-header">
+                <span class="host-field-label">
+                  <span class="host-icon-badge">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                      <circle cx="12" cy="12" r="8.3"/>
+                      <path d="M12 7.3V12l3 2"/>
+                    </svg>
+                  </span>
+                  Bot think time (seconds)
+                </span>
+              </div>
+              <div class="host-stepper-row">
+                <div class="host-stepper host-stepper-wide" data-target="host-think-time">
+                  <div class="host-stepper-controls">
+                    <button type="button" class="host-stepper-btn" data-delta="-0.1" aria-label="Decrease bot think time">−</button>
+                    <span class="host-stepper-value">1.5</span>
+                    <button type="button" class="host-stepper-btn" data-delta="0.1" aria-label="Increase bot think time">+</button>
+                  </div>
+                  <input type="hidden" id="host-think-time" min="0" max="5" step="0.1" value="1.5">
+                </div>
+                <p class="hint host-stepper-desc">How long bots take to make a decision.</p>
+              </div>
+            </div>
+
+            <div class="host-field-group">
+              <div class="host-field-header">
+                <span class="host-field-label">
+                  <span class="host-icon-badge">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                      <rect x="4.5" y="4.5" width="15" height="15" rx="3"/>
+                      <circle cx="9" cy="9" r="1" fill="currentColor" stroke="none"/>
+                      <circle cx="15" cy="9" r="1" fill="currentColor" stroke="none"/>
+                      <circle cx="9" cy="15" r="1" fill="currentColor" stroke="none"/>
+                      <circle cx="15" cy="15" r="1" fill="currentColor" stroke="none"/>
+                      <circle cx="12" cy="12" r="1" fill="currentColor" stroke="none"/>
+                    </svg>
+                  </span>
+                  Random seed (optional)
+                </span>
+              </div>
+              <div class="host-stepper-row">
+                <div class="host-icon-input">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <rect x="4.5" y="4.5" width="15" height="15" rx="3"/>
+                    <circle cx="9" cy="9" r="1" fill="currentColor" stroke="none"/>
+                    <circle cx="15" cy="9" r="1" fill="currentColor" stroke="none"/>
+                    <circle cx="9" cy="15" r="1" fill="currentColor" stroke="none"/>
+                    <circle cx="15" cy="15" r="1" fill="currentColor" stroke="none"/>
+                    <circle cx="12" cy="12" r="1" fill="currentColor" stroke="none"/>
+                  </svg>
+                  <input type="number" id="host-seed" step="1" placeholder="Leave blank for random">
+                </div>
+                <p class="hint host-stepper-desc">Setting a seed makes the deck reproducible, useful for reporting a bug ("it happened in seed 12345"). Shown in-game once the round starts.</p>
+              </div>
+            </div>
+
+            <p class="host-tip">
+              <svg viewBox="0 0 24 24" fill="currentColor" stroke="none" aria-hidden="true">
+                <path d="M12 2.5l1.7 5.3 5.3 1.7-5.3 1.7L12 16.5l-1.7-5.3-5.3-1.7 5.3-1.7L12 2.5z"/>
+              </svg>
+              <span><strong>Tip:</strong> These advanced options are for experienced players and debugging.</span>
+            </p>
+          </div>
+        </details>
+
+        <button id="btn-create-game" class="primary host-submit-btn">
+          <span>Host Game</span>
+          <svg class="host-submit-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M5 12h13"/>
+            <path d="M13 6l6 6-6 6"/>
+          </svg>
+        </button>
         <p id="host-error" class="error hidden"></p>
       </div>
     </section>
@@ -575,6 +1038,11 @@
         <details class="advanced how-to-play">
           <summary>New to High Society? How to play</summary>
           <div class="how-to-play-body">
+            <!-- Explicitly reset to false -- the flag set above, in
+                 Home's Rules panel, persists for the rest of this
+                 template's render otherwise, which would give this
+                 second copy duplicate ids too. -->
+            {% set htp_jump_links = false %}
             {% include "_how_to_play_body.html" %}
           </div>
         </details>
@@ -924,12 +1392,27 @@
        hardcoded 0. -->
   <div id="home-global-stats" class="home-global-stats hidden">
     <div class="home-global-stat">
-      <span id="home-global-stat-games" class="home-global-stat-value">—</span>
-      <span class="home-global-stat-label">Games played</span>
+      <span class="home-global-stat-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <rect x="3" y="7.5" width="18" height="12.5" rx="2"/><path d="M8.5 7.5V4.5M15.5 7.5V4.5M3 11.5h18"/>
+        </svg>
+      </span>
+      <span class="home-global-stat-text">
+        <span id="home-global-stat-games" class="home-global-stat-value">—</span>
+        <span class="home-global-stat-label">Games played</span>
+      </span>
     </div>
     <div class="home-global-stat">
-      <span id="home-global-stat-players" class="home-global-stat-value">—</span>
-      <span class="home-global-stat-label">Players</span>
+      <span class="home-global-stat-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M16.5 20.5v-1.8a3.6 3.6 0 0 0-3.6-3.6H6.6A3.6 3.6 0 0 0 3 18.7v1.8"/><circle cx="9.8" cy="7.8" r="3.6"/>
+          <path d="M21 20.5v-1.8a3.6 3.6 0 0 0-2.6-3.46"/><path d="M14.9 4.1a3.6 3.6 0 0 1 0 7"/>
+        </svg>
+      </span>
+      <span class="home-global-stat-text">
+        <span id="home-global-stat-players" class="home-global-stat-value">—</span>
+        <span class="home-global-stat-label">Players</span>
+      </span>
     </div>
   </div>
     </div>

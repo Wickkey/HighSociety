@@ -3,7 +3,9 @@
 // hook) -- kept here anyway since every feature module needs to switch
 // screens, and this is the one place that already does. Circular import
 // with matchmaking.js is safe: only ever touched inside a function body.
-import { SIDEBAR_HIDDEN_SCREENS, GLOBAL_STATS_FOOTER_SCREENS } from './constants.js';
+import {
+  SIDEBAR_HIDDEN_SCREENS, GLOBAL_STATS_FOOTER_SCREENS, SIDEBAR_ACTIVE_BY_PATH, SIDEBAR_ACTIVE_CLEARING_SCREENS,
+} from './constants.js';
 import { cancelMatchmakingTicketQuietly } from '../lobby/matchmaking.js';
 import { loadHomeGlobalStats } from '../lobby/lobby.js';
 
@@ -22,8 +24,23 @@ export function showError(el, text) { el.textContent = text; el.classList.remove
 // not a full back/forward history of internal screen transitions (room-
 // specific navigation already manages its own history entries via
 // ?room=<code>, untouched by this).
+// Highlights the sidebar item for `itemId` (see SIDEBAR_ACTIVE_BY_PATH),
+// or clears every item's active state if itemId is falsy -- one place so
+// setScreenPath and showScreen's own room-entry clearing (below) both stay
+// in sync without either needing to know how the other decided to change.
+function setSidebarActive(itemId) {
+  document.querySelectorAll('.sidebar-item').forEach((el) => {
+    el.classList.toggle('active', el.id === itemId);
+  });
+}
+
 export function setScreenPath(path) {
   if (location.pathname !== path) history.replaceState(null, '', path);
+  // Unconditional, unlike the history write above -- a direct visit/
+  // refresh at e.g. /join already has location.pathname === '/join' before
+  // this ever runs, so gating this on the same "did it change" check would
+  // leave a fresh page load with no sidebar tab highlighted at all.
+  setSidebarActive(SIDEBAR_ACTIVE_BY_PATH[path] || null);
 }
 
 export function showScreen(id) {
@@ -41,6 +58,7 @@ export function showScreen(id) {
   // half-set-up state rather than an intentional part of the screen.
   $('profile-chip-wrap').classList.toggle('hidden', id === 'screen-login');
   document.querySelector('.app-shell').classList.toggle('sidebar-hidden', SIDEBAR_HIDDEN_SCREENS.has(id));
+  if (SIDEBAR_ACTIVE_CLEARING_SCREENS.has(id)) setSidebarActive(null);
   // Single central switch for the sticky stats footer, same idea as
   // SIDEBAR_HIDDEN_SCREENS above -- every screen transition goes through
   // here, so no individual screen's show-function needs to know this

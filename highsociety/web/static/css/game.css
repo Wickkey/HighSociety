@@ -817,6 +817,23 @@ button.link-button:hover { color: var(--accent); }
 .how-to-play-body p { margin: 0 0 0.8rem; }
 .how-to-play-body p:last-child { margin-bottom: 0; }
 
+/* Quick-nav pills -- only rendered on the Rules screen's own full-page
+   copy of this content (see _how_to_play_body.html's htp_jump_links
+   flag), not the shorter collapsed copy on the Join screen where jumping
+   around a page that's already collapsed to one glance doesn't add much. */
+.htp-jump-links { display: flex; gap: 0.5rem; flex-wrap: wrap; margin: 0 0 1.1rem; }
+.htp-jump-links a {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--accent-strong);
+  background: var(--accent-soft);
+  padding: 0.35rem 0.8rem;
+  border-radius: 999px;
+  text-decoration: none;
+  transition: background 0.15s ease;
+}
+.htp-jump-links a:hover { background: rgba(185, 138, 47, 0.28); }
+
 .auction-types {
   margin: 0 0 0.9rem;
   padding: 0.2rem 0.9rem;
