@@ -40,7 +40,12 @@ export function setScreenPath(path) {
   // refresh at e.g. /join already has location.pathname === '/join' before
   // this ever runs, so gating this on the same "did it change" check would
   // leave a fresh page load with no sidebar tab highlighted at all.
-  setSidebarActive(SIDEBAR_ACTIVE_BY_PATH[path] || null);
+  // /account/<username> shares its sidebar highlight with the bare
+  // /account entry in SIDEBAR_ACTIVE_BY_PATH -- normalize the username
+  // segment away before the lookup rather than adding a second entry per
+  // possible username.
+  const sidebarLookupPath = path.startsWith('/account/') ? '/account' : path;
+  setSidebarActive(SIDEBAR_ACTIVE_BY_PATH[sidebarLookupPath] || null);
 }
 
 export function showScreen(id) {
