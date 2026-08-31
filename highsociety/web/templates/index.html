@@ -263,6 +263,27 @@
               <span id="account-elo" class="account-elo-value">1000</span>
               <span class="account-elo-label">Elo Rating</span>
             </div>
+            <!-- players.created_at/last_seen_at (see get_player_profile_stats)
+                 -- "last played", not live presence: last_seen_at only
+                 updates when a game actually finishes, not on every visit,
+                 so this deliberately doesn't claim to be an online/offline
+                 indicator the way it might first read. Hidden until
+                 loadAccountStats has real dates to show (see its own
+                 account-meta-row.loading class). -->
+            <div id="account-meta-row" class="account-meta-row loading">
+              <span class="account-meta-item">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <rect x="3.5" y="5" width="17" height="15.5" rx="2"/><path d="M3.5 9.5h17M8 3v3.5M16 3v3.5"/>
+                </svg>
+                Player since <span id="account-player-since">—</span>
+              </span>
+              <span class="account-meta-item">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <circle cx="12" cy="12" r="8.3"/><path d="M12 7.3V12l3 2"/>
+                </svg>
+                Last played <span id="account-last-played">—</span>
+              </span>
+            </div>
           </div>
         </div>
 
@@ -303,6 +324,30 @@
             <span id="account-stat-avg-money" class="account-stat-value">—</span>
             <span class="account-stat-label">Avg. money left</span>
           </div>
+        </div>
+
+        <!-- Elo history -- Chart.js (see account.js's loadEloChart), the
+             same real plotting library already vendored for this exact
+             purpose (moved here from the Leaderboard screen, where it was
+             built then asked to be pulled back out and relocated -- this
+             is that relocation). Hidden for a guest (elo never moves) or
+             anyone with no rated games yet -- see loadEloChart's own guard. -->
+        <div id="account-elo-chart-section" class="account-section hidden">
+          <h3>Elo progress</h3>
+          <div id="account-elo-chart" class="account-elo-chart loading"></div>
+        </div>
+
+        <!-- Recent Activity -- reuses the exact same cached /api/games
+             response (and in-memory cache) the Home screen's own Recent
+             Games widget already fetches -- see account.js's
+             loadRecentActivity -- so this paints instantly with zero
+             added network wait whenever Home was visited this session,
+             which is effectively always (it's the app's own landing
+             screen). rating_change per row comes from that same response
+             (see get_recent_games' own docstring). -->
+        <div id="account-recent-activity-section" class="account-section hidden">
+          <h3>Recent Activity</h3>
+          <div id="account-recent-activity-list" class="account-recent-activity-list"></div>
         </div>
 
         <button type="button" id="btn-account-my-games" class="secondary standalone">My Games</button>

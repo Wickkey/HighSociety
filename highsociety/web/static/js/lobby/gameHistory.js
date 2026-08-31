@@ -87,8 +87,13 @@ const gamesPageCache = new Map(); // key -> {games, has_more}
 // wait; `freshPromise` resolves to the real current data (or null on a
 // transient failure) and also updates the cache for next time -- classic
 // stale-while-revalidate, same pattern as account.js's own stats
-// prefetch.
-function fetchGamesPage(username, offset) {
+// prefetch. Exported so account.js's Recent Activity feed can share this
+// exact cache (not a separate fetch of its own) -- whichever of Home/
+// Account happens to load first warms it for the other, so opening
+// Account right after browsing Home (the overwhelmingly common order,
+// since Home is the app's own landing screen) costs zero extra network
+// wait for this data.
+export function fetchGamesPage(username, offset) {
   const key = `${username}:${offset}`;
   const cached = gamesPageCache.get(key) || null;
   const freshPromise = fetchJSON(`/api/games/${encodeURIComponent(username)}?limit=${PAGE_SIZE}&offset=${offset}`)

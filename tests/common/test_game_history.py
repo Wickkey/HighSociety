@@ -1151,29 +1151,37 @@ def test_get_player_profile_stats_returns_none_for_an_unknown_username(database_
 def test_get_player_profile_stats_computes_win_rate(database_url):
     game_history._schema_ready = True
     conn, cursor = _fake_connection()
+    created_at = datetime.datetime(2026, 1, 1, tzinfo=datetime.timezone.utc)
+    last_seen_at = datetime.datetime(2026, 2, 1, tzinfo=datetime.timezone.utc)
     cursor.fetchone.side_effect = iter([
-        (1, 1000),         # (player id, elo)
-        (4, 3),            # (games_played, wins)
-        (2.5, 10.0, 8.0),  # (avg_placement, avg_points, avg_money_remaining)
+        (1, 1000),                    # (player id, elo)
+        (4, 3),                       # (games_played, wins)
+        (2.5, 10.0, 8.0),             # (avg_placement, avg_points, avg_money_remaining)
+        (created_at, last_seen_at),   # (created_at, last_seen_at)
     ])
     with patch.object(game_history, "_connect", return_value=conn):
         result = game_history.get_player_profile_stats("alice")
     assert result == {
         "games_played": 4, "wins": 3, "win_rate": 0.75, "elo": 1000,
         "avg_placement": 2.5, "avg_points": 10.0, "avg_money_remaining": 8.0,
+        "created_at": created_at.isoformat(), "last_played_at": last_seen_at.isoformat(),
     }
 
 
 def test_get_player_profile_stats_zero_games_has_zero_win_rate_not_a_division_error(database_url):
     game_history._schema_ready = True
     conn, cursor = _fake_connection()
-    cursor.fetchone.side_effect = iter([(1, 1000), (0, 0), (None, None, None)])
+    now = datetime.datetime.now(datetime.timezone.utc)
+    cursor.fetchone.side_effect = iter([(1, 1000), (0, 0), (None, None, None), (now, now)])
     with patch.object(game_history, "_connect", return_value=conn):
         result = game_history.get_player_profile_stats("alice")
-    assert result == {
-        "games_played": 0, "wins": 0, "win_rate": 0.0, "elo": 1000,
-        "avg_placement": None, "avg_points": None, "avg_money_remaining": None,
-    }
+    assert result["games_played"] == 0
+    assert result["wins"] == 0
+    assert result["win_rate"] == 0.0
+    assert result["elo"] == 1000
+    assert result["avg_placement"] is None
+    assert result["avg_points"] is None
+    assert result["avg_money_remaining"] is None
 
 
 def test_get_player_profile_stats_averages_are_none_when_no_game_results_rows_exist(database_url):
@@ -1182,7 +1190,8 @@ def test_get_player_profile_stats_averages_are_none_when_no_game_results_rows_ex
     report -- None, not a wrong 0."""
     game_history._schema_ready = True
     conn, cursor = _fake_connection()
-    cursor.fetchone.side_effect = iter([(1, 1000), (5, 2), (None, None, None)])
+    now = datetime.datetime.now(datetime.timezone.utc)
+    cursor.fetchone.side_effect = iter([(1, 1000), (5, 2), (None, None, None), (now, now)])
     with patch.object(game_history, "_connect", return_value=conn):
         result = game_history.get_player_profile_stats("alice")
     assert result["games_played"] == 5
@@ -1197,12 +1206,28 @@ def test_get_player_profile_stats_includes_elo_from_the_same_connection(database
     connection/round-trip that a naive get_player_elo() call would add)."""
     game_history._schema_ready = True
     conn, cursor = _fake_connection()
-    cursor.fetchone.side_effect = iter([(1, 1234), (2, 1), (1.0, 15.0, 5.0)])
+    now = datetime.datetime.now(datetime.timezone.utc)
+    cursor.fetchone.side_effect = iter([(1, 1234), (2, 1), (1.0, 15.0, 5.0), (now, now)])
     with patch.object(game_history, "_connect", return_value=conn):
         result = game_history.get_player_profile_stats("alice")
     assert result["elo"] == 1234
     # Only one connection ever opened for the whole call.
     assert conn.__enter__.call_count == 1
+
+
+def test_get_player_profile_stats_includes_player_since_and_last_played(database_url):
+    """created_at/last_seen_at are read fresh by player_id every call,
+    never served from the id/elo cache -- see this function's own comment
+    on why (last_seen_at changes on every game finished)."""
+    game_history._schema_ready = True
+    conn, cursor = _fake_connection()
+    created_at = datetime.datetime(2025, 6, 1, tzinfo=datetime.timezone.utc)
+    last_seen_at = datetime.datetime(2026, 3, 15, tzinfo=datetime.timezone.utc)
+    cursor.fetchone.side_effect = iter([(1, 1000), (2, 1), (1.0, 5.0, 3.0), (created_at, last_seen_at)])
+    with patch.object(game_history, "_connect", return_value=conn):
+        result = game_history.get_player_profile_stats("alice")
+    assert result["created_at"] == created_at.isoformat()
+    assert result["last_played_at"] == last_seen_at.isoformat()
 
 
 def test_get_player_profile_stats_failure_is_caught_not_raised(database_url):
@@ -1240,6 +1265,7 @@ def test_get_recent_games_groups_opponents_by_game(database_url):
             (101, "alice", False, False),
             (101, "bob", False, True),
         ],
+        [(100, True, 12), (101, False, None)],  # this player's own (is_winner, rating_change) per game
     ]
     with patch.object(game_history, "_connect", return_value=conn):
         result = game_history.get_recent_games("alice")
@@ -1252,6 +1278,10 @@ def test_get_recent_games_groups_opponents_by_game(database_url):
         {"name": "alice", "is_bot": False, "is_winner": False},
         {"name": "bob", "is_bot": False, "is_winner": True},
     ]
+    assert games[0]["is_winner"] is True
+    assert games[0]["rating_change"] == 12
+    assert games[1]["is_winner"] is False
+    assert games[1]["rating_change"] is None
 
 
 def test_get_recent_games_sets_has_more_when_another_page_exists(database_url):
@@ -1266,11 +1296,33 @@ def test_get_recent_games_sets_has_more_when_another_page_exists(database_url):
     cursor.fetchall.side_effect = [
         [(100, finished_at, 1), (101, finished_at, 2)],  # limit=1 + 1 lookahead row = 2 rows back
         [(100, "alice", False, True), (101, "alice", False, False)],
+        [(100, True, 5)],  # only the kept (limit=1) game needs an own-result row
     ]
     with patch.object(game_history, "_connect", return_value=conn):
         result = game_history.get_recent_games("alice", limit=1, offset=0)
     assert result["has_more"] is True
     assert [g["game_id"] for g in result["games"]] == [100]  # only `limit` rows kept
+
+
+def test_get_recent_games_rating_change_is_none_for_an_unrated_game(database_url):
+    """A game this player wasn't rated in (guest account, all-bot practice
+    game, or a game predating the ratings table) reports rating_change as
+    None -- never a fake 0, which would misleadingly read as "no change"
+    rather than "not applicable"."""
+    game_history._schema_ready = True
+    conn, cursor = _fake_connection()
+    cursor.fetchone.side_effect = None
+    cursor.fetchone.return_value = (1,)
+    finished_at = datetime.datetime(2026, 1, 1, tzinfo=datetime.timezone.utc)
+    cursor.fetchall.side_effect = [
+        [(100, finished_at, 1)],
+        [(100, "alice", False, True)],
+        [],  # LEFT JOIN found no ratings row at all for this game -- own_result_by_game stays empty
+    ]
+    with patch.object(game_history, "_connect", return_value=conn):
+        result = game_history.get_recent_games("alice")
+    assert result["games"][0]["rating_change"] is None
+    assert result["games"][0]["is_winner"] is None
 
 
 def test_get_recent_games_failure_is_caught_not_raised(database_url):

@@ -1,8 +1,11 @@
-// Account screen: profile editing, achievements grid, public stats.
+// Account screen: profile editing, achievements grid, public stats, the
+// Elo history chart, and the Recent Activity feed.
 import { $, hide, show, showError, showScreen, setScreenPath } from '../utils/dom.js';
-import { escapeHtml } from '../utils/formatting.js';
+import { escapeHtml, timeAgo } from '../utils/formatting.js';
 import { loadProfile, saveProfile, renderProfileChip } from '../auth/profile.js';
 import { fetchJSON } from '../lobby/lobby.js';
+import { fetchGamesPage } from '../lobby/gameHistory.js';
+import { openGameDetailModal } from '../ui/modals.js';
 import { showToast } from '../ui/notifications.js';
 
 // Static catalog mirroring highsociety/code/common/achievements.py's
@@ -111,6 +114,15 @@ function renderAccountStats(stats, profile) {
   $('account-stat-avg-points').textContent = stats.avg_points != null ? stats.avg_points.toFixed(1) : '—';
   $('account-stat-avg-money').textContent = stats.avg_money_remaining != null ? stats.avg_money_remaining.toFixed(1) : '—';
   $('account-stats-row').classList.remove('loading');
+
+  const dateLabel = (iso) => new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  $('account-player-since').textContent = dateLabel(stats.created_at);
+  // "Last played", not live presence -- see get_player_profile_stats' own
+  // comment on why last_seen_at only updates when a game finishes, not on
+  // every visit. timeAgo reads more like an actual "last active" glance
+  // (e.g. "2h ago") than a bare date would for anything recent.
+  $('account-last-played').textContent = timeAgo(stats.last_played_at);
+  $('account-meta-row').classList.remove('loading');
 }
 
 // Stale-while-revalidate, deliberately: the login-time prefetch is only
@@ -138,6 +150,218 @@ async function loadAccountStats() {
   try {
     renderAccountStats(await fetchJSON(`/api/profile/${encodeURIComponent(profile.username)}`), profile);
   } catch (e) { /* 404: no games recorded yet -- leave whatever's already rendered (or the skeleton) */ }
+}
+
+// ------------------------------------------------------------ Elo chart --
+//
+// Relocated here from the Leaderboard screen (see leaderboard.js's own
+// header comment) -- drawn with Chart.js rather than a hand-rolled
+// <polyline>, which had no room to grow into real axes/gridlines/hover
+// detail and reportedly looked rough squeezed into that screen's own
+// 160px-tall sparkline strip. Vendored locally as a plain UMD bundle
+// (highsociety/web/static/js/vendor/chart.umd.min.js) rather than pulled
+// from a CDN or given a build step: it self-registers window.Chart from a
+// classic <script>, loaded lazily (see loadChartJs below) only the first
+// time this screen actually needs it -- every other screen never pays for
+// its ~200KB.
+let chartJsLoadPromise = null;
+
+function loadChartJs() {
+  if (window.Chart) return Promise.resolve();
+  if (!chartJsLoadPromise) {
+    chartJsLoadPromise = new Promise((resolve, reject) => {
+      const script = document.createElement('script');
+      script.src = '/static/js/vendor/chart.umd.min.js';
+      script.onload = resolve;
+      script.onerror = () => { chartJsLoadPromise = null; reject(new Error('Failed to load chart.js')); };
+      document.head.appendChild(script);
+    });
+  }
+  return chartJsLoadPromise;
+}
+
+// A CSS custom property's raw value (e.g. "#1f7a4d") -- Chart.js draws on
+// a plain <canvas>, whose 2D context has no idea what a CSS variable is,
+// so every color handed to it has to already be a resolved literal.
+function cssVar(name) {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+}
+
+let eloChart = null; // the live Chart.js instance, if any -- see renderEloChart
+
+// `history`: [{old_rating, new_rating, created_at}, ...] oldest first (see
+// get_rating_history). Plots every new_rating, prefixed by the very first
+// entry's old_rating so the line actually starts somewhere instead of
+// jumping in mid-air on its first point.
+//
+// A real time-scale x-axis (raw millisecond timestamps on a linear scale,
+// labeled by hand -- see the comment on the `x` scale below for why not
+// Chart.js's own "time" scale) rather than evenly-spaced-by-index -- an
+// index-based layout would spread a burst of several games played in one
+// evening across the *entire* width, identical to if they'd been spread
+// across months, which is what made the old sparkline look like a
+// meaningless zigzag rather than an actual rating history. The prefixed
+// old_rating point sits at a synthetic time just before the first real
+// game (5% of the whole span back) purely so the line has a visible
+// starting slope -- it's never a real game's own timestamp.
+async function renderEloChart(history) {
+  const container = $('account-elo-chart');
+  if (eloChart) { eloChart.destroy(); eloChart = null; }
+  const section = $('account-elo-chart-section');
+  if (history.length === 0) { hide(section); return; }
+  show(section);
+  container.classList.remove('loading');
+  container.innerHTML = '<canvas id="account-elo-chart-canvas"></canvas>';
+  try {
+    await loadChartJs();
+  } catch (e) {
+    hide(section); // Chart.js failed to load (offline, ad-blocker, ...) -- skip the section rather than show a broken empty box
+    return;
+  }
+
+  const gameTimes = history.map((h) => new Date(h.created_at).getTime());
+  const span = gameTimes[gameTimes.length - 1] - gameTimes[0] || 1;
+  const times = [gameTimes[0] - span * 0.05, ...gameTimes];
+  const values = [history[0].old_rating, ...history.map((h) => h.new_rating)];
+  const trendUp = values[values.length - 1] >= values[0];
+  const lineColor = trendUp ? cssVar('--chip-money') : cssVar('--danger');
+  const gridColor = cssVar('--panel-border');
+  const textColor = cssVar('--muted');
+
+  const dateLabel = (ms) => new Date(ms).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+
+  const ctx = $('account-elo-chart-canvas').getContext('2d');
+  eloChart = new window.Chart(ctx, {
+    type: 'line',
+    data: {
+      datasets: [{
+        data: times.map((t, i) => ({ x: t, y: values[i] })),
+        borderColor: lineColor,
+        backgroundColor: lineColor,
+        pointRadius: 0,
+        pointHoverRadius: 4,
+        borderWidth: 2,
+        tension: 0.25,
+        fill: false,
+      }],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: { duration: 400 },
+      interaction: { intersect: false, mode: 'nearest', axis: 'x' },
+      scales: {
+        // A plain linear scale over raw millisecond timestamps, not
+        // Chart.js's own "time" scale -- that needs a separate date-
+        // adapter package (chartjs-adapter-date-fns or similar) this repo
+        // doesn't vendor. Formatting tick/tooltip labels by hand below
+        // gets the same result without that extra dependency.
+        x: {
+          type: 'linear',
+          grid: { display: false },
+          ticks: { color: textColor, maxRotation: 0, autoSkipPadding: 16, callback: dateLabel },
+        },
+        y: {
+          grid: { color: gridColor },
+          ticks: { color: textColor, precision: 0 },
+        },
+      },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            title: (items) => dateLabel(items[0].parsed.x),
+            label: (item) => `Rating: ${Math.round(item.parsed.y)}`,
+          },
+        },
+      },
+    },
+  });
+}
+
+// Guests never accrue real rating history (record_finished_game only
+// rates google_id-linked players -- same gate account-elo's own Unrated
+// label already uses), so there's nothing meaningful to plot -- the
+// section stays hidden rather than showing an empty chart.
+async function loadEloChart(profile) {
+  const section = $('account-elo-chart-section');
+  if (!profile || !profile.google_id) { hide(section); return; }
+  try {
+    const result = await fetchJSON(`/api/profile/${encodeURIComponent(profile.username)}/rating_history`);
+    await renderEloChart(result.history || []);
+  } catch (e) {
+    hide(section);
+  }
+}
+
+// -------------------------------------------------------- recent activity --
+//
+// Shares fetchGamesPage's own cache with the Home screen's Recent Games
+// widget (gameHistory.js) rather than a separate fetch of its own -- Home
+// is the app's own landing screen, so by the time anyone opens Account
+// this data has almost always already been fetched and cached this
+// session, making this paint instantly with zero added network wait. Only
+// a genuinely first-ever fetch this session (e.g. a deep link straight to
+// /account) pays for a real round trip, same as Home's own widget would
+// have anyway.
+// Won: a plain check-in-circle -- an unambiguous "success" signal on its
+// own, no trophy iconography risky enough to render oddly at 17px. Played
+// (no win/loss to report -- see get_recent_games' is_winner being null
+// for a game this player wasn't rated in, though a null still renders via
+// this same "not a win" branch): a single card silhouette, matching this
+// app's own suit/card visual language used elsewhere (sidebar, home tiles).
+function activityIconSvg(isWinner) {
+  if (isWinner) return '<circle cx="12" cy="12" r="8.5"/><path d="M8.2 12.3l2.6 2.6L16 9.3"/>';
+  return '<rect x="6.5" y="3.5" width="11" height="17" rx="2"/><path d="M9.5 8h5M9.5 12h5M9.5 16h3"/>';
+}
+
+function renderActivityRow(game, myUsername) {
+  const others = game.opponents.filter((o) => o.name !== myUsername);
+  const opponentsLabel = others.length === 0 ? 'Solo game' : `vs ${others.map((o) => o.name).join(', ')}`;
+  const title = game.is_winner ? 'Won a game' : 'Played a game';
+  let deltaHtml = '';
+  if (game.rating_change != null) {
+    const sign = game.rating_change > 0 ? '+' : '';
+    const cls = game.rating_change > 0 ? 'positive' : game.rating_change < 0 ? 'negative' : '';
+    deltaHtml = `<span class="account-activity-delta ${cls}">${sign}${game.rating_change} ELO</span>`;
+  }
+  return `
+    <button type="button" class="account-activity-row" data-game-id="${game.game_id}">
+      <span class="account-activity-icon${game.is_winner ? ' won' : ''}">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${activityIconSvg(game.is_winner)}</svg>
+      </span>
+      <span class="account-activity-body">
+        <span class="account-activity-title">${escapeHtml(title)}</span>
+        <span class="account-activity-meta">${escapeHtml(opponentsLabel)} · ${timeAgo(game.finished_at)}</span>
+      </span>
+      ${deltaHtml}
+    </button>
+  `;
+}
+
+function wireActivityRowClicks(container) {
+  container.querySelectorAll('.account-activity-row:not([data-wired])').forEach((row) => {
+    row.dataset.wired = 'true';
+    row.addEventListener('click', () => openGameDetailModal(row.dataset.gameId));
+  });
+}
+
+async function loadRecentActivity(profile) {
+  const section = $('account-recent-activity-section');
+  const list = $('account-recent-activity-list');
+  if (!profile) { hide(section); return; }
+  const paint = (page) => {
+    const games = page.games.slice(0, 5);
+    if (games.length === 0) { hide(section); return; }
+    list.innerHTML = games.map((g) => renderActivityRow(g, profile.username)).join('');
+    wireActivityRowClicks(list);
+    show(section);
+  };
+  const { cached, freshPromise } = fetchGamesPage(profile.username, 0);
+  if (cached) paint(cached);
+  const fresh = await freshPromise;
+  if (fresh) paint(fresh);
+  else if (!cached) hide(section);
 }
 
 // Cached per username, in memory for this tab's lifetime -- an unlocked
@@ -213,9 +437,23 @@ export function showAccountScreen() {
   hide($('account-username-edit')); // collapsed by default -- see onAccountEditUsernameClick
   hide($('account-error'));
   hide($('account-saved'));
+  $('account-meta-row').classList.add('loading');
+  // Reset both to hidden before either async loader below has a chance to
+  // resolve -- otherwise switching accounts (e.g. logging out of a Google
+  // account with real chart/activity data, back in as a fresh guest) could
+  // flash the *previous* profile's chart/feed for a moment before these
+  // loaders replace it.
+  hide($('account-elo-chart-section'));
+  hide($('account-recent-activity-section'));
   showScreen('screen-account');
   setScreenPath('/account');
+  // All three run independently/in parallel, same as the stats prefetch
+  // already did -- none of them awaits or blocks another, so the screen's
+  // fast initial paint (stats, from the login-time prefetch) is never held
+  // up waiting on the chart or activity feed to resolve.
   loadAccountStats();
+  loadEloChart(profile);
+  loadRecentActivity(profile);
 }
 
 // The pencil next to the username -- reveals the same input+Save that

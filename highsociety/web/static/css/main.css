@@ -501,7 +501,6 @@ input.needs-attention {
 #screen-join .panel,
 #screen-spectate-join .panel,
 #screen-finished .panel,
-#screen-account .panel,
 #screen-matchmaking .panel,
 #screen-login .panel {
   max-width: 460px;
@@ -518,6 +517,17 @@ input.needs-attention {
 #screen-leaderboard .panel,
 #screen-game-history .panel {
   max-width: 560px;
+  margin: var(--screen-top-gap) auto;
+  box-shadow: var(--shadow);
+}
+
+/* Widest of the centered panels -- Account grew a real Elo chart and a
+   Recent Activity feed on top of its original stat grid, which the
+   460px width every plain form uses would leave cramped. Carved out of
+   the shared 460px group above rather than added to the 560px one, since
+   this now needs more room than even Leaderboard/My Games' own tables do. */
+#screen-account .panel {
+  max-width: 680px;
   margin: var(--screen-top-gap) auto;
   box-shadow: var(--shadow);
 }

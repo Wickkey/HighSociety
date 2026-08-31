@@ -1789,12 +1789,14 @@ def test_profile_endpoint_returns_stats_and_elo(monkeypatch):
     monkeypatch.setattr(game_history, "get_player_profile_stats", lambda username: {
         "games_played": 4, "wins": 3, "win_rate": 0.75, "elo": 1032,
         "avg_placement": 1.5, "avg_points": 12.0, "avg_money_remaining": 6.0,
+        "created_at": "2025-06-01T00:00:00+00:00", "last_played_at": "2026-03-15T00:00:00+00:00",
     })
     resp = web_server.app.test_client().get("/api/profile/alice")
     assert resp.status_code == 200
     assert resp.get_json() == {
         "username": "alice", "games_played": 4, "wins": 3, "win_rate": 0.75,
         "avg_placement": 1.5, "avg_points": 12.0, "avg_money_remaining": 6.0, "elo": 1032,
+        "created_at": "2025-06-01T00:00:00+00:00", "last_played_at": "2026-03-15T00:00:00+00:00",
     }
 
 

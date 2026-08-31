@@ -189,6 +189,14 @@
 .account-elo-hero { display: flex; align-items: baseline; gap: 0.4rem; margin-top: 0.15rem; }
 .account-elo-value { font-size: 1.8rem; font-weight: 800; color: var(--accent-strong); line-height: 1; }
 .account-elo-label { font-size: 0.78rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+/* "Player since" / "Last played" -- see get_player_profile_stats' own
+   created_at/last_seen_at. Shown as a quiet inline pair rather than two
+   more stat cards -- this is context about the account, not a
+   performance metric on the same footing as games played/win rate. */
+.account-meta-row { display: flex; gap: 1.1rem; flex-wrap: wrap; margin-top: 0.5rem; }
+.account-meta-item { display: flex; align-items: center; gap: 0.35rem; font-size: 0.78rem; color: var(--muted); }
+.account-meta-item svg { width: 14px; height: 14px; flex-shrink: 0; }
+.account-meta-row.loading .account-meta-item span { animation: stat-skeleton-pulse 1.4s ease-in-out infinite; }
 #account-username-edit { margin-top: 1rem; }
 .account-saved { color: var(--chip-money); font-weight: 600; margin: 0.4rem 0 0; }
 /* Deliberately NOT the same weight as "My Games" above it (a real
@@ -245,6 +253,61 @@
   0%, 100% { opacity: 0.35; }
   50% { opacity: 0.8; }
 }
+
+.account-section { margin-top: 1.6rem; }
+.account-section h3 { margin-bottom: 0.6rem; }
+
+/* Real axes/gridlines/tooltips via Chart.js (see account.js's
+   loadEloChart) -- moved here from the Leaderboard screen, where this was
+   originally built then pulled back out at the user's own request to
+   relocate it later; this is that relocation. Meaningfully taller than
+   the old 160px sparkline it replaces there -- squeezed under a
+   leaderboard table it read as a cramped afterthought, but as its own
+   dedicated section here it gets room to actually look like a real chart. */
+.account-elo-chart { width: 100%; height: 260px; }
+/* Same pulsing-placeholder language as the stat cards above, so "still
+   loading" reads consistently within this one screen, not just app-wide. */
+.account-elo-chart.loading {
+  border-radius: var(--radius-sm);
+  background: var(--panel-bg-soft);
+  animation: stat-skeleton-pulse 1.4s ease-in-out infinite;
+}
+
+.account-recent-activity-list { display: flex; flex-direction: column; gap: 0.5rem; }
+.account-activity-row {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  padding: 0.65rem 0.8rem;
+  background: var(--panel-bg-soft);
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-sm);
+  font-size: 0.85rem;
+}
+.account-activity-icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+/* A won game's trophy gets its own warmer tint than the plain "played" (no
+   win/loss to report -- see get_recent_games' rating_change/is_winner
+   being null when this player wasn't rated in that game at all) icon,
+   the same green/played-vs-gold/won distinction .recent-game-placement-1
+   already uses elsewhere for a top finish. */
+.account-activity-icon.won { background: var(--accent-soft); color: var(--accent-strong); }
+.account-activity-icon svg { width: 17px; height: 17px; }
+.account-activity-body { display: flex; flex-direction: column; gap: 0.1rem; min-width: 0; flex: 1 1 auto; }
+.account-activity-title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.account-activity-meta { color: var(--muted); font-size: 0.76rem; }
+.account-activity-delta { font-weight: 700; font-size: 0.85rem; flex-shrink: 0; white-space: nowrap; }
+.account-activity-delta.positive { color: var(--chip-money); }
+.account-activity-delta.negative { color: var(--danger); }
 
 /* Locked tiles are fully desaturated (grayscale + faded) so an unlock reads
    as a real color reveal, not just a border/shadow change. Icon badge
@@ -1181,29 +1244,4 @@ button.secondary.standalone { margin-top: 0.9rem; display: inline-block; }
 .leaderboard-pagination button:disabled { opacity: 0.4; cursor: default; }
 #leaderboard-page-label { font-size: 0.85rem; }
 
-.leaderboard-my-rating {
-  display: flex;
-  margin-top: 1rem;
-  padding: 0.9rem 1rem;
-  background: var(--panel-bg-soft);
-  border: 1px solid var(--panel-border);
-  border-radius: var(--radius-sm);
-}
-.leaderboard-my-rating-label { font-size: 0.78rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.03em; }
-/* Real axes/gridlines/tooltips via Chart.js now (see leaderboard.js) --
-   replacing the old hand-rolled <polyline> sparkline, which had no room
-   to grow into any of that. Fixed height keeps the panel from jumping as
-   the chart (re)renders; width is still fluid. */
-.leaderboard-sparkline { width: 100%; height: 160px; margin-top: 0.4rem; }
-/* Shown the instant the screen opens (before either the chart or the
-   table below it has resolved -- see leaderboard.js's showLeaderboardScreen,
-   which now fires both fetches in parallel instead of one after the
-   other) -- same pulsing-placeholder language as the Account screen's
-   own stat-skeleton-pulse, so "still loading" reads consistently
-   app-wide rather than each screen inventing its own loading look. */
-.leaderboard-sparkline.loading {
-  border-radius: var(--radius-sm);
-  background: var(--panel-bg-soft);
-  animation: stat-skeleton-pulse 1.4s ease-in-out infinite;
-}
 .leaderboard-loading-row td { color: var(--muted); animation: stat-skeleton-pulse 1.4s ease-in-out infinite; }
