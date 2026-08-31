@@ -433,20 +433,11 @@
   outline: none;
 }
 .home-tile:hover .home-tile-arrow, .home-tile:focus-visible .home-tile-arrow { transform: translateX(3px); color: var(--accent-strong); }
-/* The clear primary CTA -- a gold fill instead of the same cream every
-   other tile gets, so "start here if you're not sure" reads at a glance
-   rather than needing all three read in full first. */
-.home-tile-primary {
-  background: linear-gradient(135deg, var(--accent-highlight), var(--accent));
-  border-color: transparent;
-  box-shadow: 0 10px 26px rgba(185, 138, 47, 0.35);
-}
-.home-tile-primary:hover, .home-tile-primary:focus-visible { border-color: transparent; box-shadow: 0 14px 32px rgba(185, 138, 47, 0.42); }
-.home-tile-primary .home-tile-icon { background: rgba(28, 26, 22, 0.14); border-color: rgba(28, 26, 22, 0.2); color: #2a2115; }
-.home-tile-primary .home-tile-title { color: #2a2115; }
-.home-tile-primary .home-tile-sub { color: rgba(42, 33, 21, 0.72); }
-.home-tile-primary .home-tile-arrow { color: rgba(42, 33, 21, 0.6); }
-.home-tile-primary:hover .home-tile-arrow, .home-tile-primary:focus-visible .home-tile-arrow { color: #2a2115; }
+/* Same cream background as every other tile, per explicit feedback (the
+   gold fill made Host look like a different kind of control rather than
+   one of three equal options) -- "start here if you're not sure" is now
+   carried by the "Most popular" badge alone, not a whole-tile color
+   change. */
 .home-tile-badge {
   position: absolute;
   top: 0.7rem;
@@ -455,7 +446,10 @@
   font-weight: 800;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  color: rgba(42, 33, 21, 0.6);
+  color: var(--accent-strong);
+  background: var(--accent-soft);
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
 }
 /* A colored badge behind the line icon rather than a bare glyph -- gives
    the tile a focal point and ties the icon to the app's own gold accent
