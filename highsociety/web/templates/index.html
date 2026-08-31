@@ -396,6 +396,14 @@
             </span>
             Elo progress
           </h3>
+          <!-- Purely a client-side filter over history already fetched in
+               full -- see account.js's onEloChartRangeClick -- switching
+               ranges never re-fetches. -->
+          <div id="account-elo-chart-range-toggle" class="account-elo-chart-range-toggle">
+            <button type="button" class="account-elo-chart-range-btn" data-range="7">7D</button>
+            <button type="button" class="account-elo-chart-range-btn" data-range="30">30D</button>
+            <button type="button" class="account-elo-chart-range-btn selected" data-range="all">All</button>
+          </div>
           <div id="account-elo-chart" class="account-elo-chart loading"></div>
         </div>
 
@@ -585,7 +593,10 @@
         </div>
 
         <!-- Hidden until loadHomeRecentGames actually has rows -- a guest/
-             new player with no games yet just never sees this section. -->
+             new player with no games yet just never sees this section.
+             Named "Game History" (not "Recent Games") to match what "See
+             more" actually opens -- the full My Games screen, which is
+             this same history, just further back than 5 rows. -->
         <div id="home-recent-games" class="card panel home-recent-games hidden">
           <div class="home-recent-games-header">
             <h3>
@@ -594,19 +605,29 @@
                   <circle cx="12" cy="12" r="8.3"/><path d="M12 7.5V12l3 2"/>
                 </svg>
               </span>
-              Recent Games
+              Game History
             </h3>
-            <!-- Elo shown right on Home, not just buried on Account --
-                 reuses account.js's own login-time stats prefetch (see
-                 getPrefetchedEloBadge) rather than a second network call
-                 for the same data. Hidden for a guest, same Unrated gate
-                 the Account screen's own Elo hero uses. -->
-            <span id="home-recent-games-elo" class="home-recent-games-elo hidden">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                <path d="M3.5 18.5l5.5-6 4 3.5 6.5-8"/><path d="M15.5 7.5h4.5V12"/>
-              </svg>
-              <span id="home-recent-games-elo-value">—</span>
-            </span>
+            <div class="home-recent-games-header-right">
+              <!-- Elo shown right on Home, not just buried on Account --
+                   reuses account.js's own login-time stats prefetch (see
+                   getPrefetchedEloBadge) rather than a second network call
+                   for the same data. Hidden for a guest, same Unrated gate
+                   the Account screen's own Elo hero uses. -->
+              <span id="home-recent-games-elo" class="home-recent-games-elo hidden">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M3.5 18.5l5.5-6 4 3.5 6.5-8"/><path d="M15.5 7.5h4.5V12"/>
+                </svg>
+                <span id="home-recent-games-elo-value">—</span>
+              </span>
+              <!-- Opens the exact same full history screen "My Games"
+                   already is (showGameHistoryScreen, unchanged) -- this
+                   widget's own 5 rows are just the most recent slice of
+                   that same list, not a different data source. -->
+              <button type="button" id="btn-home-recent-games-see-more" class="home-recent-games-see-more">
+                See more
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18l6-6-6-6"/></svg>
+              </button>
+            </div>
           </div>
           <div id="home-recent-games-list" class="recent-games-list"></div>
         </div>

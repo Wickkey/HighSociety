@@ -247,7 +247,23 @@
    less finished next to every other icon-led section in this app
    (Home tiles, the Host form's field headers, the section headings just
    above). Same "colored circle behind a line icon" language throughout,
-   just sized down to fit inside an already-compact stat card. */
+   just sized down to fit inside an already-compact stat card. Placed
+   before (to the left of) the value+label, not stacked above them --
+   the reference mockup's own arrangement -- via the same :has()
+   opt-in this file already uses for h3:has(.section-icon), which
+   leaves the icon-less 2-stat popover in the "view a player" modal
+   (same bare .account-stat/.account-stat-value/.account-stat-label
+   classes, no icon markup) on its original centered layout untouched. */
+.account-stat:has(.account-stat-icon) {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  grid-template-rows: auto auto;
+  align-items: center;
+  column-gap: 0.6rem;
+  text-align: left;
+}
+.account-stat:has(.account-stat-icon) .account-stat-value { grid-row: 1; grid-column: 2; }
+.account-stat:has(.account-stat-icon) .account-stat-label { grid-row: 2; grid-column: 2; }
 .account-stat-icon {
   width: 22px;
   height: 22px;
@@ -257,7 +273,8 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  margin-bottom: 0.1rem;
+  grid-row: 1 / 3;
+  grid-column: 1;
 }
 .account-stat-icon svg { width: 12px; height: 12px; }
 .account-stat-value { font-size: 1.3rem; font-weight: 700; color: var(--accent-strong); }
@@ -296,11 +313,20 @@ h3:has(.section-icon) { display: flex; align-items: center; gap: 0.5rem; }
 /* Real axes/gridlines/tooltips via a real charting library (see
    account.js's loadEloChart) -- moved here from the Leaderboard screen,
    where this was originally built then pulled back out at the user's own
-   request to relocate it later; this is that relocation. Meaningfully
-   taller than the old 160px sparkline it replaces there -- squeezed under
-   a leaderboard table it read as a cramped afterthought, but as its own
-   dedicated tile here it gets room to actually look like a real chart. */
-.account-elo-chart { width: 100%; height: 260px; }
+   request to relocate it later; this is that relocation. Taller than the
+   old 160px sparkline it replaces there (squeezed under a leaderboard
+   table it read as a cramped afterthought) but pulled back down from an
+   initial 260px, which read as too large for its own dedicated tile. */
+/* overflow: hidden is a deliberate safety net, not decoration -- a
+   mismeasured ApexCharts height (a real bug hit during dev: it computed
+   275px against this 200px box) has nothing else clipping it, and would
+   otherwise spill visibly into whatever tile sits below. min-height is
+   forced back down for the same reason: ApexCharts sets its own
+   `min-height` inline style on this exact element after render (215px,
+   observed, even with height:200 and the legend/toolbar both disabled),
+   which silently grows the tile 15px past the size actually asked for
+   ("too large" was the original complaint) unless overridden here. */
+.account-elo-chart { width: 100%; height: 200px; min-height: 200px !important; overflow: hidden; }
 /* Same pulsing-placeholder language as the stat cards above, so "still
    loading" reads consistently within this one screen, not just app-wide. */
 .account-elo-chart.loading {
@@ -308,6 +334,33 @@ h3:has(.section-icon) { display: flex; align-items: center; gap: 0.5rem; }
   background: var(--panel-bg-soft);
   animation: stat-skeleton-pulse 1.4s ease-in-out infinite;
 }
+/* "No games in this range" -- shown when a 7D/30D filter narrows the
+   real (non-empty) history down to nothing, so the chart area itself
+   explains why it's blank instead of just looking broken; the range
+   toggle above it stays visible/reachable either way. */
+.account-elo-chart-empty { display: flex; align-items: center; justify-content: center; height: 100%; margin: 0; }
+
+/* 7D/30D/All range toggle, above the chart -- same .pill-choice-btn
+   language the Host form's own button-row pickers already use elsewhere,
+   sized down (this is a much smaller, secondary control than a real form
+   field). Purely a client-side filter over history already fetched in
+   full (see account.js's renderEloChart) -- switching ranges never
+   re-fetches. */
+.account-elo-chart-range-toggle { display: flex; gap: 0.4rem; margin-bottom: 0.7rem; }
+.account-elo-chart-range-btn {
+  padding: 0.3rem 0.75rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  background: var(--panel-bg-soft);
+  border: 1px solid var(--panel-border);
+  border-radius: 999px;
+  color: var(--text);
+  cursor: pointer;
+  margin: 0;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+.account-elo-chart-range-btn:hover { border-color: var(--accent-light); }
+.account-elo-chart-range-btn.selected { background: var(--accent); border-color: var(--accent); color: #fff; }
 
 /* Locked tiles are fully desaturated (grayscale + faded) so an unlock reads
    as a real color reveal, not just a border/shadow change. Icon badge
@@ -443,6 +496,24 @@ h3:has(.section-icon) { display: flex; align-items: center; gap: 0.5rem; }
   flex-shrink: 0;
 }
 .home-recent-games-elo svg { width: 13px; height: 13px; }
+.home-recent-games-header-right { display: flex; align-items: center; gap: 0.6rem; flex-shrink: 0; }
+.home-recent-games-see-more {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.15rem;
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--accent-strong);
+  cursor: pointer;
+}
+.home-recent-games-see-more svg { width: 14px; height: 14px; transition: transform 0.15s var(--ease-out); }
+.home-recent-games-see-more:hover { color: var(--accent); }
+.home-recent-games-see-more:hover svg { transform: translateX(2px); }
 /* A real sticky footer -- position:fixed rather than a flex/margin-auto
    trick tied to one screen's internal layout, so it can never misalign
    with whatever a specific screen happens to render (see showScreen's
@@ -580,6 +651,14 @@ h3:has(.section-icon) { display: flex; align-items: center; gap: 0.5rem; }
   margin: 0;
 }
 .home-back:hover, .screen-back:hover { color: var(--accent-strong); }
+/* Account's own back button sits directly on the dark felt background
+   (outside any panel, see .account-screen-wrap in index.html) unlike
+   every other .screen-back usage, which stays the first element *inside*
+   its own light-colored .panel -- the shared muted/brown color those all
+   use read as nearly invisible against dark felt. Same light tone the
+   sidebar/topbar already use on this same background. */
+.account-screen-wrap > .screen-back { color: rgba(245, 241, 230, 0.78); }
+.account-screen-wrap > .screen-back:hover { color: #f5f1e6; }
 
 /* ---------------- host form ---------------- */
 

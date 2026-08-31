@@ -206,11 +206,35 @@ function cssVar(name) {
 }
 
 let eloChart = null; // the live ApexCharts instance, if any -- see renderEloChart
+let fullEloHistory = []; // the unfiltered fetch, so the 7D/30D/All toggle can re-slice without a new request -- see loadEloChart/onEloChartRangeClick
+
+// Client-side only -- get_rating_history already returns everything, so
+// narrowing to a window is just a filter on timestamps already in hand,
+// never a re-fetch.
+function filterHistoryByRange(history, range) {
+  if (range === 'all') return history;
+  const days = range === '7' ? 7 : 30;
+  const cutoffMs = Date.now() - days * 24 * 60 * 60 * 1000;
+  return history.filter((h) => new Date(h.created_at).getTime() >= cutoffMs);
+}
+
+export function onEloChartRangeClick(e) {
+  const btn = e.target.closest('.account-elo-chart-range-btn');
+  if (!btn) return;
+  document.querySelectorAll('#account-elo-chart-range-toggle .account-elo-chart-range-btn').forEach((b) => {
+    b.classList.toggle('selected', b === btn);
+  });
+  renderEloChart(filterHistoryByRange(fullEloHistory, btn.dataset.range));
+}
 
 // `history`: [{old_rating, new_rating, created_at}, ...] oldest first (see
-// get_rating_history). Plots every new_rating, prefixed by the very first
-// entry's old_rating so the line actually starts somewhere instead of
-// jumping in mid-air on its first point.
+// get_rating_history), already narrowed to whatever range is currently
+// selected (see filterHistoryByRange) -- an empty array here means "no
+// games in this window", which shows a small inline message rather than
+// hiding the whole tile (the range toggle above it should stay reachable
+// so a different window can still be picked). Plots every new_rating,
+// prefixed by the very first entry's old_rating so the line actually
+// starts somewhere instead of jumping in mid-air on its first point.
 //
 // A real datetime x-axis (each point keeps its actual timestamp) rather
 // than evenly-spaced-by-index -- an index-based layout would spread a
@@ -224,15 +248,20 @@ let eloChart = null; // the live ApexCharts instance, if any -- see renderEloCha
 async function renderEloChart(history) {
   const container = $('account-elo-chart');
   if (eloChart) { eloChart.destroy(); eloChart = null; }
-  const section = $('account-elo-chart-section');
-  if (history.length === 0) { hide(section); return; }
-  show(section);
   container.classList.remove('loading');
+  if (history.length === 0) {
+    container.innerHTML = '<p class="muted account-elo-chart-empty">No games in this range.</p>';
+    return;
+  }
   container.innerHTML = '';
   try {
     await loadApexCharts();
   } catch (e) {
-    hide(section); // ApexCharts failed to load (offline, ad-blocker, ...) -- skip the section rather than show a broken empty box
+    // ApexCharts genuinely failed to load (offline, ad-blocker, ...) --
+    // unlike the empty-range case above, there's no chart at all to show
+    // regardless of range, so this hides the whole tile, range toggle
+    // included.
+    hide($('account-elo-chart-section'));
     return;
   }
 
@@ -248,24 +277,40 @@ async function renderEloChart(history) {
   eloChart = new window.ApexCharts(container, {
     chart: {
       type: 'area',
-      height: '100%',
+      // A numeric pixel height, not '100%' -- ApexCharts resolves a
+      // percentage height against the parent at mount time, and that
+      // measurement came out taller than the container's own 200px
+      // (275px, observed), which the container (no overflow:hidden)
+      // doesn't clip -- the extra height visibly spilled out of the
+      // tile and over whatever sat below it. A concrete number matching
+      // the CSS height in lobby.css always lands exactly on-target.
+      height: 200,
       fontFamily: 'inherit',
       background: 'transparent',
       toolbar: { show: false },
       zoom: { enabled: false },
       animations: { speed: 400 },
     },
+    // A legend is pure clutter for a single named series -- it also ate
+    // into the height budget above, part of why the chart rendered
+    // taller than intended.
+    legend: { show: false },
     series: [{ name: 'Rating', data: times.map((t, i) => [t, values[i]]) }],
     colors: [lineColor],
     stroke: { curve: 'smooth', width: 2.5 },
     // The gradient fill under the line is the single biggest visual
-    // upgrade a real area chart brings over a bare line -- fading to
-    // fully transparent (opacityTo: 0) so it reads as a soft wash under
-    // the line rather than a solid block competing with the felt/parchment
-    // colors behind it.
+    // upgrade a real area chart brings over a bare line. Fading all the
+    // way to fully transparent (opacityTo: 0) read as only partially
+    // shaded -- the lower portion of the area looked empty. Without an
+    // explicit gradientToColors, ApexCharts fades the bottom stop to
+    // white rather than to the series' own color, which against this
+    // app's light cream panel background read as no fill at all -- so
+    // this pins both gradient stops to the same lineColor and only
+    // varies the opacity, keeping a visible tinted floor the whole way
+    // down instead of washing out to white.
     fill: {
       type: 'gradient',
-      gradient: { shadeIntensity: 1, opacityFrom: 0.32, opacityTo: 0, stops: [0, 90, 100] },
+      gradient: { shadeIntensity: 1, gradientToColors: [lineColor], opacityFrom: 0.4, opacityTo: 0.12, stops: [0, 100] },
     },
     markers: { size: 0, hover: { size: 5 } },
     dataLabels: { enabled: false },
@@ -298,12 +343,26 @@ async function renderEloChart(history) {
 // rates google_id-linked players -- same gate account-elo's own Unrated
 // label already uses), so there's nothing meaningful to plot -- the
 // section stays hidden rather than showing an empty chart.
+// The section's own visibility for the "no profile / not Google-linked"
+// case is already decided synchronously in showAccountScreen (before this
+// even starts) -- checked again here only defensively, in case this is
+// ever called from somewhere that skipped that step.
 async function loadEloChart(profile) {
   const section = $('account-elo-chart-section');
   if (!profile || !profile.google_id) { hide(section); return; }
   try {
     const result = await fetchJSON(`/api/profile/${encodeURIComponent(profile.username)}/rating_history`);
-    await renderEloChart(result.history || []);
+    fullEloHistory = result.history || [];
+    if (fullEloHistory.length === 0) { hide(section); return; }
+    // A fresh load (a different profile, or just re-opening this screen)
+    // always starts from "All" -- a 7D/30D selection left over from a
+    // previous visit silently carrying over would show a narrower window
+    // than the toggle itself appears to say, with nothing indicating why.
+    document.querySelectorAll('#account-elo-chart-range-toggle .account-elo-chart-range-btn').forEach((b) => {
+      b.classList.toggle('selected', b.dataset.range === 'all');
+    });
+    show(section);
+    await renderEloChart(fullEloHistory);
   } catch (e) {
     hide(section);
   }
@@ -413,12 +472,28 @@ export function showAccountScreen() {
   hide($('account-error'));
   hide($('account-saved'));
   $('account-meta-row').classList.add('loading');
-  // Reset both to hidden before either async loader below has a chance to
-  // resolve -- otherwise switching accounts (e.g. logging out of a Google
-  // account with real chart/activity data, back in as a fresh guest) could
-  // flash the *previous* profile's chart/feed for a moment before these
-  // loaders replace it.
-  hide($('account-elo-chart-section'));
+  // The chart tile's own visibility is decided synchronously, right here,
+  // rather than staying hidden until its (slower) async fetch resolves --
+  // a real, reported bug: whenever the chart happened to take longer to
+  // load than Recent Activity below it (a fresh network fetch plus a real
+  // ~500KB charting library, vs. Recent Activity's near-instant cached
+  // paint), the chart tile would pop into existence *after* the screen had
+  // already settled, visibly shoving Recent Activity down without warning.
+  // google_id is already known synchronously (it's on the local profile,
+  // no fetch needed) and is the same condition loadEloChart's own guard
+  // uses, so reserving the space for it up front is safe in the common
+  // case; the rare remaining edge case (a Google account with zero rated
+  // games so far) still collapses it back down once the fetch confirms
+  // that, but that's a far rarer, smaller correction than every single
+  // successful load shifting late. See loadEloChart/renderEloChart's own
+  // comments for the other half of this.
+  $('account-elo-chart').classList.add('loading');
+  $('account-elo-chart-section').classList.toggle('hidden', !(profile && profile.google_id));
+  // Recent Activity has no equivalent slow-external-library concern, so
+  // it keeps the simpler "hidden until its own data says otherwise"
+  // behavior -- reset here for the same account-switch reason as before
+  // (logging out of a Google account with real data, back in as a fresh
+  // guest, shouldn't flash the previous profile's feed for a moment).
   hide($('account-recent-activity-section'));
   showScreen('screen-account');
   setScreenPath('/account');

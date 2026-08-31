@@ -12,7 +12,7 @@ import {
 } from './auth/profile.js';
 import {
   showAccountScreen, onAccountSaveClick, showAchievementsScreen,
-  onAccountEditUsernameClick, onAccountCancelEditClick,
+  onAccountEditUsernameClick, onAccountCancelEditClick, onEloChartRangeClick,
 } from './account/account.js';
 import {
   showHomeTile, showHomeTiles, onHomeLinkClick, navigateFromSidebar, onCreateGame, onJoinByCode, onJoinRoomCodeInput,
@@ -117,6 +117,11 @@ function wireStaticHandlers() {
     showScreen('screen-host-setup'); showHomeTiles(); startRoomsPolling();
   }));
   $('btn-account-my-games').addEventListener('click', () => navigateFromSidebar(showGameHistoryScreen));
+  // Opens the exact same full history screen "My Games" already is --
+  // see index.html's own comment on why this widget is titled "Game
+  // History" now, not "Recent Games".
+  $('btn-home-recent-games-see-more').addEventListener('click', () => navigateFromSidebar(showGameHistoryScreen));
+  $('account-elo-chart-range-toggle').addEventListener('click', onEloChartRangeClick);
   $('btn-game-history-prev').addEventListener('click', onGameHistoryPrevClick);
   $('btn-game-history-next').addEventListener('click', onGameHistoryNextClick);
   $('sidebar-leaderboard').addEventListener('click', () => navigateFromSidebar(showLeaderboardScreen));
