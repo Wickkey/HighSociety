@@ -34,7 +34,7 @@ export const SIDEBAR_HIDDEN_SCREENS = new Set(['screen-login', 'screen-game']);
 // than once on every "back to home" navigation).
 export const GLOBAL_STATS_FOOTER_SCREENS = new Set([
   'screen-matchmaking', 'screen-leaderboard',
-  'screen-account', 'screen-achievements', 'screen-game-history',
+  'screen-account', 'screen-achievements', 'screen-game-history', 'screen-player-profile',
 ]);
 
 // Maps setScreenPath's own path argument to the sidebar item it should
@@ -66,6 +66,10 @@ export const SIDEBAR_ACTIVE_BY_PATH = {
 // otherwise still sitting underneath.
 export const SIDEBAR_ACTIVE_CLEARING_SCREENS = new Set([
   'screen-join', 'screen-spectate-join', 'screen-spectate', 'screen-finished', 'screen-game',
+  // Reached from a name click (Leaderboard or a game detail modal), not
+  // from the sidebar itself -- no sidebar item describes "you're looking
+  // at some specific player's profile", so nothing should stay lit.
+  'screen-player-profile',
 ]);
 
 const TOAST_DURATION_MS = 1500; // long enough to actually read before it clears

@@ -465,6 +465,129 @@
       </div>
     </section>
 
+    <!-- ===================== PLAYER PROFILE (public, read-only) =====================
+         Any player (or the 3 reserved bot identities -- see web_server.py's
+         BOT_PROFILES), reached by clicking a name on the Leaderboard or in the
+         game detail modal -- see playerProfile.js. Deliberately separate from
+         /account: that screen only ever shows whoever's logged in on this
+         browser and lets them edit it; this one is a read-only viewer of
+         *anyone*, with no edit affordances at all. -->
+    <section id="screen-player-profile" class="screen hidden">
+      <div class="account-screen-wrap">
+        <button type="button" class="screen-back" id="btn-player-profile-back">← Back</button>
+
+        <div class="card panel account-panel">
+          <div class="account-header">
+            <span id="player-profile-avatar" class="profile-chip-avatar account-avatar"></span>
+            <div>
+              <h2 id="player-profile-name"></h2>
+              <div id="player-profile-elo-hero" class="account-elo-hero hidden">
+                <span id="player-profile-elo" class="account-elo-value"></span> <span class="account-elo-label">ELO RATING</span>
+              </div>
+            </div>
+          </div>
+          <!-- Bots get a bit of flavor text instead of the player-since/
+               last-played meta a human profile shows -- both would just
+               read as "since the schema was created" for a shared identity
+               that never actually joined (see BOT_PROFILES' own comment). -->
+          <p id="player-profile-bio" class="muted hidden"></p>
+          <div id="player-profile-meta-row" class="account-meta-row hidden">
+            <span class="account-meta-item">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <rect x="3.5" y="5" width="17" height="15.5" rx="1.5"/><path d="M3.5 9.5h17"/><path d="M8 3v3.5M16 3v3.5"/>
+              </svg>
+              <span>Player since <span id="player-profile-since"></span></span>
+            </span>
+            <span class="account-meta-item">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <circle cx="12" cy="12" r="9"/><path d="M12 7.5V12l3 2"/>
+              </svg>
+              <span>Last played <span id="player-profile-last-played"></span></span>
+            </span>
+          </div>
+
+          <div id="player-profile-stats-row" class="account-stats-row account-stats-grid loading">
+            <div class="account-stat">
+              <span class="account-stat-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                  <rect x="4" y="4" width="16" height="16" rx="3"/>
+                  <circle cx="8.5" cy="8.5" r="1.2" fill="currentColor" stroke="none"/>
+                  <circle cx="12" cy="12" r="1.2" fill="currentColor" stroke="none"/>
+                  <circle cx="15.5" cy="15.5" r="1.2" fill="currentColor" stroke="none"/>
+                </svg>
+              </span>
+              <span id="player-profile-stat-games" class="account-stat-value">—</span>
+              <span class="account-stat-label">Games played</span>
+            </div>
+            <div class="account-stat">
+              <span class="account-stat-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="currentColor" stroke="none">
+                  <path d="M12 3.4l2.5 5.4 5.9.6-4.4 4 1.3 5.8L12 16.2l-5.3 3-1.3.9 1.3-5.8-4.4-4 5.9-.6z"/>
+                </svg>
+              </span>
+              <span id="player-profile-stat-wins" class="account-stat-value">—</span>
+              <span class="account-stat-label">Wins</span>
+            </div>
+            <div class="account-stat">
+              <span class="account-stat-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                  <circle cx="12" cy="12" r="8.3"/><circle cx="12" cy="12" r="4.3"/><circle cx="12" cy="12" r="1" fill="currentColor" stroke="none"/>
+                </svg>
+              </span>
+              <span id="player-profile-stat-winrate" class="account-stat-value">—</span>
+              <span class="account-stat-label">Win rate</span>
+            </div>
+            <div class="account-stat">
+              <span class="account-stat-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                  <rect x="3.5" y="14.5" width="4.5" height="6" rx="1"/><rect x="9.75" y="9.5" width="4.5" height="11" rx="1"/><rect x="16" y="4.5" width="4.5" height="16" rx="1"/>
+                </svg>
+              </span>
+              <span id="player-profile-stat-avg-placement" class="account-stat-value">—</span>
+              <span class="account-stat-label">Avg. placement</span>
+            </div>
+            <div class="account-stat">
+              <span class="account-stat-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="currentColor" stroke="none">
+                  <path d="M12 3l7 7-7 11-7-11z"/>
+                </svg>
+              </span>
+              <span id="player-profile-stat-avg-points" class="account-stat-value">—</span>
+              <span class="account-stat-label">Avg. points</span>
+            </div>
+            <div class="account-stat">
+              <span class="account-stat-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                  <circle cx="12" cy="12" r="8.3"/>
+                  <path d="M12 7.5v9M9.3 9.4c0-1.1 1-2 2.7-2s2.7.9 2.7 1.9c0 2.6-5.4 1.4-5.4 4 0 1.1 1.2 2 2.7 2s2.7-.8 2.7-1.9"/>
+                </svg>
+              </span>
+              <span id="player-profile-stat-avg-money" class="account-stat-value">—</span>
+              <span class="account-stat-label">Avg. money left</span>
+            </div>
+          </div>
+        </div>
+
+        <div id="player-profile-history-section" class="card panel account-panel hidden">
+          <h3>
+            <span class="section-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="8.3"/><path d="M12 7.5V12l3 2"/>
+              </svg>
+            </span>
+            Game History
+          </h3>
+          <div id="player-profile-history-list" class="recent-games-list"></div>
+          <p id="player-profile-history-empty" class="muted hidden">No games recorded yet.</p>
+          <div id="player-profile-history-pagination" class="leaderboard-pagination hidden">
+            <button type="button" id="btn-player-profile-history-prev" class="secondary" disabled>← Prev</button>
+            <span id="player-profile-history-page-label" class="muted"></span>
+            <button type="button" id="btn-player-profile-history-next" class="secondary" disabled>Next →</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
     <!-- ===================== LEADERBOARD ===================== -->
     <section id="screen-leaderboard" class="screen hidden">
       <div class="card panel account-panel leaderboard-panel">

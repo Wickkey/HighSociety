@@ -2,6 +2,14 @@
 import { $, hide, show } from '../utils/dom.js';
 import { escapeHtml } from '../utils/formatting.js';
 import { fetchJSON } from '../lobby/lobby.js';
+// Circular with gameHistory.js (which imports openGameDetailModal from
+// here) via playerProfile.js's own import of fetchGamesPage/renderIfChanged
+// from gameHistory.js -- safe by this project's own established
+// convention (see gameHistory.js's identical note on this exact pair):
+// every side of the cycle only ever touches another side's export inside
+// a function body (onGameDetailTableClick below; wireRowClicks in
+// gameHistory.js), never at any module's own top-level evaluation.
+import { showPlayerProfileScreen } from '../lobby/playerProfile.js';
 
 // In-page confirm dialog (resign, leaving mid-game — see gameActions.js's
 // onResign/lobby.js's onHomeLinkClick) styled like every other panel in the
@@ -65,16 +73,41 @@ export async function openGameDetailModal(gameId) {
   try {
     const detail = await fetchJSON(`/api/games/detail/${encodeURIComponent(gameId)}`);
     $('game-detail-date').textContent = new Date(detail.finished_at).toLocaleDateString();
-    body.innerHTML = detail.participants.map((p) => `
+    body.innerHTML = detail.participants.map((p) => {
+      // A human's own name is always a real, linkable username. A bot's
+      // displayed name is a per-seat flavor label ("Ziggy bot") that
+      // never had a profile of its own -- bot_profile_username (see
+      // get_game_detail's own docstring) is the shared difficulty
+      // identity's real username to link to instead, when this game
+      // actually recorded one (older games might not have).
+      const linkUsername = p.is_bot ? p.bot_profile_username : p.name;
+      const nameHtml = linkUsername
+        ? `<button type="button" class="name-link" data-username="${escapeHtml(linkUsername)}">${escapeHtml(p.name)}</button>`
+        : escapeHtml(p.name);
+      return `
       <tr>
         <td>${p.placement != null ? p.placement : '—'}</td>
-        <td>${escapeHtml(p.name)}${p.is_bot ? ' (bot)' : ''}${p.is_winner ? ' 🏆' : ''}</td>
+        <td>${nameHtml}${p.is_bot ? ' (bot)' : ''}${p.is_winner ? ' 🏆' : ''}</td>
         <td>${p.points}</td>
         <td>${p.money_left}</td>
       </tr>
-    `).join('');
+    `;
+    }).join('');
   } catch (e) {
     body.innerHTML = '<tr><td colspan="4">Could not load this game.</td></tr>';
   }
 }
 export function closeGameDetailModal() { hide($('game-detail-modal')); }
+
+// Wired from index.html's game-detail-body click delegation (see app.js,
+// same data-attribute-click-delegation pattern rematch.js's own
+// onStandingsTableClick already uses for its own name links). Closing
+// the modal first, then navigating, matches what closing it always did
+// anyway -- this just also happens to land somewhere instead of nowhere.
+export function onGameDetailTableClick(e) {
+  const btn = e.target.closest('[data-username]');
+  if (btn) {
+    closeGameDetailModal();
+    showPlayerProfileScreen(btn.dataset.username, 'leaderboard');
+  }
+}

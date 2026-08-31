@@ -8,6 +8,7 @@ import { $, hide, show, showScreen, setScreenPath } from '../utils/dom.js';
 import { escapeHtml } from '../utils/formatting.js';
 import { loadProfile } from '../auth/profile.js';
 import { fetchJSON } from './lobby.js';
+import { showPlayerProfileScreen } from './playerProfile.js';
 
 const PAGE_SIZE = 20;
 let leaderboardOffset = 0;
@@ -58,7 +59,7 @@ async function loadLeaderboardPage(profile) {
       return `
       <tr class="${profile && r.username === profile.username ? 'leaderboard-row-me' : ''}">
         <td class="${rank === 1 ? 'leaderboard-rank-1' : ''}">${rank}</td>
-        <td>${escapeHtml(r.username)}</td>
+        <td><button type="button" class="name-link" data-username="${escapeHtml(r.username)}">${escapeHtml(r.username)}</button></td>
         <td>${r.elo}</td>
         <td>${r.games_played}</td>
         <td>${r.games_won}</td>
@@ -73,4 +74,13 @@ async function loadLeaderboardPage(profile) {
     body.innerHTML = '';
     show(empty);
   }
+}
+
+// Every ranked player's name opens their real public profile page --
+// "self-explanatory" per the original ask, since this table is already
+// nothing but real, rated humans (see get_leaderboard's own docstring on
+// why guests/bots are excluded here).
+export function onLeaderboardTableClick(e) {
+  const btn = e.target.closest('[data-username]');
+  if (btn) showPlayerProfileScreen(btn.dataset.username, 'leaderboard');
 }

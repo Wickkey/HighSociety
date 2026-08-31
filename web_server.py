@@ -807,16 +807,48 @@ def api_achievements():
     return jsonify({"achievements": game_history.get_player_achievements(username)})
 
 
+
+# The 3 reserved per-difficulty bot identities (see game_history.py's own
+# schema comment for `players`/`bots`) get a public profile too -- real
+# aggregate stats already exist for them (bots are real rated
+# participants, see record_finished_game's docstring), they just need a
+# friendlier display name than the internal "__bot_easy__" username and
+# a bit of flavor text in place of the "player since"/"last played" meta
+# a human profile shows (both would just read as "since the schema was
+# created", which is meaningless for a shared identity that never
+# actually "joined"). Deliberately presentation-only content, kept here
+# rather than in game_history.py, which stays a plain persistence layer
+# with no opinion on bio copy.
+BOT_PROFILES = {
+    "__bot_easy__": {
+        "display_name": "Easy Bot",
+        "bio": "Bids first, thinks never. A creature of pure impulse and modest budgets.",
+    },
+    "__bot_medium__": {
+        "display_name": "Medium Bot",
+        "bio": "Reads the table, mostly. Occasionally overpays for a Painting out of spite.",
+    },
+    "__bot_hard__": {
+        "display_name": "Hard Bot",
+        "bio": "Counts your money better than you do. Shows no mercy and even less small talk.",
+    },
+}
+
+
 @app.route("/api/profile/<username>")
 def api_profile(username):
     """Public profile stats -- games played, win rate, current Elo.
     Unlike achievements this isn't gated to Google-linked accounts (see
     get_player_profile_stats's own docstring): it's just a factual record
     of games already played under this exact username, visible to anyone,
-    matching the user's own "should be publicly visible" ask."""
+    matching the user's own "should be publicly visible" ask. Also
+    answers for the 3 reserved bot identities (see BOT_PROFILES above) --
+    same shape, plus is_bot/display_name/bio so the client can render a
+    bot's profile distinctly from a human's."""
     stats = game_history.get_player_profile_stats(username)
     if stats is None:
         return jsonify({"error": "No games recorded for that username yet."}), 404
+    bot_profile = BOT_PROFILES.get(username)
     return jsonify({
         "username": username,
         "games_played": stats["games_played"],
@@ -828,6 +860,9 @@ def api_profile(username):
         "elo": stats["elo"],
         "created_at": stats["created_at"],
         "last_played_at": stats["last_played_at"],
+        "is_bot": bot_profile is not None,
+        "display_name": bot_profile["display_name"] if bot_profile else username,
+        "bio": bot_profile["bio"] if bot_profile else None,
     })
 
 
@@ -910,14 +945,21 @@ def api_rating_history(username):
 @app.route("/account/<username>")
 @app.route("/achievements")
 @app.route("/my-games")
+@app.route("/players/<username>")
 def index(username=None):
-    # The /account/<username> variant is purely cosmetic/shareable -- the
-    # account screen always renders whichever profile is actually logged
-    # in on this browser (there's no per-user public profile page), so
-    # `username` is never read here; the client corrects the URL bar to
-    # match the real logged-in profile regardless (see account.js's
-    # showAccountScreen), same as every other route on this one shared
-    # shell template.
+    # Two different routes share this same `username` param, for two
+    # different reasons -- neither actually reads it here:
+    # - /account/<username> is purely cosmetic/shareable -- the account
+    #   screen always renders whichever profile is actually logged in on
+    #   this browser (there's no per-user account editor), so the client
+    #   corrects the URL bar to match the real logged-in profile
+    #   regardless (see account.js's showAccountScreen).
+    # - /players/<username> is a real per-player public page (unlike
+    #   /account) -- the client reads it back out of location.pathname
+    #   itself instead (see playerProfile.js's showPlayerProfileScreen/
+    #   its own boot-path handling).
+    # Both are otherwise the same client-decides-what-to-show model every
+    # other route on this one shared shell template already uses.
     return render_template(
         "index.html", ga_measurement_id=GA_MEASUREMENT_ID,
         google_client_id=GOOGLE_CLIENT_ID if GOOGLE_SIGN_IN_ENABLED else None,
