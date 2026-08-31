@@ -907,9 +907,17 @@ def api_rating_history(username):
 @app.route("/leaderboard")
 @app.route("/rules")
 @app.route("/account")
+@app.route("/account/<username>")
 @app.route("/achievements")
 @app.route("/my-games")
-def index():
+def index(username=None):
+    # The /account/<username> variant is purely cosmetic/shareable -- the
+    # account screen always renders whichever profile is actually logged
+    # in on this browser (there's no per-user public profile page), so
+    # `username` is never read here; the client corrects the URL bar to
+    # match the real logged-in profile regardless (see account.js's
+    # showAccountScreen), same as every other route on this one shared
+    # shell template.
     return render_template(
         "index.html", ga_measurement_id=GA_MEASUREMENT_ID,
         google_client_id=GOOGLE_CLIENT_ID if GOOGLE_SIGN_IN_ENABLED else None,

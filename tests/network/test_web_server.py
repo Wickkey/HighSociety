@@ -1896,12 +1896,18 @@ def test_rating_history_endpoint_returns_a_list(monkeypatch):
 
 # ---------------------------------------- static per-screen URLs --------
 
-@pytest.mark.parametrize("path", ["/", "/play", "/join", "/host", "/leaderboard", "/rules", "/account", "/achievements"])
+@pytest.mark.parametrize(
+    "path",
+    ["/", "/play", "/join", "/host", "/leaderboard", "/rules", "/account", "/account/alice", "/achievements"],
+)
 def test_static_screen_paths_all_serve_the_same_app_shell(path):
     """Each of the 7 top-level sidebar screens gets a real, refreshable/
     shareable URL (see app.js's SCREEN_PATHS/setScreenPath) -- all served
     by the same index() view as '/', since this is a single-page app that
-    figures out which screen to show client-side."""
+    figures out which screen to show client-side. /account/<username> is
+    the same Account screen with a cosmetic username segment -- the
+    username itself is never read server-side (see index()'s own
+    comment)."""
     resp = web_server.app.test_client().get(path)
     assert resp.status_code == 200
     assert b"High Society" in resp.data

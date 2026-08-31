@@ -496,7 +496,14 @@ export function showAccountScreen() {
   // guest, shouldn't flash the previous profile's feed for a moment).
   hide($('account-recent-activity-section'));
   showScreen('screen-account');
-  setScreenPath('/account');
+  // Includes the username (chess.com-style) purely for a nicer/shareable
+  // URL -- this is never a per-user viewer, so a stale or foreign
+  // username left over in the address bar (an old bookmark after a
+  // rename, say) just gets silently corrected to whoever's actually
+  // logged in on the very next visit, same as everything else this
+  // screen renders. Falls back to the bare path if somehow reached
+  // with no profile yet.
+  setScreenPath(profile ? `/account/${encodeURIComponent(profile.username)}` : '/account');
   // All three run independently/in parallel, same as the stats prefetch
   // already did -- none of them awaits or blocks another, so the screen's
   // fast initial paint (stats, from the login-time prefetch) is never held

@@ -63,6 +63,14 @@ export function proceedPastLogin() {
     startPolling();
     return;
   }
+  // /account/<username> is a variant of /account (see web_server.py's own
+  // route comment) -- always the current browser's own profile, never a
+  // per-user viewer -- so it needs a prefix check rather than one exact-
+  // match BOOT_PATH_HANDLERS entry per possible username.
+  if (location.pathname.startsWith('/account/')) {
+    showAccountScreen();
+    return;
+  }
   const bootHandler = BOOT_PATH_HANDLERS[location.pathname];
   if (bootHandler) {
     bootHandler();
