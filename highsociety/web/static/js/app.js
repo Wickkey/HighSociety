@@ -22,7 +22,9 @@ import {
   applySpectateIdentityDefaults, refreshStatus, leaveToHome, setCurrentRoomCode,
 } from './lobby/lobby.js';
 import { onAddBot } from './lobby/playerList.js';
-import { showGameHistoryScreen, onGameHistoryPrevClick, onGameHistoryNextClick } from './lobby/gameHistory.js';
+import {
+  showGameHistoryScreen, onGameHistoryPrevClick, onGameHistoryNextClick, getGameHistoryReturnTo,
+} from './lobby/gameHistory.js';
 import { showLeaderboardScreen, onLeaderboardPrevClick, onLeaderboardNextClick } from './lobby/leaderboard.js';
 import { onPlayClick, onFindMatch, onMatchmakingCancel, onMatchmakingAddBots } from './lobby/matchmaking.js';
 import {
@@ -110,8 +112,17 @@ function wireStaticHandlers() {
   $('btn-achievements-back').addEventListener('click', () => navigateFromSidebar(() => {
     showScreen('screen-host-setup'); showHomeTiles(); startRoomsPolling();
   }));
+  // This screen has three entry points now (sidebar/direct link, Home's
+  // widget, Account's widget) -- Back has to return to whichever one was
+  // actually used (getGameHistoryReturnTo, set by showGameHistoryScreen
+  // itself), not always Home, which is what a real reported bug turned
+  // out to be: opening from Account and pressing Back landed on Home.
   $('btn-game-history-back').addEventListener('click', () => navigateFromSidebar(() => {
-    showScreen('screen-host-setup'); showHomeTiles(); startRoomsPolling();
+    if (getGameHistoryReturnTo() === 'account') {
+      showAccountScreen();
+    } else {
+      showScreen('screen-host-setup'); showHomeTiles(); startRoomsPolling();
+    }
   }));
   $('btn-leaderboard-back').addEventListener('click', () => navigateFromSidebar(() => {
     showScreen('screen-host-setup'); showHomeTiles(); startRoomsPolling();
@@ -123,8 +134,8 @@ function wireStaticHandlers() {
   // see index.html's own comment on why this widget is titled "Game
   // History" now, not "Recent Games". Account's own copy of this same
   // widget (titled identically, for the same reason) gets the same link.
-  $('btn-home-recent-games-see-more').addEventListener('click', () => navigateFromSidebar(showGameHistoryScreen));
-  $('btn-account-recent-activity-see-more').addEventListener('click', () => navigateFromSidebar(showGameHistoryScreen));
+  $('btn-home-recent-games-see-more').addEventListener('click', () => navigateFromSidebar(() => showGameHistoryScreen('home')));
+  $('btn-account-recent-activity-see-more').addEventListener('click', () => navigateFromSidebar(() => showGameHistoryScreen('account')));
   $('account-elo-chart-range-toggle').addEventListener('click', onEloChartRangeClick);
   $('btn-game-history-prev').addEventListener('click', onGameHistoryPrevClick);
   $('btn-game-history-next').addEventListener('click', onGameHistoryNextClick);

@@ -198,13 +198,25 @@ function showEnter(el) {
   el.classList.add('enter');
 }
 
-// The full "My Games" screen, reached from the Account screen -- real
-// pagination (10 per page, Prev/Next) rather than a "Load more" button
-// that only ever grows, matching the Leaderboard's own pagination.
+// The full "My Games" screen -- real pagination (10 per page, Prev/Next)
+// rather than a "Load more" button that only ever grows, matching the
+// Leaderboard's own pagination.
 let gameHistoryOffset = 0;
 let gameHistoryUsername = null;
+// This screen now has three separate entry points -- the sidebar/a
+// direct /my-games link, Home's own "Game History" widget, and Account's
+// -- so its own Back button can no longer just hardcode "go to Home"
+// (a real reported bug: opening it from Account and pressing Back landed
+// on Home instead of back on Account). `returnTo` records which one was
+// actually used, read by app.js's onGameHistoryBackClick.
+let gameHistoryReturnTo = 'home';
 
-export function showGameHistoryScreen() {
+export function getGameHistoryReturnTo() {
+  return gameHistoryReturnTo;
+}
+
+export function showGameHistoryScreen(returnTo = 'home') {
+  gameHistoryReturnTo = returnTo;
   showScreen('screen-game-history');
   setScreenPath('/my-games');
   const profile = loadProfile();
