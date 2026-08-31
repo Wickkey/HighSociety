@@ -1321,15 +1321,42 @@ button.secondary.standalone { margin-top: 0.9rem; display: inline-block; }
 /* Width + centering for .leaderboard-panel itself now live in main.css,
    alongside every other screen's own panel-centering rule. */
 
+/* Shared by both the Leaderboard screen's own table and the game detail
+   modal's ("game results") -- flagged as looking bland/monotone in both
+   places, so one fix here covers both rather than needing two. */
 .leaderboard-table { width: 100%; border-collapse: collapse; margin-top: 1rem; font-size: 0.9rem; }
 .leaderboard-table th, .leaderboard-table td {
   padding: 0.5rem 0.6rem;
   text-align: left;
   border-bottom: 1px solid var(--panel-border);
 }
-.leaderboard-table th { color: var(--muted); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.03em; }
+.leaderboard-table th {
+  color: var(--muted);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  /* A slightly heavier bottom border than the body rows below it --
+     separates the header as its own band instead of just looking like
+     one more (uppercase) row in an otherwise perfectly flat table. */
+  border-bottom: 2px solid var(--panel-border);
+}
+/* Alternating row tint -- a real zebra pattern reads as a deliberately
+   designed table, not a wall of identical rows; :not(.leaderboard-row-me)
+   so the "this is you" highlight below always wins on whichever row it
+   lands on, striped or not. */
+.leaderboard-table tbody tr:nth-child(even):not(.leaderboard-row-me) { background: var(--panel-bg-soft); }
 .leaderboard-row-me { background: var(--accent-soft); font-weight: 700; }
 .leaderboard-rank-1 { color: var(--accent-strong); font-weight: 800; font-size: 1.05rem; }
+/* A clickable name inside one of these tables previously only looked
+   different from static text on hover -- from a first glance at the
+   table itself, nothing distinguished it. Colored + a visible (if
+   subtle) underline at rest gives it the same "this is a link" read
+   every other link in the app already has; the existing hover rule in
+   game.css still darkens it further on top of this. */
+.leaderboard-table .name-link {
+  color: var(--accent-strong);
+  text-decoration-color: rgba(143, 106, 34, 0.4);
+}
 .leaderboard-pagination { display: flex; align-items: center; justify-content: center; gap: 1rem; margin-top: 0.9rem; }
 .leaderboard-pagination button { margin: 0; }
 .leaderboard-pagination button:disabled { opacity: 0.4; cursor: default; }

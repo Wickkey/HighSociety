@@ -61,11 +61,20 @@ export async function openProfileModal(username) {
 }
 export function closeProfileModal() { hide($('profile-view-modal')); }
 
-// "Click a game -> see full results" -- the same modal serves both the
-// My Games screen and the home page's Recent Games widget (see
-// lobby/gameHistory.js, which only ever fetches the list; this owns the
-// one detail view both lists open into).
+// "Click a game -> see full results" -- the same modal serves the Home
+// widget, My Games, Account's Recent Activity, and a Player Profile's own
+// game history (see lobby/gameHistory.js, which only ever fetches the
+// list; this owns the one detail view every caller opens into).
 export async function openGameDetailModal(gameId) {
+  // Captured the instant the modal opens (before anything else changes)
+  // -- this is a real screen id (e.g. 'screen-host-setup' for Home,
+  // 'screen-game-history' for My Games, 'screen-account'), since the
+  // modal is only ever an overlay on top of whatever's already showing.
+  // Used by onGameDetailTableClick below so a name clicked inside this
+  // modal returns Back to wherever the modal was actually opened from --
+  // a real reported bug otherwise: it always assumed Leaderboard,
+  // landing there even when the modal was opened from Home.
+  gameDetailOpenerScreenId = document.querySelector('.screen:not(.hidden)')?.id || null;
   const body = $('game-detail-body');
   body.innerHTML = '';
   $('game-detail-date').textContent = '';
@@ -99,15 +108,27 @@ export async function openGameDetailModal(gameId) {
 }
 export function closeGameDetailModal() { hide($('game-detail-modal')); }
 
+let gameDetailOpenerScreenId = null; // see openGameDetailModal's own comment
+
 // Wired from index.html's game-detail-body click delegation (see app.js,
 // same data-attribute-click-delegation pattern rematch.js's own
 // onStandingsTableClick already uses for its own name links). Closing
 // the modal first, then navigating, matches what closing it always did
 // anyway -- this just also happens to land somewhere instead of nowhere.
+// The opener screen id is passed straight through as returnTo -- app.js's
+// Back handler is what turns a screen id into "how do I re-show that
+// screen" (it already owns every one of those re-show functions).
+// Falls back to 'leaderboard' for the one case that's genuinely ambiguous
+// (this same modal opened from *another* Player Profile's own game
+// history -- chasing that arbitrarily deep would need a real navigation
+// stack, not worth it for how rarely that specific path comes up).
 export function onGameDetailTableClick(e) {
   const btn = e.target.closest('[data-username]');
   if (btn) {
+    const returnTo = (gameDetailOpenerScreenId && gameDetailOpenerScreenId !== 'screen-player-profile')
+      ? gameDetailOpenerScreenId
+      : 'leaderboard';
     closeGameDetailModal();
-    showPlayerProfileScreen(btn.dataset.username, 'leaderboard');
+    showPlayerProfileScreen(btn.dataset.username, returnTo);
   }
 }
