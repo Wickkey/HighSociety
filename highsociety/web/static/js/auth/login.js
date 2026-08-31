@@ -7,6 +7,7 @@ import { saveProfile, renderProfileChip } from './profile.js';
 import { prefetchAccountStats, showAccountScreen, showAchievementsScreen } from '../account/account.js';
 import { showLeaderboardScreen } from '../lobby/leaderboard.js';
 import { showGameHistoryScreen } from '../lobby/gameHistory.js';
+import { showPlayerProfileScreen } from '../lobby/playerProfile.js';
 import { onPlayClick } from '../lobby/matchmaking.js';
 
 // Maps a direct/refreshed visit to one of the 8 static screen URLs
@@ -69,6 +70,15 @@ export function proceedPastLogin() {
   // match BOOT_PATH_HANDLERS entry per possible username.
   if (location.pathname.startsWith('/account/')) {
     showAccountScreen();
+    return;
+  }
+  // /players/<username> carries a real per-user segment (unlike every
+  // other entry in BOOT_PATH_HANDLERS below, which are all exact-match
+  // static paths) -- a direct visit/refresh/shared link at this URL
+  // opens that exact profile, same as clicking their name anywhere else.
+  if (location.pathname.startsWith('/players/')) {
+    const username = decodeURIComponent(location.pathname.slice('/players/'.length));
+    showPlayerProfileScreen(username, 'leaderboard');
     return;
   }
   const bootHandler = BOOT_PATH_HANDLERS[location.pathname];

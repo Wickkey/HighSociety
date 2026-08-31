@@ -1797,7 +1797,26 @@ def test_profile_endpoint_returns_stats_and_elo(monkeypatch):
         "username": "alice", "games_played": 4, "wins": 3, "win_rate": 0.75,
         "avg_placement": 1.5, "avg_points": 12.0, "avg_money_remaining": 6.0, "elo": 1032,
         "created_at": "2025-06-01T00:00:00+00:00", "last_played_at": "2026-03-15T00:00:00+00:00",
+        "is_bot": False, "display_name": "alice", "bio": None,
     }
+
+
+def test_profile_endpoint_flags_the_reserved_bot_identities(monkeypatch):
+    """The 3 shared bot-difficulty identities (see web_server.py's own
+    BOT_PROFILES) get a friendlier display name and a bit of flavor text
+    instead of the raw "__bot_hard__" username -- real stats otherwise,
+    same as any human."""
+    monkeypatch.setattr(game_history, "get_player_profile_stats", lambda username: {
+        "games_played": 500, "wins": 210, "win_rate": 0.42, "elo": 1140,
+        "avg_placement": 2.1, "avg_points": 15.0, "avg_money_remaining": 3.0,
+        "created_at": "2025-01-01T00:00:00+00:00", "last_played_at": "2026-03-15T00:00:00+00:00",
+    })
+    resp = web_server.app.test_client().get("/api/profile/__bot_hard__")
+    assert resp.status_code == 200
+    body = resp.get_json()
+    assert body["is_bot"] is True
+    assert body["display_name"] == "Hard Bot"
+    assert isinstance(body["bio"], str) and len(body["bio"]) > 0
 
 
 def test_global_stats_endpoint_returns_204_when_unavailable(monkeypatch):
@@ -1898,7 +1917,10 @@ def test_rating_history_endpoint_returns_a_list(monkeypatch):
 
 @pytest.mark.parametrize(
     "path",
-    ["/", "/play", "/join", "/host", "/leaderboard", "/rules", "/account", "/account/alice", "/achievements"],
+    [
+        "/", "/play", "/join", "/host", "/leaderboard", "/rules", "/account", "/account/alice",
+        "/achievements", "/players/alice",
+    ],
 )
 def test_static_screen_paths_all_serve_the_same_app_shell(path):
     """Each of the 7 top-level sidebar screens gets a real, refreshable/
@@ -1907,7 +1929,9 @@ def test_static_screen_paths_all_serve_the_same_app_shell(path):
     figures out which screen to show client-side. /account/<username> is
     the same Account screen with a cosmetic username segment -- the
     username itself is never read server-side (see index()'s own
-    comment)."""
+    comment). /players/<username> is the one route here with a real
+    per-user destination -- the username itself still isn't read
+    server-side either."""
     resp = web_server.app.test_client().get(path)
     assert resp.status_code == 200
     assert b"High Society" in resp.data

@@ -2,7 +2,9 @@
 // DOMContentLoaded. Owns nothing itself -- every handler it wires lives in
 // its own feature module; this file only imports and attaches them.
 import { $, showScreen } from './utils/dom.js';
-import { resolveConfirmDialog, openProfileModal, closeProfileModal, closeGameDetailModal } from './ui/modals.js';
+import {
+  resolveConfirmDialog, openProfileModal, closeProfileModal, closeGameDetailModal, onGameDetailTableClick,
+} from './ui/modals.js';
 import { onSpecChatSend, onPlayerChatSend } from './ui/chat.js';
 import {
   onContinueAsGuest, onShuffleUsername, onLoginUsernameContinue, initGoogleSignIn, proceedPastLogin,
@@ -25,7 +27,12 @@ import { onAddBot } from './lobby/playerList.js';
 import {
   showGameHistoryScreen, onGameHistoryPrevClick, onGameHistoryNextClick, getGameHistoryReturnTo,
 } from './lobby/gameHistory.js';
-import { showLeaderboardScreen, onLeaderboardPrevClick, onLeaderboardNextClick } from './lobby/leaderboard.js';
+import {
+  showLeaderboardScreen, onLeaderboardPrevClick, onLeaderboardNextClick, onLeaderboardTableClick,
+} from './lobby/leaderboard.js';
+import {
+  getPlayerProfileReturnTo, onPlayerProfileHistoryPrevClick, onPlayerProfileHistoryNextClick,
+} from './lobby/playerProfile.js';
 import { onPlayClick, onFindMatch, onMatchmakingCancel, onMatchmakingAddBots } from './lobby/matchmaking.js';
 import {
   onRequestRematchClick, onCancelRematchForm, onSendRematchRequest, onAcceptRematch, onDeclineRematch,
@@ -142,6 +149,18 @@ function wireStaticHandlers() {
   $('sidebar-leaderboard').addEventListener('click', () => navigateFromSidebar(showLeaderboardScreen));
   $('btn-leaderboard-prev').addEventListener('click', onLeaderboardPrevClick);
   $('btn-leaderboard-next').addEventListener('click', onLeaderboardNextClick);
+  $('leaderboard-body').addEventListener('click', onLeaderboardTableClick);
+  $('game-detail-body').addEventListener('click', onGameDetailTableClick);
+  // Reached from a name click (Leaderboard or the game detail modal), not
+  // the sidebar -- Back returns to whichever one was actually used
+  // (getPlayerProfileReturnTo, same "returnTo" idea as Game History's own
+  // multi-entry-point Back button above).
+  $('btn-player-profile-back').addEventListener('click', () => navigateFromSidebar(() => {
+    if (getPlayerProfileReturnTo() === 'leaderboard') showLeaderboardScreen();
+    else { showScreen('screen-host-setup'); showHomeTiles(); startRoomsPolling(); }
+  }));
+  $('btn-player-profile-history-prev').addEventListener('click', onPlayerProfileHistoryPrevClick);
+  $('btn-player-profile-history-next').addEventListener('click', onPlayerProfileHistoryNextClick);
   $('game-detail-close').addEventListener('click', closeGameDetailModal);
   $('btn-account-save').addEventListener('click', onAccountSaveClick);
   $('btn-account-edit-username').addEventListener('click', onAccountEditUsernameClick);

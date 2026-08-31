@@ -941,13 +941,25 @@ def get_recent_games(username: str, limit: int = 20, offset: int = 0) -> dict:
 def get_game_detail(game_id: int) -> Optional[dict]:
     """
     Full per-participant breakdown of one game -- {"game_id",
-    "finished_at", "participants": [{"name", "is_bot", "points",
-    "money_left", "is_winner", "eliminated", "placement"}, ...]},
-    ordered by placement. No access check tied to any particular
-    username -- consistent with this app's existing stateless,
-    sessionless trust model (e.g. /api/auth/username/change's own
-    docstring), and a finished game's results aren't sensitive. None if
-    the game_id doesn't exist or on any failure.
+    "finished_at", "participants": [{"name", "is_bot",
+    "bot_profile_username", "points", "money_left", "is_winner",
+    "eliminated", "placement"}, ...]}, ordered by placement. No access
+    check tied to any particular username -- consistent with this app's
+    existing stateless, sessionless trust model (e.g.
+    /api/auth/username/change's own docstring), and a finished game's
+    results aren't sensitive. None if the game_id doesn't exist or on any
+    failure.
+
+    `bot_profile_username` is a second, deliberately separate lookup from
+    `name`: `name` stays this seat's own per-game flavor label (e.g.
+    "Ziggy bot", from `pg.bot_name`) so the row itself never changes, but
+    a bot with a known difficulty also has a real, shared players row
+    (see the `bots` table) with genuine aggregate stats -- this is that
+    row's username (one of `__bot_easy__`/`__bot_medium__`/`__bot_hard__`),
+    for the caller to link the name to a real profile. None for a human
+    participant, or for a bot with no known difficulty (nothing to link
+    to -- see record_finished_game's own docstring on `difficulty` being
+    optional).
     """
     if not is_configured():
         return None
@@ -972,18 +984,22 @@ def get_game_detail(game_id: int) -> Optional[dict]:
             cur.execute(
                 """
                 SELECT COALESCE(p.username, pg.bot_name) AS name, p.id IS NULL AS is_bot,
+                       bot_p.username AS bot_profile_username,
                        pg.points, pg.money_left, pg.is_winner, pg.eliminated, pg.placement
                 FROM player_games pg
                 LEFT JOIN players p ON p.id = pg.player_id AND p.id NOT IN (SELECT player_id FROM bots)
+                LEFT JOIN players bot_p ON bot_p.id = pg.player_id AND bot_p.id IN (SELECT player_id FROM bots)
                 WHERE pg.game_id = %s
                 ORDER BY pg.placement NULLS LAST
                 """,
                 (game_id,),
             )
             participants = [
-                {"name": name, "is_bot": is_bot, "points": points, "money_left": money_left,
+                {"name": name, "is_bot": is_bot, "bot_profile_username": bot_profile_username,
+                 "points": points, "money_left": money_left,
                  "is_winner": is_winner, "eliminated": eliminated, "placement": placement}
-                for name, is_bot, points, money_left, is_winner, eliminated, placement in cur.fetchall()
+                for name, is_bot, bot_profile_username, points, money_left, is_winner, eliminated, placement
+                in cur.fetchall()
             ]
             return {"game_id": game_id, "finished_at": finished_at.isoformat(), "participants": participants}
     except Exception as e:  # noqa: BLE001

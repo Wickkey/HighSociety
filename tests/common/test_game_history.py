@@ -1347,17 +1347,21 @@ def test_get_game_detail_returns_every_participant_ordered_by_placement(database
     cursor.fetchone.side_effect = None
     cursor.fetchone.return_value = (finished_at,)
     cursor.fetchall = MagicMock(return_value=[
-        ("alice", False, 15, 5, True, False, 1),
-        ("Marble", True, 5, 0, False, True, 2),
+        ("alice", False, None, 15, 5, True, False, 1),
+        ("Marble", True, "__bot_hard__", 5, 0, False, True, 2),
     ])
     with patch.object(game_history, "_connect", return_value=conn):
         result = game_history.get_game_detail(42)
     assert result["game_id"] == 42
     assert len(result["participants"]) == 2
     assert result["participants"][0] == {
-        "name": "alice", "is_bot": False, "points": 15, "money_left": 5,
+        "name": "alice", "is_bot": False, "bot_profile_username": None, "points": 15, "money_left": 5,
         "is_winner": True, "eliminated": False, "placement": 1,
     }
+    # The bot seat's flavor name ("Marble") is untouched, but it also
+    # carries the shared difficulty identity's real username to link to.
+    assert result["participants"][1]["name"] == "Marble"
+    assert result["participants"][1]["bot_profile_username"] == "__bot_hard__"
 
 
 def test_get_game_detail_reads_placement_from_player_games_not_game_results(database_url):
