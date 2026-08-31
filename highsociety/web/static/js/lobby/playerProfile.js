@@ -9,6 +9,17 @@ import { $, hide, show, showScreen, setScreenPath } from '../utils/dom.js';
 import { timeAgo } from '../utils/formatting.js';
 import { fetchJSON } from './lobby.js';
 import { fetchGamesPage, renderIfChanged } from './gameHistory.js';
+import { createEloChartController } from '../ui/eloChart.js';
+
+// Same shared chart Account's own screen uses (see ui/eloChart.js), a
+// separate controller instance so this screen's chart state (fetched
+// history, live chart object) is never confused with Account's own.
+const eloChartController = createEloChartController({
+  containerId: 'player-profile-elo-chart',
+  sectionId: 'player-profile-elo-chart-section',
+  rangeToggleId: 'player-profile-elo-chart-range-toggle',
+});
+export function onPlayerProfileEloChartRangeClick(e) { eloChartController.onRangeClick(e); }
 
 const PAGE_SIZE = 10; // matches gameHistory.js's own fixed page size -- fetchGamesPage bakes this in already
 
@@ -16,10 +27,16 @@ const dateLabel = (iso) => new Date(iso).toLocaleDateString('en-US', { month: 's
 
 let profileUsername = null; // the profile currently shown/loading -- stale-response guard for both loaders below
 let profileOffset = 0;
-// Where the Back button returns to -- this screen has two real entry
-// points (Leaderboard, the game detail modal opened from anywhere), same
-// "returnTo" idea gameHistory.js already established for its own Back
-// button's identical multi-entry-point problem.
+// Where the Back button returns to -- either the literal string
+// 'leaderboard' (clicked a name directly on the Leaderboard), or the id
+// of whichever screen was actually showing underneath when the game
+// detail modal that led here was opened (see ui/modals.js's
+// openGameDetailModal, which captures that id the instant it opens --
+// Home, My Games, and Account can all open that same modal, and each
+// needs its own real screen back, not always Leaderboard, which was a
+// real reported bug: opening a game from Home and clicking a name in it
+// landed back on Leaderboard, not Home). app.js's Back handler is what
+// actually turns a screen id back into "how do I re-show that screen".
 let profileReturnTo = 'leaderboard';
 
 export function getPlayerProfileReturnTo() {
@@ -39,11 +56,20 @@ export function showPlayerProfileScreen(username, returnTo = 'leaderboard') {
   hide($('player-profile-meta-row'));
   hide($('player-profile-elo-hero'));
   $('player-profile-stats-row').classList.add('loading');
+  hide($('player-profile-elo-chart-section'));
+  $('player-profile-elo-chart').classList.add('loading');
   hide($('player-profile-history-section'));
   $('player-profile-history-list').innerHTML = '';
   delete $('player-profile-history-list').dataset.renderedHtml; // a stale renderIfChanged memo from a *different* profile must never suppress this one's first real paint
 
+  // All three run independently -- none awaits or blocks another, same as
+  // Account's own screen-open already does. The chart's own relevance
+  // guard matters here in a way Account never had to worry about:
+  // clicking from one player's profile straight to another's (far more
+  // plausible than a login/logout cycle) could otherwise paint a slow
+  // first fetch's stale data into a screen that's since moved on.
   loadPlayerProfileStats(username);
+  eloChartController.load(`/api/profile/${encodeURIComponent(username)}/rating_history`, () => username === profileUsername);
   loadPlayerProfileHistoryPage();
 }
 

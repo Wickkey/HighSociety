@@ -11,6 +11,7 @@ import { fetchJSON } from '../lobby/lobby.js';
 // note on its own import from here.
 import { fetchGamesPage, renderIfChanged } from '../lobby/gameHistory.js';
 import { showToast } from '../ui/notifications.js';
+import { createEloChartController } from '../ui/eloChart.js';
 
 // Static catalog mirroring highsociety/code/common/achievements.py's
 // ACHIEVEMENTS -- small enough to duplicate client-side (12 entries) rather
@@ -170,174 +171,16 @@ async function loadAccountStats() {
 
 // ------------------------------------------------------------ Elo chart --
 //
-// Drawn with ApexCharts (MIT-licensed, one of the most widely used JS
-// charting libraries) -- switched from Chart.js specifically for its
-// area-chart look: a real gradient fill under the line, a built-in
-// datetime x-axis (no separate date-adapter package needed, unlike
-// Chart.js's own "time" scale), and a themeable tooltip/crosshair,
-// closer to what a polished rating-history chart is expected to look
-// like out of the box. Vendored locally as a single UMD bundle
-// (highsociety/web/static/js/vendor/apexcharts.min.js) rather than
-// pulled from a CDN or given a build step -- self-registers
-// window.ApexCharts from a classic <script>, loaded lazily (see
-// loadApexCharts below) only the first time this screen actually needs
-// it, so every other screen never pays for it.
-let apexChartsLoadPromise = null;
-
-function loadApexCharts() {
-  if (window.ApexCharts) return Promise.resolve();
-  if (!apexChartsLoadPromise) {
-    apexChartsLoadPromise = new Promise((resolve, reject) => {
-      const script = document.createElement('script');
-      script.src = '/static/js/vendor/apexcharts.min.js';
-      script.onload = resolve;
-      script.onerror = () => { apexChartsLoadPromise = null; reject(new Error('Failed to load apexcharts')); };
-      document.head.appendChild(script);
-    });
-  }
-  return apexChartsLoadPromise;
-}
-
-// A CSS custom property's raw value (e.g. "#1f7a4d") -- ApexCharts draws
-// on inline SVG, which has no idea what a CSS variable is either, so
-// every color handed to it has to already be a resolved literal.
-function cssVar(name) {
-  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-}
-
-let eloChart = null; // the live ApexCharts instance, if any -- see renderEloChart
-let fullEloHistory = []; // the unfiltered fetch, so the 7D/30D/All toggle can re-slice without a new request -- see loadEloChart/onEloChartRangeClick
-
-// Client-side only -- get_rating_history already returns everything, so
-// narrowing to a window is just a filter on timestamps already in hand,
-// never a re-fetch.
-function filterHistoryByRange(history, range) {
-  if (range === 'all') return history;
-  const days = range === '7' ? 7 : 30;
-  const cutoffMs = Date.now() - days * 24 * 60 * 60 * 1000;
-  return history.filter((h) => new Date(h.created_at).getTime() >= cutoffMs);
-}
-
-export function onEloChartRangeClick(e) {
-  const btn = e.target.closest('.account-elo-chart-range-btn');
-  if (!btn) return;
-  document.querySelectorAll('#account-elo-chart-range-toggle .account-elo-chart-range-btn').forEach((b) => {
-    b.classList.toggle('selected', b === btn);
-  });
-  renderEloChart(filterHistoryByRange(fullEloHistory, btn.dataset.range));
-}
-
-// `history`: [{old_rating, new_rating, created_at}, ...] oldest first (see
-// get_rating_history), already narrowed to whatever range is currently
-// selected (see filterHistoryByRange) -- an empty array here means "no
-// games in this window", which shows a small inline message rather than
-// hiding the whole tile (the range toggle above it should stay reachable
-// so a different window can still be picked). Plots every new_rating,
-// prefixed by the very first entry's old_rating so the line actually
-// starts somewhere instead of jumping in mid-air on its first point.
-//
-// A real datetime x-axis (each point keeps its actual timestamp) rather
-// than evenly-spaced-by-index -- an index-based layout would spread a
-// burst of several games played in one evening across the *entire*
-// width, identical to if they'd been spread across months, which is what
-// made the old sparkline look like a meaningless zigzag rather than an
-// actual rating history. The prefixed old_rating point sits at a
-// synthetic time just before the first real game (5% of the whole span
-// back) purely so the line has a visible starting slope -- it's never a
-// real game's own timestamp.
-async function renderEloChart(history) {
-  const container = $('account-elo-chart');
-  if (eloChart) { eloChart.destroy(); eloChart = null; }
-  container.classList.remove('loading');
-  if (history.length === 0) {
-    container.innerHTML = '<p class="muted account-elo-chart-empty">No games in this range.</p>';
-    return;
-  }
-  container.innerHTML = '';
-  try {
-    await loadApexCharts();
-  } catch (e) {
-    // ApexCharts genuinely failed to load (offline, ad-blocker, ...) --
-    // unlike the empty-range case above, there's no chart at all to show
-    // regardless of range, so this hides the whole tile, range toggle
-    // included.
-    hide($('account-elo-chart-section'));
-    return;
-  }
-
-  const gameTimes = history.map((h) => new Date(h.created_at).getTime());
-  const span = gameTimes[gameTimes.length - 1] - gameTimes[0] || 1;
-  const times = [gameTimes[0] - span * 0.05, ...gameTimes];
-  const values = [history[0].old_rating, ...history.map((h) => h.new_rating)];
-  const trendUp = values[values.length - 1] >= values[0];
-  const lineColor = trendUp ? cssVar('--chip-money') : cssVar('--danger');
-  const gridColor = cssVar('--panel-border');
-  const textColor = cssVar('--muted');
-
-  eloChart = new window.ApexCharts(container, {
-    chart: {
-      type: 'area',
-      // A numeric pixel height, not '100%' -- ApexCharts resolves a
-      // percentage height against the parent at mount time, and that
-      // measurement came out taller than the container's own 200px
-      // (275px, observed), which the container (no overflow:hidden)
-      // doesn't clip -- the extra height visibly spilled out of the
-      // tile and over whatever sat below it. A concrete number matching
-      // the CSS height in lobby.css always lands exactly on-target.
-      height: 200,
-      fontFamily: 'inherit',
-      background: 'transparent',
-      toolbar: { show: false },
-      zoom: { enabled: false },
-      animations: { speed: 400 },
-    },
-    // A legend is pure clutter for a single named series -- it also ate
-    // into the height budget above, part of why the chart rendered
-    // taller than intended.
-    legend: { show: false },
-    series: [{ name: 'Rating', data: times.map((t, i) => [t, values[i]]) }],
-    colors: [lineColor],
-    stroke: { curve: 'smooth', width: 2.5 },
-    // The gradient fill under the line is the single biggest visual
-    // upgrade a real area chart brings over a bare line. Fading all the
-    // way to fully transparent (opacityTo: 0) read as only partially
-    // shaded -- the lower portion of the area looked empty. Without an
-    // explicit gradientToColors, ApexCharts fades the bottom stop to
-    // white rather than to the series' own color, which against this
-    // app's light cream panel background read as no fill at all -- so
-    // this pins both gradient stops to the same lineColor and only
-    // varies the opacity, keeping a visible tinted floor the whole way
-    // down instead of washing out to white.
-    fill: {
-      type: 'gradient',
-      gradient: { shadeIntensity: 1, gradientToColors: [lineColor], opacityFrom: 0.4, opacityTo: 0.12, stops: [0, 100] },
-    },
-    markers: { size: 0, hover: { size: 5 } },
-    dataLabels: { enabled: false },
-    grid: {
-      borderColor: gridColor,
-      strokeDashArray: 0,
-      xaxis: { lines: { show: false } },
-      yaxis: { lines: { show: true } },
-      padding: { left: 8, right: 8 },
-    },
-    xaxis: {
-      type: 'datetime',
-      labels: { style: { colors: textColor, fontSize: '11px' }, datetimeUTC: false },
-      axisBorder: { show: false },
-      axisTicks: { show: false },
-    },
-    yaxis: {
-      labels: { style: { colors: textColor, fontSize: '11px' }, formatter: (v) => Math.round(v) },
-    },
-    tooltip: {
-      theme: 'dark',
-      x: { format: 'MMM d, yyyy' },
-      y: { formatter: (v) => `Rating: ${Math.round(v)}` },
-    },
-  });
-  await eloChart.render();
-}
+// The actual ApexCharts implementation lives in ui/eloChart.js now,
+// shared with a public Player Profile's own identical chart (see
+// lobby/playerProfile.js) -- this screen just owns one controller
+// instance pointed at its own ids.
+const eloChartController = createEloChartController({
+  containerId: 'account-elo-chart',
+  sectionId: 'account-elo-chart-section',
+  rangeToggleId: 'account-elo-chart-range-toggle',
+});
+export function onEloChartRangeClick(e) { eloChartController.onRangeClick(e); }
 
 // Guests never accrue real rating history (record_finished_game only
 // rates google_id-linked players -- same gate account-elo's own Unrated
@@ -348,24 +191,8 @@ async function renderEloChart(history) {
 // even starts) -- checked again here only defensively, in case this is
 // ever called from somewhere that skipped that step.
 async function loadEloChart(profile) {
-  const section = $('account-elo-chart-section');
-  if (!profile || !profile.google_id) { hide(section); return; }
-  try {
-    const result = await fetchJSON(`/api/profile/${encodeURIComponent(profile.username)}/rating_history`);
-    fullEloHistory = result.history || [];
-    if (fullEloHistory.length === 0) { hide(section); return; }
-    // A fresh load (a different profile, or just re-opening this screen)
-    // always starts from "All" -- a 7D/30D selection left over from a
-    // previous visit silently carrying over would show a narrower window
-    // than the toggle itself appears to say, with nothing indicating why.
-    document.querySelectorAll('#account-elo-chart-range-toggle .account-elo-chart-range-btn').forEach((b) => {
-      b.classList.toggle('selected', b.dataset.range === 'all');
-    });
-    show(section);
-    await renderEloChart(fullEloHistory);
-  } catch (e) {
-    hide(section);
-  }
+  if (!profile || !profile.google_id) { hide($('account-elo-chart-section')); return; }
+  await eloChartController.load(`/api/profile/${encodeURIComponent(profile.username)}/rating_history`);
 }
 
 // -------------------------------------------------------- recent activity --

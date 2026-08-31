@@ -568,6 +568,30 @@
           </div>
         </div>
 
+        <!-- Elo history -- same shared ui/eloChart.js controller Account's
+             own chart uses (see playerProfile.js), not a second bespoke
+             implementation. Hidden for anyone with no rated games at all
+             (a guest, or a bot with no known difficulty) -- see
+             loadPlayerProfileEloChart's own guard. Shown for bots too:
+             they're real rated participants now, and their Elo trend is
+             genuine, not a placeholder. -->
+        <div id="player-profile-elo-chart-section" class="card panel account-panel hidden">
+          <h3>
+            <span class="section-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M3.5 18.5l5.5-6 4 3.5 6.5-8"/><path d="M15.5 7.5h4.5V12"/>
+              </svg>
+            </span>
+            Elo progress
+          </h3>
+          <div id="player-profile-elo-chart-range-toggle" class="account-elo-chart-range-toggle">
+            <button type="button" class="account-elo-chart-range-btn" data-range="7">7D</button>
+            <button type="button" class="account-elo-chart-range-btn" data-range="30">30D</button>
+            <button type="button" class="account-elo-chart-range-btn selected" data-range="all">All</button>
+          </div>
+          <div id="player-profile-elo-chart" class="account-elo-chart loading"></div>
+        </div>
+
         <div id="player-profile-history-section" class="card panel account-panel hidden">
           <h3>
             <span class="section-icon" aria-hidden="true">

@@ -32,6 +32,7 @@ import {
 } from './lobby/leaderboard.js';
 import {
   getPlayerProfileReturnTo, onPlayerProfileHistoryPrevClick, onPlayerProfileHistoryNextClick,
+  onPlayerProfileEloChartRangeClick,
 } from './lobby/playerProfile.js';
 import { onPlayClick, onFindMatch, onMatchmakingCancel, onMatchmakingAddBots } from './lobby/matchmaking.js';
 import {
@@ -144,6 +145,7 @@ function wireStaticHandlers() {
   $('btn-home-recent-games-see-more').addEventListener('click', () => navigateFromSidebar(() => showGameHistoryScreen('home')));
   $('btn-account-recent-activity-see-more').addEventListener('click', () => navigateFromSidebar(() => showGameHistoryScreen('account')));
   $('account-elo-chart-range-toggle').addEventListener('click', onEloChartRangeClick);
+  $('player-profile-elo-chart-range-toggle').addEventListener('click', onPlayerProfileEloChartRangeClick);
   $('btn-game-history-prev').addEventListener('click', onGameHistoryPrevClick);
   $('btn-game-history-next').addEventListener('click', onGameHistoryNextClick);
   $('sidebar-leaderboard').addEventListener('click', () => navigateFromSidebar(showLeaderboardScreen));
@@ -151,13 +153,25 @@ function wireStaticHandlers() {
   $('btn-leaderboard-next').addEventListener('click', onLeaderboardNextClick);
   $('leaderboard-body').addEventListener('click', onLeaderboardTableClick);
   $('game-detail-body').addEventListener('click', onGameDetailTableClick);
-  // Reached from a name click (Leaderboard or the game detail modal), not
-  // the sidebar -- Back returns to whichever one was actually used
-  // (getPlayerProfileReturnTo, same "returnTo" idea as Game History's own
-  // multi-entry-point Back button above).
+  // Reached from a name click (Leaderboard, or the game detail modal
+  // opened from Home/My Games/Account/another profile) -- Back has to
+  // return to whichever *specific* screen actually opened it, not just
+  // Leaderboard, which was a real reported bug: opening a game from
+  // Home's own widget and clicking a name in it landed on Leaderboard
+  // instead of back on Home. getPlayerProfileReturnTo() is either the
+  // literal string 'leaderboard' or a real screen id captured at the
+  // moment the game detail modal opened (see ui/modals.js's
+  // openGameDetailModal) -- this is the one place that turns a screen id
+  // back into "how do I actually re-show that screen", since it already
+  // owns every one of those re-show functions.
   $('btn-player-profile-back').addEventListener('click', () => navigateFromSidebar(() => {
-    if (getPlayerProfileReturnTo() === 'leaderboard') showLeaderboardScreen();
-    else { showScreen('screen-host-setup'); showHomeTiles(); startRoomsPolling(); }
+    const returnTo = getPlayerProfileReturnTo();
+    if (returnTo === 'leaderboard') { showLeaderboardScreen(); return; }
+    if (returnTo === 'screen-game-history') { showGameHistoryScreen(getGameHistoryReturnTo()); return; }
+    if (returnTo === 'screen-account') { showAccountScreen(); return; }
+    // 'screen-host-setup' (Home) and anything unrecognized both land on
+    // the tile picker -- Home has no extra state of its own to restore.
+    showScreen('screen-host-setup'); showHomeTiles(); startRoomsPolling();
   }));
   $('btn-player-profile-history-prev').addEventListener('click', onPlayerProfileHistoryPrevClick);
   $('btn-player-profile-history-next').addEventListener('click', onPlayerProfileHistoryNextClick);
