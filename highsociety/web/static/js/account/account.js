@@ -154,56 +154,57 @@ async function loadAccountStats() {
 
 // ------------------------------------------------------------ Elo chart --
 //
-// Relocated here from the Leaderboard screen (see leaderboard.js's own
-// header comment) -- drawn with Chart.js rather than a hand-rolled
-// <polyline>, which had no room to grow into real axes/gridlines/hover
-// detail and reportedly looked rough squeezed into that screen's own
-// 160px-tall sparkline strip. Vendored locally as a plain UMD bundle
-// (highsociety/web/static/js/vendor/chart.umd.min.js) rather than pulled
-// from a CDN or given a build step: it self-registers window.Chart from a
-// classic <script>, loaded lazily (see loadChartJs below) only the first
-// time this screen actually needs it -- every other screen never pays for
-// its ~200KB.
-let chartJsLoadPromise = null;
+// Drawn with ApexCharts (MIT-licensed, one of the most widely used JS
+// charting libraries) -- switched from Chart.js specifically for its
+// area-chart look: a real gradient fill under the line, a built-in
+// datetime x-axis (no separate date-adapter package needed, unlike
+// Chart.js's own "time" scale), and a themeable tooltip/crosshair,
+// closer to what a polished rating-history chart is expected to look
+// like out of the box. Vendored locally as a single UMD bundle
+// (highsociety/web/static/js/vendor/apexcharts.min.js) rather than
+// pulled from a CDN or given a build step -- self-registers
+// window.ApexCharts from a classic <script>, loaded lazily (see
+// loadApexCharts below) only the first time this screen actually needs
+// it, so every other screen never pays for it.
+let apexChartsLoadPromise = null;
 
-function loadChartJs() {
-  if (window.Chart) return Promise.resolve();
-  if (!chartJsLoadPromise) {
-    chartJsLoadPromise = new Promise((resolve, reject) => {
+function loadApexCharts() {
+  if (window.ApexCharts) return Promise.resolve();
+  if (!apexChartsLoadPromise) {
+    apexChartsLoadPromise = new Promise((resolve, reject) => {
       const script = document.createElement('script');
-      script.src = '/static/js/vendor/chart.umd.min.js';
+      script.src = '/static/js/vendor/apexcharts.min.js';
       script.onload = resolve;
-      script.onerror = () => { chartJsLoadPromise = null; reject(new Error('Failed to load chart.js')); };
+      script.onerror = () => { apexChartsLoadPromise = null; reject(new Error('Failed to load apexcharts')); };
       document.head.appendChild(script);
     });
   }
-  return chartJsLoadPromise;
+  return apexChartsLoadPromise;
 }
 
-// A CSS custom property's raw value (e.g. "#1f7a4d") -- Chart.js draws on
-// a plain <canvas>, whose 2D context has no idea what a CSS variable is,
-// so every color handed to it has to already be a resolved literal.
+// A CSS custom property's raw value (e.g. "#1f7a4d") -- ApexCharts draws
+// on inline SVG, which has no idea what a CSS variable is either, so
+// every color handed to it has to already be a resolved literal.
 function cssVar(name) {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 }
 
-let eloChart = null; // the live Chart.js instance, if any -- see renderEloChart
+let eloChart = null; // the live ApexCharts instance, if any -- see renderEloChart
 
 // `history`: [{old_rating, new_rating, created_at}, ...] oldest first (see
 // get_rating_history). Plots every new_rating, prefixed by the very first
 // entry's old_rating so the line actually starts somewhere instead of
 // jumping in mid-air on its first point.
 //
-// A real time-scale x-axis (raw millisecond timestamps on a linear scale,
-// labeled by hand -- see the comment on the `x` scale below for why not
-// Chart.js's own "time" scale) rather than evenly-spaced-by-index -- an
-// index-based layout would spread a burst of several games played in one
-// evening across the *entire* width, identical to if they'd been spread
-// across months, which is what made the old sparkline look like a
-// meaningless zigzag rather than an actual rating history. The prefixed
-// old_rating point sits at a synthetic time just before the first real
-// game (5% of the whole span back) purely so the line has a visible
-// starting slope -- it's never a real game's own timestamp.
+// A real datetime x-axis (each point keeps its actual timestamp) rather
+// than evenly-spaced-by-index -- an index-based layout would spread a
+// burst of several games played in one evening across the *entire*
+// width, identical to if they'd been spread across months, which is what
+// made the old sparkline look like a meaningless zigzag rather than an
+// actual rating history. The prefixed old_rating point sits at a
+// synthetic time just before the first real game (5% of the whole span
+// back) purely so the line has a visible starting slope -- it's never a
+// real game's own timestamp.
 async function renderEloChart(history) {
   const container = $('account-elo-chart');
   if (eloChart) { eloChart.destroy(); eloChart = null; }
@@ -211,11 +212,11 @@ async function renderEloChart(history) {
   if (history.length === 0) { hide(section); return; }
   show(section);
   container.classList.remove('loading');
-  container.innerHTML = '<canvas id="account-elo-chart-canvas"></canvas>';
+  container.innerHTML = '';
   try {
-    await loadChartJs();
+    await loadApexCharts();
   } catch (e) {
-    hide(section); // Chart.js failed to load (offline, ad-blocker, ...) -- skip the section rather than show a broken empty box
+    hide(section); // ApexCharts failed to load (offline, ad-blocker, ...) -- skip the section rather than show a broken empty box
     return;
   }
 
@@ -228,55 +229,53 @@ async function renderEloChart(history) {
   const gridColor = cssVar('--panel-border');
   const textColor = cssVar('--muted');
 
-  const dateLabel = (ms) => new Date(ms).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-
-  const ctx = $('account-elo-chart-canvas').getContext('2d');
-  eloChart = new window.Chart(ctx, {
-    type: 'line',
-    data: {
-      datasets: [{
-        data: times.map((t, i) => ({ x: t, y: values[i] })),
-        borderColor: lineColor,
-        backgroundColor: lineColor,
-        pointRadius: 0,
-        pointHoverRadius: 4,
-        borderWidth: 2,
-        tension: 0.25,
-        fill: false,
-      }],
+  eloChart = new window.ApexCharts(container, {
+    chart: {
+      type: 'area',
+      height: '100%',
+      fontFamily: 'inherit',
+      background: 'transparent',
+      toolbar: { show: false },
+      zoom: { enabled: false },
+      animations: { speed: 400 },
     },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      animation: { duration: 400 },
-      interaction: { intersect: false, mode: 'nearest', axis: 'x' },
-      scales: {
-        // A plain linear scale over raw millisecond timestamps, not
-        // Chart.js's own "time" scale -- that needs a separate date-
-        // adapter package (chartjs-adapter-date-fns or similar) this repo
-        // doesn't vendor. Formatting tick/tooltip labels by hand below
-        // gets the same result without that extra dependency.
-        x: {
-          type: 'linear',
-          grid: { display: false },
-          ticks: { color: textColor, maxRotation: 0, autoSkipPadding: 16, callback: dateLabel },
-        },
-        y: {
-          grid: { color: gridColor },
-          ticks: { color: textColor, precision: 0 },
-        },
-      },
-      plugins: {
-        legend: { display: false },
-        tooltip: {
-          callbacks: {
-            title: (items) => dateLabel(items[0].parsed.x),
-            label: (item) => `Rating: ${Math.round(item.parsed.y)}`,
-          },
-        },
-      },
+    series: [{ name: 'Rating', data: times.map((t, i) => [t, values[i]]) }],
+    colors: [lineColor],
+    stroke: { curve: 'smooth', width: 2.5 },
+    // The gradient fill under the line is the single biggest visual
+    // upgrade a real area chart brings over a bare line -- fading to
+    // fully transparent (opacityTo: 0) so it reads as a soft wash under
+    // the line rather than a solid block competing with the felt/parchment
+    // colors behind it.
+    fill: {
+      type: 'gradient',
+      gradient: { shadeIntensity: 1, opacityFrom: 0.32, opacityTo: 0, stops: [0, 90, 100] },
+    },
+    markers: { size: 0, hover: { size: 5 } },
+    dataLabels: { enabled: false },
+    grid: {
+      borderColor: gridColor,
+      strokeDashArray: 0,
+      xaxis: { lines: { show: false } },
+      yaxis: { lines: { show: true } },
+      padding: { left: 8, right: 8 },
+    },
+    xaxis: {
+      type: 'datetime',
+      labels: { style: { colors: textColor, fontSize: '11px' }, datetimeUTC: false },
+      axisBorder: { show: false },
+      axisTicks: { show: false },
+    },
+    yaxis: {
+      labels: { style: { colors: textColor, fontSize: '11px' }, formatter: (v) => Math.round(v) },
+    },
+    tooltip: {
+      theme: 'dark',
+      x: { format: 'MMM d, yyyy' },
+      y: { formatter: (v) => `Rating: ${Math.round(v)}` },
     },
   });
+  await eloChart.render();
 }
 
 // Guests never accrue real rating history (record_finished_game only
