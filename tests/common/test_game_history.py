@@ -1470,10 +1470,21 @@ def test_get_leaderboard_cache_is_scoped_per_page(database_url):
 
 def test_record_finished_game_invalidates_the_leaderboard_cache(database_url, mock_release_connection):
     """A rated game just changed someone's standing -- don't make every
-    visitor wait out the rest of the leaderboard's TTL to see it."""
+    visitor wait out the rest of the leaderboard's TTL to see it. Every
+    cached page is invalidated (a rank shift can move players across
+    page boundaries too), but the default first page is immediately
+    re-fetched and reinstalled -- see _warm_leaderboard_cache -- so the
+    very next real visitor gets a warm cache hit with fresh data instead
+    of the query this invalidation would otherwise have pushed onto
+    them."""
     game_history._schema_ready = True
     game_history._leaderboard_cache[(20, 0)] = (time.monotonic(), {"rows": ["stale"], "has_more": False})
+    game_history._leaderboard_cache[(20, 20)] = (time.monotonic(), {"rows": ["stale-page-2"], "has_more": False})
     conn, cursor = _fake_connection()
+    # record_finished_game itself never calls fetchall() (only fetchone(),
+    # for its own RETURNING-id upserts) -- this return_value is only ever
+    # actually consumed by _warm_leaderboard_cache's own leaderboard query.
+    cursor.fetchall = MagicMock(return_value=[("alice", 1016, 1, 1)])
     participants = [
         {"is_bot": False, "username": "alice", "name": "Alice", "game_username": "alice",
          "points": 10, "money_left": 5, "is_winner": True, "eliminated": False},
@@ -1489,6 +1500,25 @@ def test_record_finished_game_invalidates_the_leaderboard_cache(database_url, mo
             finished_at=datetime.datetime.now(datetime.timezone.utc),
             participants=participants,
         )
+    # The stale second page is gone, not silently kept around.
+    assert (20, 20) not in game_history._leaderboard_cache
+    # The default first page isn't just cleared -- it's already warm
+    # again with the freshly re-fetched result, not the old stale one.
+    assert (20, 0) in game_history._leaderboard_cache
+    _, warmed = game_history._leaderboard_cache[(20, 0)]
+    assert warmed == {"rows": [{"username": "alice", "elo": 1016, "games_played": 1, "games_won": 1}],
+                       "has_more": False}
+
+
+def test_warm_leaderboard_cache_leaves_it_clear_on_a_fetch_failure(database_url):
+    """A transient DB hiccup right after a game finishes shouldn't install
+    a worse (empty) result over what a normal lazy fetch would have
+    produced on the next real request -- see _fetch_leaderboard_page's
+    own docstring on why None (not an empty page) means "leave it
+    alone"."""
+    game_history._schema_ready = True
+    with patch.object(game_history, "_connect", side_effect=RuntimeError("db unreachable")):
+        game_history._warm_leaderboard_cache()
     assert (20, 0) not in game_history._leaderboard_cache
 
 

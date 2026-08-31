@@ -999,42 +999,22 @@ _leaderboard_cache: dict = {}  # (limit, offset) -> (cached_at_monotonic, result
 _leaderboard_cache_lock = threading.Lock()
 
 
-def get_leaderboard(limit: int = 20, offset: int = 0) -> dict:
-    """
-    Page of players ranked by elo -- {"rows": [{"username", "elo",
-    "games_played", "games_won"}, ...], "has_more": bool}. Restricted to
-    Google-linked accounts (a guest's elo never moves off the 1000
-    default, so including them would just be a meaningless tie-heavy
-    list) and explicitly excluding the 3 reserved bot identities (see the
-    `bots` table): bots are real rated participants now (see record_
-    finished_game's own docstring) so their elo genuinely moves, but it
-    must never be shown to players. {"rows": [], "has_more": False} on
-    any failure or no database.
-
-    The leaderboard is the exact same data for every single visitor --
-    unlike everything else in this module, there's no per-user identity
-    involved at all, which makes it the cleanest possible caching target:
-    each (limit, offset) page is cached in memory for
-    _LEADERBOARD_CACHE_TTL_SECONDS and served with zero database
-    round-trips to every request that lands within that window, however
-    many concurrent visitors that is. 20s of staleness is imperceptible
-    for a leaderboard (nobody needs their rank to update mid-second) and
-    turns "the leaderboard should load instantly, it's the same for
-    everyone" from a database-latency problem into a non-problem.
-    """
-    cache_key = (limit, offset)
-    now = time.monotonic()
-    with _leaderboard_cache_lock:
-        cached = _leaderboard_cache.get(cache_key)
-    if cached is not None and now - cached[0] < _LEADERBOARD_CACHE_TTL_SECONDS:
-        return cached[1]
-
-    empty = {"rows": [], "has_more": False}
+def _fetch_leaderboard_page(limit: int, offset: int) -> Optional[dict]:
+    """The actual query behind one leaderboard page -- {"rows", "has_more"}
+    -- with no caching of its own. None (not the {"rows": [], ...} shape
+    get_leaderboard returns publicly) on any failure/no-database case, so
+    a caller like _warm_leaderboard_cache below can tell "genuinely
+    nothing to show" apart from "couldn't refresh it, leave the existing
+    cached copy alone" -- overwriting a good cached page with an empty
+    one on a transient DB hiccup would be strictly worse than just
+    leaving it stale a little longer. Split out of get_leaderboard so the
+    on-commit eager refresh (see record_finished_game) can populate the
+    cache with the exact same query instead of duplicating it."""
     if not is_configured():
-        return empty
+        return None
     ensure_schema()
     if not _schema_ready:
-        return empty
+        return None
     conn = None
     try:
         conn = _connect()
@@ -1058,17 +1038,74 @@ def get_leaderboard(limit: int = 20, offset: int = 0) -> dict:
                 {"username": u, "elo": e, "games_played": gp, "games_won": gw}
                 for u, e, gp, gw in all_rows[:limit]
             ]
-            result = {"rows": rows, "has_more": has_more}
+            return {"rows": rows, "has_more": has_more}
     except Exception as e:  # noqa: BLE001
-        LoggingManager.warning(f"game_history.get_leaderboard failed: {e}")
-        return empty
+        LoggingManager.warning(f"game_history._fetch_leaderboard_page failed: {e}")
+        return None
     finally:
         if conn is not None:
             _release_connection(conn)
 
+
+def get_leaderboard(limit: int = 20, offset: int = 0) -> dict:
+    """
+    Page of players ranked by elo -- {"rows": [{"username", "elo",
+    "games_played", "games_won"}, ...], "has_more": bool}. Restricted to
+    Google-linked accounts (a guest's elo never moves off the 1000
+    default, so including them would just be a meaningless tie-heavy
+    list) and explicitly excluding the 3 reserved bot identities (see the
+    `bots` table): bots are real rated participants now (see record_
+    finished_game's own docstring) so their elo genuinely moves, but it
+    must never be shown to players. {"rows": [], "has_more": False} on
+    any failure or no database.
+
+    The leaderboard is the exact same data for every single visitor --
+    unlike everything else in this module, there's no per-user identity
+    involved at all, which makes it the cleanest possible caching target:
+    each (limit, offset) page is cached in memory for
+    _LEADERBOARD_CACHE_TTL_SECONDS and served with zero database
+    round-trips to every request that lands within that window. That TTL
+    is just a safety net now, not the real staleness bound, though: the
+    moment a rated game actually finishes, record_finished_game clears
+    (and, for the default first page, immediately repopulates) this same
+    cache -- see _warm_leaderboard_cache's own docstring -- so in
+    practice almost nobody ever waits on either the TTL or a real query.
+    """
+    cache_key = (limit, offset)
+    now = time.monotonic()
+    with _leaderboard_cache_lock:
+        cached = _leaderboard_cache.get(cache_key)
+    if cached is not None and now - cached[0] < _LEADERBOARD_CACHE_TTL_SECONDS:
+        return cached[1]
+
+    result = _fetch_leaderboard_page(limit, offset)
+    if result is None:
+        return {"rows": [], "has_more": False}
+
     with _leaderboard_cache_lock:
         _leaderboard_cache[cache_key] = (now, result)
     return result
+
+
+def _warm_leaderboard_cache() -> None:
+    """Called from record_finished_game's own background write thread the
+    instant a rated game commits, right after that same call already
+    cleared the cache (see there) -- re-runs the query immediately and
+    reinstalls the result, so the clear above doesn't just leave the next
+    real visitor to pay for a fresh fetch themselves. Only ever refills
+    the (20, 0) key -- the frontend's own default first page (see
+    leaderboard.js's PAGE_SIZE) and by far the overwhelming majority of
+    real views, since almost nobody actually pages past a small
+    leaderboard -- rather than trying to guess every (limit, offset) some
+    caller might have had cached; anything else just falls back to a
+    normal lazy fetch-on-next-request like before. Runs on a background
+    thread already, and this table is tiny, so the extra query here is
+    free in every way that matters to an actual player."""
+    result = _fetch_leaderboard_page(20, 0)
+    if result is None:
+        return  # leave the cache clear -- see _fetch_leaderboard_page's own docstring on why not to overwrite with a worse guess
+    with _leaderboard_cache_lock:
+        _leaderboard_cache[(20, 0)] = (time.monotonic(), result)
 
 
 def get_rating_history(username: str) -> list:
@@ -1701,11 +1738,18 @@ def record_finished_game(*, room_code: str, seats: int, bot_mix: list,
     if cache_refreshes:
         # A rated game just changed someone's standing -- don't make
         # everyone wait out the rest of the leaderboard's TTL to see it.
-        # Cheap regardless of how many pages are cached: worst case, the
-        # very next leaderboard view for each page pays one real query
-        # again instead of a cache hit.
+        # Clearing (not just the default page) covers every paginated
+        # offset someone might have cached, since a rank shift can move
+        # players across page boundaries too. _warm_leaderboard_cache
+        # then immediately re-fetches just the default first page, so
+        # the very next real visitor -- the overwhelmingly common case --
+        # gets a warm cache hit instead of paying for the query this
+        # clear would otherwise have pushed onto them. Runs on this same
+        # background write thread (see record_finished_game_async), so
+        # it costs a real player nothing either way.
         with _leaderboard_cache_lock:
             _leaderboard_cache.clear()
+        _warm_leaderboard_cache()
     return elo_changes
 
 
