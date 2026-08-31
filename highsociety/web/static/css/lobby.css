@@ -1347,16 +1347,6 @@ button.secondary.standalone { margin-top: 0.9rem; display: inline-block; }
 .leaderboard-table tbody tr:nth-child(even):not(.leaderboard-row-me) { background: var(--panel-bg-soft); }
 .leaderboard-row-me { background: var(--accent-soft); font-weight: 700; }
 .leaderboard-rank-1 { color: var(--accent-strong); font-weight: 800; font-size: 1.05rem; }
-/* A clickable name inside one of these tables previously only looked
-   different from static text on hover -- from a first glance at the
-   table itself, nothing distinguished it. Colored + a visible (if
-   subtle) underline at rest gives it the same "this is a link" read
-   every other link in the app already has; the existing hover rule in
-   game.css still darkens it further on top of this. */
-.leaderboard-table .name-link {
-  color: var(--accent-strong);
-  text-decoration-color: rgba(143, 106, 34, 0.4);
-}
 .leaderboard-pagination { display: flex; align-items: center; justify-content: center; gap: 1rem; margin-top: 0.9rem; }
 .leaderboard-pagination button { margin: 0; }
 .leaderboard-pagination button:disabled { opacity: 0.4; cursor: default; }
