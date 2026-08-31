@@ -199,21 +199,6 @@
 .account-meta-row.loading .account-meta-item span { animation: stat-skeleton-pulse 1.4s ease-in-out infinite; }
 #account-username-edit { margin-top: 1rem; }
 .account-saved { color: var(--chip-money); font-weight: 600; margin: 0.4rem 0 0; }
-/* Deliberately NOT the same weight as "My Games" above it (a real
-   .secondary bordered button) -- logging out is an exit action, not a
-   normal nav destination, and looking identical to one made it too easy
-   to click by mistake reaching for My Games. Plain text + a faint red
-   hover tint reads as "quieter, and different in kind" rather than just
-   a differently-colored version of the same button. */
-#btn-account-logout {
-  width: 100%;
-  margin-top: 0.6rem;
-  background: none;
-  border: 1px solid transparent;
-  color: var(--danger);
-  box-shadow: none;
-}
-#btn-account-logout:hover { background: var(--danger-soft); box-shadow: none; transform: none; }
 
 .account-stats-row {
   display: flex;
@@ -290,8 +275,8 @@
 }
 
 /* A small icon badge inline with a section heading -- not scoped to any
-   one screen: "Elo progress"/"Recent Activity" on Account and "Recent
-   Games" on Home all opt in via this same .section-icon class, matching
+   one screen: "Elo progress" and "Game History" on Account, and "Game
+   History" on Home, all opt in via this same .section-icon class, matching
    the same "colored circle behind a line icon" language .home-tile-icon/
    .host-icon-badge/.account-stat-icon already use elsewhere, so a heading
    with an icon next to it reads as one deliberate, consistent app-wide

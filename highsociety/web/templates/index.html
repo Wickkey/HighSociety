@@ -377,8 +377,6 @@
           </div>
         </div>
 
-        <button type="button" id="btn-account-my-games" class="secondary standalone">My Games</button>
-        <button type="button" id="btn-account-logout" class="account-logout standalone">Log out</button>
         </div>
 
         <!-- Elo history -- ApexCharts (see account.js's loadEloChart), the
@@ -407,28 +405,46 @@
           <div id="account-elo-chart" class="account-elo-chart loading"></div>
         </div>
 
-        <!-- Recent Activity -- the exact same recent-games-list/
+        <!-- Named "Game History" (not "Recent Activity") to match Home's
+             own widget -- both open the exact same My Games screen via
+             "See more", so they need the exact same name, not two names
+             for one destination. Also the exact same recent-games-list/
              recent-game-row markup (and rendering code, gameHistory.js's
-             renderIfChanged) as the Home screen's own Recent Games widget
-             and the My Games screen, per explicit feedback that this used
-             to look like a different, bespoke component instead of the
-             same one reused everywhere. Also shares that same fetch's
-             in-memory cache (see account.js's loadRecentActivity) -- so
-             this paints instantly with zero added network wait whenever
-             Home was visited this session, which is effectively always
-             (it's the app's own landing screen). The rating_change badge
-             each row can show comes from that same shared response (see
+             renderIfChanged) as Home's widget and the My Games screen
+             itself, per explicit feedback that this used to look like a
+             different, bespoke component instead of the same one reused
+             everywhere. Also shares that same fetch's in-memory cache
+             (see account.js's loadRecentActivity) -- so this paints
+             instantly with zero added network wait whenever Home was
+             visited this session, which is effectively always (it's the
+             app's own landing screen). The rating_change badge each row
+             can show comes from that same shared response (see
              get_recent_games' own docstring) and renders identically
              wherever this component appears, not just here. -->
         <div id="account-recent-activity-section" class="card panel account-panel hidden">
-          <h3>
-            <span class="section-icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                <circle cx="12" cy="12" r="8.3"/><path d="M12 7.5V12l3 2"/>
-              </svg>
-            </span>
-            Recent Activity
-          </h3>
+          <div class="home-recent-games-header">
+            <h3>
+              <span class="section-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                  <circle cx="12" cy="12" r="8.3"/><path d="M12 7.5V12l3 2"/>
+                </svg>
+              </span>
+              Game History
+            </h3>
+            <div class="home-recent-games-header-right">
+              <!-- Opens the exact same full history screen "My Games"
+                   already is (showGameHistoryScreen, unchanged) -- this
+                   widget's own rows are just the most recent slice of
+                   that same list, not a different data source. No Elo
+                   badge here unlike Home's copy of this header -- the
+                   profile tile right above this one already shows Elo
+                   prominently, so repeating it here would be redundant. -->
+              <button type="button" id="btn-account-recent-activity-see-more" class="home-recent-games-see-more">
+                See more
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18l6-6-6-6"/></svg>
+              </button>
+            </div>
+          </div>
           <div id="account-recent-activity-list" class="recent-games-list"></div>
         </div>
       </div>

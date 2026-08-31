@@ -116,11 +116,15 @@ function wireStaticHandlers() {
   $('btn-leaderboard-back').addEventListener('click', () => navigateFromSidebar(() => {
     showScreen('screen-host-setup'); showHomeTiles(); startRoomsPolling();
   }));
-  $('btn-account-my-games').addEventListener('click', () => navigateFromSidebar(showGameHistoryScreen));
+  // No standalone "My Games" button on the Account screen any more --
+  // its own "Game History" tile's "See more" link below opens the exact
+  // same screen, so the button was a second way to do the same thing.
   // Opens the exact same full history screen "My Games" already is --
   // see index.html's own comment on why this widget is titled "Game
-  // History" now, not "Recent Games".
+  // History" now, not "Recent Games". Account's own copy of this same
+  // widget (titled identically, for the same reason) gets the same link.
   $('btn-home-recent-games-see-more').addEventListener('click', () => navigateFromSidebar(showGameHistoryScreen));
+  $('btn-account-recent-activity-see-more').addEventListener('click', () => navigateFromSidebar(showGameHistoryScreen));
   $('account-elo-chart-range-toggle').addEventListener('click', onEloChartRangeClick);
   $('btn-game-history-prev').addEventListener('click', onGameHistoryPrevClick);
   $('btn-game-history-next').addEventListener('click', onGameHistoryNextClick);
@@ -131,7 +135,10 @@ function wireStaticHandlers() {
   $('btn-account-save').addEventListener('click', onAccountSaveClick);
   $('btn-account-edit-username').addEventListener('click', onAccountEditUsernameClick);
   $('btn-account-cancel-edit').addEventListener('click', onAccountCancelEditClick);
-  $('btn-account-logout').addEventListener('click', onLogout);
+  // No standalone "Log out" button on the Account screen any more --
+  // it read as an odd, heavier-weight duplicate of this same action
+  // right below it; the profile chip's own popover menu (wired below)
+  // is the one remaining, already-functional way to log out.
   $('btn-find-match').addEventListener('click', onFindMatch);
   $('btn-matchmaking-cancel').addEventListener('click', onMatchmakingCancel);
   $('btn-matchmaking-back').addEventListener('click', onMatchmakingCancel);
