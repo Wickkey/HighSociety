@@ -994,7 +994,20 @@ def get_game_detail(game_id: int) -> Optional[dict]:
             _release_connection(conn)
 
 
-_LEADERBOARD_CACHE_TTL_SECONDS = 20
+# 20s made sense back when this TTL was the *only* staleness bound --
+# now that record_finished_game eagerly invalidates (and re-warms) this
+# same cache the instant a rated game actually commits (see
+# _warm_leaderboard_cache below), this TTL is just a safety net for
+# whatever that path doesn't cover (a transient DB hiccup during the
+# eager refresh, or -- if this app ever runs more than the single
+# gunicorn worker it does today -- another process's own cache having no
+# other way to hear about the write). None of that calls for anything
+# close to real-time, so this is set conservatively long rather than
+# tuned to feel instant: an out-of-band leaderboard change (a direct DB
+# edit, say) surfaces within 10 minutes worst-case, which is already far
+# tighter than anyone is realistically checking a leaderboard for
+# unexplained staleness.
+_LEADERBOARD_CACHE_TTL_SECONDS = 600
 _leaderboard_cache: dict = {}  # (limit, offset) -> (cached_at_monotonic, result)
 _leaderboard_cache_lock = threading.Lock()
 
