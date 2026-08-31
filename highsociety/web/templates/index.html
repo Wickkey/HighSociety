@@ -220,9 +220,19 @@
 
     <!-- ===================== ACCOUNT ===================== -->
     <section id="screen-account" class="screen hidden">
-      <div class="card panel account-panel">
+      <!-- Three separate tiles (profile+stats, Elo chart, Recent Activity)
+           rather than one long panel holding everything -- per explicit
+           feedback that a single giant tile read as an undifferentiated
+           wall, plus a reference mockup showing this same content
+           segregated into its own cards. Each card keeps managing its own
+           visibility independently (chart/activity hide via their own
+           .hidden class, same as before) -- this only changes how they're
+           grouped/spaced when shown, not when each one appears. -->
+      <div class="account-screen-wrap">
         <button type="button" class="screen-back" id="btn-account-back">← Back</button>
-        <div class="account-header">
+
+        <div class="card panel account-panel">
+          <div class="account-header">
           <span id="account-avatar" class="profile-chip-avatar account-avatar"></span>
           <div>
             <div class="account-name-row">
@@ -299,59 +309,120 @@
         </div>
         <p id="account-saved" class="account-saved hidden">Saved.</p>
 
+        <!-- Each card's own leading icon is purely decorative (the label
+             below the number already says what it is) -- added because a
+             bare number+label read as noticeably less finished next to
+             every other icon-led element on this app (Home tiles, the
+             Host form's field headers, this very screen's own section
+             headings). Distinct, simple, bold-enough-at-12px glyphs per
+             stat rather than one repeated icon everywhere. -->
         <div id="account-stats-row" class="account-stats-row account-stats-grid loading">
           <div class="account-stat">
+            <span class="account-stat-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="4" y="4" width="16" height="16" rx="3"/>
+                <circle cx="8.5" cy="8.5" r="1.2" fill="currentColor" stroke="none"/>
+                <circle cx="12" cy="12" r="1.2" fill="currentColor" stroke="none"/>
+                <circle cx="15.5" cy="15.5" r="1.2" fill="currentColor" stroke="none"/>
+              </svg>
+            </span>
             <span id="account-stat-games" class="account-stat-value">—</span>
             <span class="account-stat-label">Games played</span>
           </div>
           <div class="account-stat">
+            <span class="account-stat-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="currentColor" stroke="none">
+                <path d="M12 3.4l2.5 5.4 5.9.6-4.4 4 1.3 5.8L12 16.2l-5.3 3-1.3.9 1.3-5.8-4.4-4 5.9-.6z"/>
+              </svg>
+            </span>
             <span id="account-stat-wins" class="account-stat-value">—</span>
             <span class="account-stat-label">Wins</span>
           </div>
           <div class="account-stat">
+            <span class="account-stat-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="8.3"/><circle cx="12" cy="12" r="4.3"/><circle cx="12" cy="12" r="1" fill="currentColor" stroke="none"/>
+              </svg>
+            </span>
             <span id="account-stat-winrate" class="account-stat-value">—</span>
             <span class="account-stat-label">Win rate</span>
           </div>
           <div class="account-stat">
+            <span class="account-stat-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="3.5" y="14.5" width="4.5" height="6" rx="1"/><rect x="9.75" y="9.5" width="4.5" height="11" rx="1"/><rect x="16" y="4.5" width="4.5" height="16" rx="1"/>
+              </svg>
+            </span>
             <span id="account-stat-avg-placement" class="account-stat-value">—</span>
             <span class="account-stat-label">Avg. placement</span>
           </div>
           <div class="account-stat">
+            <span class="account-stat-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="currentColor" stroke="none">
+                <path d="M12 3l7 7-7 11-7-11z"/>
+              </svg>
+            </span>
             <span id="account-stat-avg-points" class="account-stat-value">—</span>
             <span class="account-stat-label">Avg. points</span>
           </div>
           <div class="account-stat">
+            <span class="account-stat-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="8.3"/>
+                <path d="M12 7.5v9M9.3 9.4c0-1.1 1-2 2.7-2s2.7.9 2.7 1.9c0 2.6-5.4 1.4-5.4 4 0 1.1 1.2 2 2.7 2s2.7-.8 2.7-1.9"/>
+              </svg>
+            </span>
             <span id="account-stat-avg-money" class="account-stat-value">—</span>
             <span class="account-stat-label">Avg. money left</span>
           </div>
         </div>
 
-        <!-- Elo history -- Chart.js (see account.js's loadEloChart), the
+        <button type="button" id="btn-account-my-games" class="secondary standalone">My Games</button>
+        <button type="button" id="btn-account-logout" class="account-logout standalone">Log out</button>
+        </div>
+
+        <!-- Elo history -- ApexCharts (see account.js's loadEloChart), the
              same real plotting library already vendored for this exact
              purpose (moved here from the Leaderboard screen, where it was
              built then asked to be pulled back out and relocated -- this
              is that relocation). Hidden for a guest (elo never moves) or
              anyone with no rated games yet -- see loadEloChart's own guard. -->
-        <div id="account-elo-chart-section" class="account-section hidden">
-          <h3>Elo progress</h3>
+        <div id="account-elo-chart-section" class="card panel account-panel hidden">
+          <h3>
+            <span class="section-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M3.5 18.5l5.5-6 4 3.5 6.5-8"/><path d="M15.5 7.5h4.5V12"/>
+              </svg>
+            </span>
+            Elo progress
+          </h3>
           <div id="account-elo-chart" class="account-elo-chart loading"></div>
         </div>
 
-        <!-- Recent Activity -- reuses the exact same cached /api/games
-             response (and in-memory cache) the Home screen's own Recent
-             Games widget already fetches -- see account.js's
-             loadRecentActivity -- so this paints instantly with zero
-             added network wait whenever Home was visited this session,
-             which is effectively always (it's the app's own landing
-             screen). rating_change per row comes from that same response
-             (see get_recent_games' own docstring). -->
-        <div id="account-recent-activity-section" class="account-section hidden">
-          <h3>Recent Activity</h3>
-          <div id="account-recent-activity-list" class="account-recent-activity-list"></div>
+        <!-- Recent Activity -- the exact same recent-games-list/
+             recent-game-row markup (and rendering code, gameHistory.js's
+             renderIfChanged) as the Home screen's own Recent Games widget
+             and the My Games screen, per explicit feedback that this used
+             to look like a different, bespoke component instead of the
+             same one reused everywhere. Also shares that same fetch's
+             in-memory cache (see account.js's loadRecentActivity) -- so
+             this paints instantly with zero added network wait whenever
+             Home was visited this session, which is effectively always
+             (it's the app's own landing screen). The rating_change badge
+             each row can show comes from that same shared response (see
+             get_recent_games' own docstring) and renders identically
+             wherever this component appears, not just here. -->
+        <div id="account-recent-activity-section" class="card panel account-panel hidden">
+          <h3>
+            <span class="section-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="8.3"/><path d="M12 7.5V12l3 2"/>
+              </svg>
+            </span>
+            Recent Activity
+          </h3>
+          <div id="account-recent-activity-list" class="recent-games-list"></div>
         </div>
-
-        <button type="button" id="btn-account-my-games" class="secondary standalone">My Games</button>
-        <button type="button" id="btn-account-logout" class="account-logout standalone">Log out</button>
       </div>
     </section>
 
@@ -516,7 +587,27 @@
         <!-- Hidden until loadHomeRecentGames actually has rows -- a guest/
              new player with no games yet just never sees this section. -->
         <div id="home-recent-games" class="card panel home-recent-games hidden">
-          <h3>Recent Games</h3>
+          <div class="home-recent-games-header">
+            <h3>
+              <span class="section-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                  <circle cx="12" cy="12" r="8.3"/><path d="M12 7.5V12l3 2"/>
+                </svg>
+              </span>
+              Recent Games
+            </h3>
+            <!-- Elo shown right on Home, not just buried on Account --
+                 reuses account.js's own login-time stats prefetch (see
+                 getPrefetchedEloBadge) rather than a second network call
+                 for the same data. Hidden for a guest, same Unrated gate
+                 the Account screen's own Elo hero uses. -->
+            <span id="home-recent-games-elo" class="home-recent-games-elo hidden">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M3.5 18.5l5.5-6 4 3.5 6.5-8"/><path d="M15.5 7.5h4.5V12"/>
+              </svg>
+              <span id="home-recent-games-elo-value">—</span>
+            </span>
+          </div>
           <div id="home-recent-games-list" class="recent-games-list"></div>
         </div>
       </div>

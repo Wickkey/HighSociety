@@ -4,8 +4,12 @@ import { $, hide, show, showError, showScreen, setScreenPath } from '../utils/do
 import { escapeHtml, timeAgo } from '../utils/formatting.js';
 import { loadProfile, saveProfile, renderProfileChip } from '../auth/profile.js';
 import { fetchJSON } from '../lobby/lobby.js';
-import { fetchGamesPage } from '../lobby/gameHistory.js';
-import { openGameDetailModal } from '../ui/modals.js';
+// Circular with gameHistory.js (which imports getPrefetchedStats from
+// here) -- safe by this project's own established convention: both sides
+// only ever touch the other's export inside a function body, never at
+// this module's own top-level evaluation. See gameHistory.js's identical
+// note on its own import from here.
+import { fetchGamesPage, renderIfChanged } from '../lobby/gameHistory.js';
 import { showToast } from '../ui/notifications.js';
 
 // Static catalog mirroring highsociety/code/common/achievements.py's
@@ -89,6 +93,18 @@ export function prefetchAccountStats() {
   if (!profile) return;
   _statsPrefetchUsername = profile.username;
   _statsPrefetch = fetchJSON(`/api/profile/${encodeURIComponent(profile.username)}`).catch(() => null);
+}
+
+// Shared read-only access to that same prefetch -- lets gameHistory.js's
+// Home widget show the current Elo rating alongside Recent Games without
+// firing a second request for data already in flight. Falls back to a
+// fresh fetch only if the prefetch doesn't exist yet or was for a
+// different username (a very early call before login's own prefetch
+// fired, or a mid-session identity change) -- correctness over always
+// reusing the cache.
+export function getPrefetchedStats(username) {
+  if (_statsPrefetch && _statsPrefetchUsername === username) return _statsPrefetch;
+  return fetchJSON(`/api/profile/${encodeURIComponent(username)}`).catch(() => null);
 }
 
 // account-stats-row.loading CSS) the instant the screen opens, then
@@ -295,56 +311,17 @@ async function loadEloChart(profile) {
 
 // -------------------------------------------------------- recent activity --
 //
-// Shares fetchGamesPage's own cache with the Home screen's Recent Games
-// widget (gameHistory.js) rather than a separate fetch of its own -- Home
-// is the app's own landing screen, so by the time anyone opens Account
-// this data has almost always already been fetched and cached this
-// session, making this paint instantly with zero added network wait. Only
-// a genuinely first-ever fetch this session (e.g. a deep link straight to
-// /account) pays for a real round trip, same as Home's own widget would
-// have anyway.
-// Won: a plain check-in-circle -- an unambiguous "success" signal on its
-// own, no trophy iconography risky enough to render oddly at 17px. Played
-// (no win/loss to report -- see get_recent_games' is_winner being null
-// for a game this player wasn't rated in, though a null still renders via
-// this same "not a win" branch): a single card silhouette, matching this
-// app's own suit/card visual language used elsewhere (sidebar, home tiles).
-function activityIconSvg(isWinner) {
-  if (isWinner) return '<circle cx="12" cy="12" r="8.5"/><path d="M8.2 12.3l2.6 2.6L16 9.3"/>';
-  return '<rect x="6.5" y="3.5" width="11" height="17" rx="2"/><path d="M9.5 8h5M9.5 12h5M9.5 16h3"/>';
-}
-
-function renderActivityRow(game, myUsername) {
-  const others = game.opponents.filter((o) => o.name !== myUsername);
-  const opponentsLabel = others.length === 0 ? 'Solo game' : `vs ${others.map((o) => o.name).join(', ')}`;
-  const title = game.is_winner ? 'Won a game' : 'Played a game';
-  let deltaHtml = '';
-  if (game.rating_change != null) {
-    const sign = game.rating_change > 0 ? '+' : '';
-    const cls = game.rating_change > 0 ? 'positive' : game.rating_change < 0 ? 'negative' : '';
-    deltaHtml = `<span class="account-activity-delta ${cls}">${sign}${game.rating_change} ELO</span>`;
-  }
-  return `
-    <button type="button" class="account-activity-row" data-game-id="${game.game_id}">
-      <span class="account-activity-icon${game.is_winner ? ' won' : ''}">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${activityIconSvg(game.is_winner)}</svg>
-      </span>
-      <span class="account-activity-body">
-        <span class="account-activity-title">${escapeHtml(title)}</span>
-        <span class="account-activity-meta">${escapeHtml(opponentsLabel)} · ${timeAgo(game.finished_at)}</span>
-      </span>
-      ${deltaHtml}
-    </button>
-  `;
-}
-
-function wireActivityRowClicks(container) {
-  container.querySelectorAll('.account-activity-row:not([data-wired])').forEach((row) => {
-    row.dataset.wired = 'true';
-    row.addEventListener('click', () => openGameDetailModal(row.dataset.gameId));
-  });
-}
-
+// Renders through gameHistory.js's own renderIfChanged/gamesListHtml --
+// the exact same row markup Home's Recent Games widget and the My Games
+// screen use -- rather than a bespoke design of its own, per explicit
+// feedback that this used to look like a visually different component.
+// Also shares fetchGamesPage's own cache with that same widget rather
+// than a separate fetch of its own -- Home is the app's own landing
+// screen, so by the time anyone opens Account this data has almost
+// always already been fetched and cached this session, making this paint
+// instantly with zero added network wait. Only a genuinely first-ever
+// fetch this session (e.g. a deep link straight to /account) pays for a
+// real round trip, same as Home's own widget would have anyway.
 async function loadRecentActivity(profile) {
   const section = $('account-recent-activity-section');
   const list = $('account-recent-activity-list');
@@ -352,8 +329,7 @@ async function loadRecentActivity(profile) {
   const paint = (page) => {
     const games = page.games.slice(0, 5);
     if (games.length === 0) { hide(section); return; }
-    list.innerHTML = games.map((g) => renderActivityRow(g, profile.username)).join('');
-    wireActivityRowClicks(list);
+    renderIfChanged(list, games, profile.username);
     show(section);
   };
   const { cached, freshPromise } = fetchGamesPage(profile.username, 0);

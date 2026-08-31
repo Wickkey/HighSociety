@@ -521,16 +521,22 @@ input.needs-attention {
   box-shadow: var(--shadow);
 }
 
-/* Widest of the centered panels -- Account grew a real Elo chart and a
-   Recent Activity feed on top of its original stat grid, which the
-   460px width every plain form uses would leave cramped. Carved out of
-   the shared 460px group above rather than added to the 560px one, since
-   this now needs more room than even Leaderboard/My Games' own tables do. */
-#screen-account .panel {
+/* Widest of the centered-panel screens -- Account grew a real Elo chart
+   and a Recent Activity feed alongside its original profile/stats card,
+   now three separate stacked tiles (see index.html's own comment) rather
+   than one long panel, which the 460px width every plain form uses would
+   leave cramped regardless. The wrapper (not each individual .panel)
+   owns the centering/max-width now, since there are multiple sibling
+   panels to keep aligned as one column instead of just one. */
+.account-screen-wrap {
   max-width: 680px;
   margin: var(--screen-top-gap) auto;
-  box-shadow: var(--shadow);
+  display: flex;
+  flex-direction: column;
+  gap: 1.1rem;
 }
+.account-screen-wrap > .screen-back { align-self: flex-start; }
+.account-screen-wrap .account-panel { box-shadow: var(--shadow); margin-bottom: 0; }
 
 
 h2 { margin-top: 0; font-size: 1.35rem; }

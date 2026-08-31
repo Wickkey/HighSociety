@@ -242,6 +242,24 @@
   border: 1px solid var(--accent-light);
   border-radius: var(--radius-sm);
 }
+/* A small icon per stat -- purely decorative (each card's own label
+   already says what it is), but a bare number+label read as noticeably
+   less finished next to every other icon-led section in this app
+   (Home tiles, the Host form's field headers, the section headings just
+   above). Same "colored circle behind a line icon" language throughout,
+   just sized down to fit inside an already-compact stat card. */
+.account-stat-icon {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.5);
+  color: var(--accent-strong);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 0.1rem;
+}
+.account-stat-icon svg { width: 12px; height: 12px; }
 .account-stat-value { font-size: 1.3rem; font-weight: 700; color: var(--accent-strong); }
 .account-stat-label { font-size: 0.75rem; color: var(--muted); }
 /* Shown immediately on opening the screen, before /api/profile resolves
@@ -254,16 +272,34 @@
   50% { opacity: 0.8; }
 }
 
-.account-section { margin-top: 1.6rem; }
-.account-section h3 { margin-bottom: 0.6rem; }
+/* A small icon badge inline with a section heading -- not scoped to any
+   one screen: "Elo progress"/"Recent Activity" on Account and "Recent
+   Games" on Home all opt in via this same .section-icon class, matching
+   the same "colored circle behind a line icon" language .home-tile-icon/
+   .host-icon-badge/.account-stat-icon already use elsewhere, so a heading
+   with an icon next to it reads as one deliberate, consistent app-wide
+   pattern rather than a per-screen one-off. */
+h3:has(.section-icon) { display: flex; align-items: center; gap: 0.5rem; }
+.section-icon {
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.section-icon svg { width: 15px; height: 15px; }
 
-/* Real axes/gridlines/tooltips via Chart.js (see account.js's
-   loadEloChart) -- moved here from the Leaderboard screen, where this was
-   originally built then pulled back out at the user's own request to
-   relocate it later; this is that relocation. Meaningfully taller than
-   the old 160px sparkline it replaces there -- squeezed under a
-   leaderboard table it read as a cramped afterthought, but as its own
-   dedicated section here it gets room to actually look like a real chart. */
+/* Real axes/gridlines/tooltips via a real charting library (see
+   account.js's loadEloChart) -- moved here from the Leaderboard screen,
+   where this was originally built then pulled back out at the user's own
+   request to relocate it later; this is that relocation. Meaningfully
+   taller than the old 160px sparkline it replaces there -- squeezed under
+   a leaderboard table it read as a cramped afterthought, but as its own
+   dedicated tile here it gets room to actually look like a real chart. */
 .account-elo-chart { width: 100%; height: 260px; }
 /* Same pulsing-placeholder language as the stat cards above, so "still
    loading" reads consistently within this one screen, not just app-wide. */
@@ -272,42 +308,6 @@
   background: var(--panel-bg-soft);
   animation: stat-skeleton-pulse 1.4s ease-in-out infinite;
 }
-
-.account-recent-activity-list { display: flex; flex-direction: column; gap: 0.5rem; }
-.account-activity-row {
-  display: flex;
-  align-items: center;
-  gap: 0.8rem;
-  padding: 0.65rem 0.8rem;
-  background: var(--panel-bg-soft);
-  border: 1px solid var(--panel-border);
-  border-radius: var(--radius-sm);
-  font-size: 0.85rem;
-}
-.account-activity-icon {
-  width: 34px;
-  height: 34px;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  background: var(--accent-soft);
-  color: var(--accent-strong);
-}
-/* A won game's trophy gets its own warmer tint than the plain "played" (no
-   win/loss to report -- see get_recent_games' rating_change/is_winner
-   being null when this player wasn't rated in that game at all) icon,
-   the same green/played-vs-gold/won distinction .recent-game-placement-1
-   already uses elsewhere for a top finish. */
-.account-activity-icon.won { background: var(--accent-soft); color: var(--accent-strong); }
-.account-activity-icon svg { width: 17px; height: 17px; }
-.account-activity-body { display: flex; flex-direction: column; gap: 0.1rem; min-width: 0; flex: 1 1 auto; }
-.account-activity-title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.account-activity-meta { color: var(--muted); font-size: 0.76rem; }
-.account-activity-delta { font-weight: 700; font-size: 0.85rem; flex-shrink: 0; white-space: nowrap; }
-.account-activity-delta.positive { color: var(--chip-money); }
-.account-activity-delta.negative { color: var(--danger); }
 
 /* Locked tiles are fully desaturated (grayscale + faded) so an unlock reads
    as a real color reveal, not just a border/shadow change. Icon badge
@@ -428,7 +428,21 @@
 .home-recent-games { text-align: left; width: 100%; opacity: 0; transform: translateY(8px); }
 .home-recent-games.enter { animation: home-recent-games-in 0.4s ease forwards; }
 @keyframes home-recent-games-in { to { opacity: 1; transform: translateY(0); } }
-.home-recent-games h3 { margin: 0 0 0.8rem; }
+.home-recent-games h3 { margin: 0; }
+.home-recent-games-header { display: flex; align-items: center; justify-content: space-between; gap: 0.6rem; margin-bottom: 0.8rem; }
+.home-recent-games-elo {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--accent-strong);
+  background: var(--accent-soft);
+  padding: 0.25rem 0.6rem;
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+.home-recent-games-elo svg { width: 13px; height: 13px; }
 /* A real sticky footer -- position:fixed rather than a flex/margin-auto
    trick tied to one screen's internal layout, so it can never misalign
    with whatever a specific screen happens to render (see showScreen's
@@ -1223,6 +1237,16 @@ button.secondary.standalone { margin-top: 0.9rem; display: inline-block; }
 .recent-game-placement-1 { color: #3a2c0b; background: linear-gradient(135deg, var(--accent-highlight), var(--accent-light)); }
 .recent-game-placement-2 { color: #2c3230; background: linear-gradient(135deg, #d5dbd8, #aeb8b3); }
 .recent-game-placement-3 { color: #fff; background: linear-gradient(135deg, #cf8f5a, #a1663a); }
+
+/* Optional Elo-change badge -- present whenever a row's own game object
+   carries a non-null rating_change (see gameHistory.js's ratingDeltaHtml),
+   absent otherwise (a guest, an all-bot game, or a game predating the
+   ratings table) rather than a misleading "+0". Renders identically
+   wherever this row template appears -- Home, My Games, and Account's
+   Recent Activity all share this one definition. */
+.recent-game-elo-delta { font-weight: 700; font-size: 0.78rem; flex-shrink: 0; white-space: nowrap; }
+.recent-game-elo-delta.positive { color: var(--chip-money); }
+.recent-game-elo-delta.negative { color: var(--danger); }
 
 .game-detail-box { max-width: 480px; width: 100%; }
 

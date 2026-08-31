@@ -1,15 +1,24 @@
 // Recent-games list rendering -- shared by the home screen's small Recent
-// Games widget and the full My Games screen (see account.js's
-// showAccountScreen, which links here via #btn-account-my-games). Both
-// fetch /api/games/<username> and hand the same rows to gamesListHtml;
-// the actual "click a game -> see full results" view lives in
-// ui/modals.js's openGameDetailModal, which either caller can reuse
-// without knowing anything about the list that led to it.
+// Games widget, the full My Games screen, and Account's Recent Activity
+// section (see account.js's loadRecentActivity). All three fetch
+// /api/games/<username> (or share a cached response via fetchGamesPage)
+// and paint the exact same row markup via gamesListHtml/renderIfChanged --
+// deliberately one shared look, not three screens each free to drift into
+// their own; the actual "click a game -> see full results" view lives in
+// ui/modals.js's openGameDetailModal, which every caller reuses without
+// knowing anything about the list that led to it.
 import { $, hide, show, showScreen, setScreenPath } from '../utils/dom.js';
 import { escapeHtml } from '../utils/formatting.js';
 import { loadProfile } from '../auth/profile.js';
 import { fetchJSON } from './lobby.js';
 import { openGameDetailModal } from '../ui/modals.js';
+// Circular with account.js (which imports fetchGamesPage from here) --
+// safe by this project's own established convention (see lobby.js/
+// gameState.js/websocket.js's identical notes): both sides only ever
+// touch the other's export inside a function body (loadHomeRecentGames
+// below; loadRecentActivity in account.js), never at this module's own
+// top-level evaluation, so load order never matters.
+import { getPrefetchedStats } from '../account/account.js';
 
 // Bot display names already end in "bot" (see ai/bot_names.py's naming
 // convention -- "Ziggy bot", "Milo bot") -- appending "(bot)" again read
@@ -34,6 +43,23 @@ function placementClass(placement) {
   return '';
 }
 
+// null (never a fake 0) for any game this player wasn't rated in -- a
+// guest account, an all-bot practice game, or a game predating the
+// ratings table (see get_recent_games' own docstring) -- rendered as no
+// badge at all on that row, not a misleading "+0".
+function ratingDeltaHtml(game) {
+  if (game.rating_change == null) return '';
+  const sign = game.rating_change > 0 ? '+' : '';
+  const cls = game.rating_change > 0 ? 'positive' : game.rating_change < 0 ? 'negative' : '';
+  return `<span class="recent-game-elo-delta ${cls}">${sign}${game.rating_change} Elo</span>`;
+}
+
+// The one row template every list of a player's games renders through --
+// the Home screen's Recent Games widget, the full My Games screen, and
+// Account's Recent Activity feed all call this same function (directly or
+// via renderIfChanged below) rather than each keeping its own copy, so
+// they can't visually drift apart the way Account's own bespoke version
+// once did.
 function gamesListHtml(games, myUsername) {
   return games.map((g) => `
     <button type="button" class="recent-game-row" data-game-id="${g.game_id}">
@@ -42,6 +68,7 @@ function gamesListHtml(games, myUsername) {
         <span class="recent-game-opponents">${escapeHtml(opponentsLabel(g, myUsername))}</span>
         <span class="recent-game-date">${new Date(g.finished_at).toLocaleDateString('en-US', DATE_FORMAT)}</span>
       </span>
+      ${ratingDeltaHtml(g)}
       <svg class="recent-game-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18l6-6-6-6"/></svg>
     </button>
   `).join('');
@@ -55,14 +82,16 @@ function wireRowClicks(container) {
 }
 
 // Renders `games` into `container` -- but only actually touches the DOM
-// if the resulting HTML differs from what's already there. Both the home
-// widget and My Games call this on every visit (stale-while-revalidate,
-// see fetchGamesPage below), and re-painting identical content every
-// single time was the whole "annoying tiny refresh" report: nothing
-// visibly changed, yet the list still flashed. Skipping a no-op DOM write
-// makes the common case (nothing changed since last look) produce zero
-// visible change, matching what actually happened.
-function renderIfChanged(container, games, myUsername) {
+// if the resulting HTML differs from what's already there. Home, My
+// Games, and Account's Recent Activity all call this on every visit
+// (stale-while-revalidate, see fetchGamesPage below), and re-painting
+// identical content every single time was the whole "annoying tiny
+// refresh" report: nothing visibly changed, yet the list still flashed.
+// Skipping a no-op DOM write makes the common case (nothing changed since
+// last look) produce zero visible change, matching what actually
+// happened. Exported so Account's own Recent Activity section paints
+// through this exact same function -- see this module's own top comment.
+export function renderIfChanged(container, games, myUsername) {
   const html = gamesListHtml(games, myUsername);
   if (container.dataset.renderedHtml === html) return false;
   container.innerHTML = html;
@@ -119,6 +148,26 @@ export async function loadHomeRecentGames() {
   const fresh = await freshPromise;
   if (fresh) paintHomeRecentGames(fresh, profile.username, section);
   else if (!cached) hide(section); // no cache and the fetch failed -- nothing to show
+  loadHomeEloBadge(profile);
+}
+
+// The current Elo rating, shown right on Home next to "Recent Games" --
+// not just buried on the Account screen. Reuses account.js's own
+// login-time stats prefetch (see getPrefetchedStats) rather than firing a
+// second network request for the same data this widget doesn't otherwise
+// need. Hidden for a guest, same gate Account's own Elo hero uses (a
+// guest's elo column never actually moves).
+async function loadHomeEloBadge(profile) {
+  const badge = $('home-recent-games-elo');
+  if (!profile || !profile.google_id) { hide(badge); return; }
+  try {
+    const stats = await getPrefetchedStats(profile.username);
+    if (!stats) { hide(badge); return; }
+    $('home-recent-games-elo-value').textContent = stats.elo;
+    show(badge);
+  } catch (e) {
+    hide(badge);
+  }
 }
 
 function paintHomeRecentGames(page, username, section) {
