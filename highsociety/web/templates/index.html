@@ -809,19 +809,19 @@
         <button id="btn-join-by-code" class="primary" disabled>Join</button>
       </div>
 
-      <div id="home-panel-rules" class="card panel home-panel hidden">
+      <div id="home-panel-rules" class="card panel home-panel home-panel-rules hidden">
         <button type="button" class="home-back">← Back</button>
         <h2>How to play</h2>
+        <!-- The rich, visual version -- real card art, comparison cards
+             for the two auction types, cue-card callouts, and a scripted
+             (fake-data, no backend) auction walkthrough. Deliberately
+             its own separate partial, not a richer variant of
+             _how_to_play_body.html -- that one still renders as-is
+             inside the Join screen's collapsed summary (see below),
+             which stays plain/text on purpose (a quick reminder mid-flow,
+             not where someone goes to actually learn the game). -->
         <div class="how-to-play-body">
-          <!-- htp_jump_links only true for this, the "full page" instance
-               of this shared partial (also included, unlabeled, in the
-               Join screen's own collapsed "how to play" -- see below).
-               Guards both the jump-nav bar and the section ids it targets,
-               since this partial renders twice on the same page and two
-               elements sharing one id would be invalid HTML (and
-               scrollIntoView would only ever find the first one). -->
-          {% set htp_jump_links = true %}
-          {% include "_how_to_play_body.html" %}
+          {% include "_how_to_play_rich.html" %}
         </div>
       </div>
 
@@ -1185,10 +1185,12 @@
         <details class="advanced how-to-play">
           <summary>New to High Society? How to play</summary>
           <div class="how-to-play-body">
-            <!-- Explicitly reset to false -- the flag set above, in
-                 Home's Rules panel, persists for the rest of this
-                 template's render otherwise, which would give this
-                 second copy duplicate ids too. -->
+            <!-- Deliberately the plain partial, not the dedicated Rules
+                 screen's richer _how_to_play_rich.html -- this is a quick
+                 reminder mid-flow, not where someone goes to actually
+                 learn the game, so card art/a scripted demo would just be
+                 clutter here. htp_jump_links off: no jump-nav bar makes
+                 sense inside an already-collapsed <details>. -->
             {% set htp_jump_links = false %}
             {% include "_how_to_play_body.html" %}
           </div>

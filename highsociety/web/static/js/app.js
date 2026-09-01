@@ -35,6 +35,7 @@ import {
   onPlayerProfileEloChartRangeClick,
 } from './lobby/playerProfile.js';
 import { onPlayClick, onFindMatch, onMatchmakingCancel, onMatchmakingAddBots } from './lobby/matchmaking.js';
+import { showRulesDemo, onRulesDemoToggleClick, onRulesDemoPrevClick, onRulesDemoNextClick } from './lobby/rulesDemo.js';
 import {
   onRequestRematchClick, onCancelRematchForm, onSendRematchRequest, onAcceptRematch, onDeclineRematch,
   onStandingsTableClick,
@@ -90,6 +91,13 @@ function wireStaticHandlers() {
     btn.addEventListener('click', onBotStepperClick);
   });
   initHostBotSteppers();
+  // Scripted How to Play demo -- purely static/canned content (see
+  // rulesDemo.js), so it's safe to render once at boot rather than only
+  // when the Rules panel is actually opened.
+  $('rules-demo-toggle').addEventListener('click', onRulesDemoToggleClick);
+  $('btn-rules-demo-prev').addEventListener('click', onRulesDemoPrevClick);
+  $('btn-rules-demo-next').addEventListener('click', onRulesDemoNextClick);
+  showRulesDemo('normal');
   $('btn-join-by-code').addEventListener('click', onJoinByCode);
   $('join-room-code').addEventListener('input', onJoinRoomCodeInput);
   $('join-room-code').addEventListener('keydown', (e) => { if (e.key === 'Enter' && !$('btn-join-by-code').disabled) onJoinByCode(e); });

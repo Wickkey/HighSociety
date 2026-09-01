@@ -648,6 +648,150 @@ h3:has(.section-icon) { display: flex; align-items: center; gap: 0.5rem; }
 .account-screen-wrap > .screen-back { color: rgba(245, 241, 230, 0.78); }
 .account-screen-wrap > .screen-back:hover { color: #f5f1e6; }
 
+/* ---------------- how to play (rich, dedicated-screen version) ---------------- */
+/* See _how_to_play_rich.html -- real card art (reusing the exact
+   .status-card/.green-dot the live game itself renders, not new
+   illustrations), side-by-side auction-type comparison cards, small
+   "remember this" callouts, and a scripted (canned data, no backend)
+   auction walkthrough. Wider than the 460px every plain form-style Home
+   panel uses (#screen-host-setup .panel) -- a 2-column comparison and a
+   5-tile card gallery both read as cramped at that width. */
+#screen-host-setup .home-panel-rules { max-width: 720px; }
+
+.rules-section-heading { margin-top: 1.6rem; }
+
+/* A small highlighted callout restating one specific gotcha -- distinct
+   from a plain <p class="hint"> (which is just quieter body text): a
+   left accent bar + tinted background reads as "pause and remember
+   this" the way a real margin note or cue card would. */
+.rules-cue-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.7rem;
+  background: var(--accent-soft);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius-sm);
+  padding: 0.8rem 1rem;
+  margin: 1rem 0;
+}
+.rules-cue-card p { margin: 0; }
+.rules-cue-card-icon {
+  flex-shrink: 0;
+  width: 26px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--accent-strong);
+}
+.rules-cue-card-icon svg { width: 20px; height: 20px; }
+/* The "4 green cards ends the game" callout gets the actual green-card
+   color instead of the default gold accent -- ties the callout visually
+   to the exact card color it's talking about. */
+.rules-cue-card-icon-green { color: var(--card-green-2); }
+.rules-cue-card-flip { background: rgba(31, 122, 77, 0.1); border-left-color: var(--chip-money); }
+.rules-cue-card-flip .rules-cue-card-icon { color: var(--chip-money); }
+
+.rules-auction-compare {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.9rem;
+  margin: 0.9rem 0;
+}
+@media (max-width: 560px) { .rules-auction-compare { grid-template-columns: 1fr; } }
+.rules-auction-card {
+  background: var(--panel-bg-soft);
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-sm);
+  padding: 1rem;
+}
+.rules-auction-card h4 { margin: 0.6rem 0 0.1rem; font-size: 1rem; }
+.rules-auction-card p { margin: 0.4rem 0 0; font-size: 0.88rem; }
+.rules-auction-card .hint { margin: 0; }
+.rules-auction-icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.rules-auction-icon svg { width: 19px; height: 19px; }
+.rules-auction-icon-normal { background: var(--accent-soft); color: var(--accent-strong); }
+/* The disgrace card gets its own gently-tinted variant of the standard
+   card colors (not the actual --danger red -- a disgrace auction isn't
+   an error state, just a different, opposite-incentive rule) so the two
+   cards read as a genuine pair rather than one being an afterthought. */
+.rules-auction-card-disgrace { background: rgba(163, 48, 42, 0.06); border-color: rgba(163, 48, 42, 0.25); }
+.rules-auction-icon-disgrace { background: var(--danger-soft); color: var(--danger); }
+
+.rules-card-gallery {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 1rem;
+  margin: 0.9rem 0;
+}
+.rules-card-tile { text-align: center; }
+.rules-card-tile p { margin: 0.5rem 0 0; font-size: 0.82rem; color: var(--muted); }
+.rules-card-tile strong { color: var(--text); }
+/* .status-card is already sized/colored by game.css (same face the live
+   game itself renders) -- these two overrides only add what a lone
+   demo/gallery tile specifically needs on top of that. */
+.rules-card-tile .status-card { position: relative; }
+.rules-card-tile .status-card .green-dot { top: 6px; right: 6px; }
+
+/* ---------------- how to play: scripted auction demo ---------------- */
+/* See rulesDemo.js -- entirely canned/fixed data, no backend or real
+   game state involved, just a step-through illustration of how a bid
+   sequence actually plays out for each of the two auction types. */
+.rules-demo-toggle { display: flex; gap: 0.5rem; margin: 0.9rem 0; }
+.rules-demo-box {
+  background: var(--panel-bg-soft);
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-sm);
+  padding: 1.1rem;
+}
+.rules-demo-seats { display: flex; justify-content: space-around; gap: 0.6rem; flex-wrap: wrap; margin-bottom: 1rem; }
+.rules-demo-seat {
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-sm);
+  padding: 0.6rem 0.9rem;
+  text-align: center;
+  min-width: 92px;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+/* The seat currently acting (bidding/passing this step) -- a gold ring,
+   same "this is the highlighted one" language the live game's own
+   active-turn indicator uses. */
+.rules-demo-seat.active { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+/* The seat that ends up holding the card once the auction resolves --
+   green, distinct from "currently acting" gold, since by the final step
+   nobody is "acting" any more. */
+.rules-demo-seat.winner { border-color: var(--chip-money); box-shadow: 0 0 0 2px rgba(31, 122, 77, 0.18); }
+.rules-demo-seat-name { font-weight: 700; font-size: 0.85rem; }
+.rules-demo-seat-money { font-size: 0.85rem; color: var(--chip-money); font-weight: 600; margin-top: 0.15rem; }
+.rules-demo-seat-bid {
+  display: inline-block;
+  margin-top: 0.35rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: #fff;
+  background: var(--accent);
+  border-radius: 999px;
+  padding: 0.1rem 0.5rem;
+}
+.rules-demo-seat-passed { display: inline-block; margin-top: 0.35rem; font-size: 0.75rem; color: var(--muted); font-style: italic; }
+.rules-demo-card-area { display: flex; justify-content: center; margin-bottom: 1rem; }
+.rules-demo-narration {
+  text-align: center;
+  min-height: 2.6em;
+  font-size: 0.92rem;
+  margin: 0 0 1rem;
+}
+.rules-demo-controls { display: flex; align-items: center; justify-content: center; gap: 1rem; }
+.rules-demo-controls button { margin: 0; }
+
 /* ---------------- host form ---------------- */
 
 .host-header {
