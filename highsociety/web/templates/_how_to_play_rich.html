@@ -29,6 +29,14 @@
   <p>Spending every last chip can lose you the game outright, no matter how many points you're sitting on.</p>
 </div>
 
+<p>Every player starts with the exact same hand of cash cards — no single lump sum, so a bid is always made up of whichever of these you choose to put forward:</p>
+<div class="rules-money-gallery">
+  {% for value in [1, 2, 3, 4, 6, 8, 10, 12, 15, 20, 25] %}
+  <span class="rules-money-chip">{{ value }}</span>
+  {% endfor %}
+</div>
+<p class="hint">106 in total. Once a card is committed to a bid it's locked in for that auction — you can add more of your remaining cards to raise, but can't swap a committed one back out.</p>
+
 <h3 id="htp2-auctions" class="rules-section-heading">Two kinds of auction</h3>
 
 <div class="rules-auction-compare">
@@ -71,7 +79,7 @@
       <path d="M7 21.9l-4-4 4-4"/><path d="M21 11.9v2a4 4 0 0 1-4 4H3"/>
     </svg>
   </span>
-  <p>In a disgrace auction, passing early is <em>winning</em>. Raising the bid is a trade-off: you risk losing that money for nothing, in exchange for staying out of a card that could become a dealbreaker later on.</p>
+  <p>In a disgrace auction, raising the bid is a trade-off: you risk losing that money, in exchange for staying out of a card that could become a dealbreaker later on.</p>
 </div>
 
 <p class="hint">Money committed to a bid is locked in until the auction resolves — you can raise it later, but can't take it back. Anything you don't win with is returned to you.</p>

@@ -403,8 +403,8 @@ def test_record_finished_game_averages_elo_deltas_for_same_difficulty_bot_seats(
     cursor.fetchone.side_effect = iter([
         (1,),                    # INSERT INTO games ... RETURNING id
         (10, "g-alice", 1000),   # _upsert_player(alice)
-        (55, 1000),               # bots lookup for medium bot A
-        (55, 1000),               # bots lookup for medium bot B -- same shared player_id
+        (55, 900),                # bots lookup for medium bot A -- deliberately not 1000 (see below)
+        (55, 900),                # bots lookup for medium bot B -- same shared player_id
     ])
     participants = [
         {"is_bot": False, "username": "alice", "name": "Alice", "game_username": "alice",
@@ -423,11 +423,22 @@ def test_record_finished_game_averages_elo_deltas_for_same_difficulty_bot_seats(
         )
 
     # Ground truth: what each seat's delta would independently be, exactly
-    # matching the rated_standings this call built internally.
+    # matching the rated_standings this call built internally -- by
+    # placement (medium bot a won outright = 1st, alice 2nd, medium bot b
+    # eliminated so ranks last regardless of its own points), not raw
+    # points (see elo.compute_elo_deltas' own docstring on why those
+    # can disagree). Bots deliberately rated below alice (900 vs 1000),
+    # not the same 1000 for everyone -- at equal ratings, one bot seat
+    # winning and the other losing produces exactly offsetting +/-16
+    # deltas that average to a coincidental *zero* combined change, which
+    # would make this test unable to tell "averaged correctly" apart
+    # from "silently skipped" (record_finished_game only writes a
+    # ratings row/elo update when the combined delta is actually
+    # non-zero).
     expected_seat_deltas = elo.compute_elo_deltas([
-        {"username": "alice", "points": 8, "rating": 1000},
-        {"username": "medium bot a", "points": 40, "rating": 1000},
-        {"username": "medium bot b", "points": 18, "rating": 1000},
+        {"username": "alice", "placement": 2, "rating": 1000},
+        {"username": "medium bot a", "placement": 1, "rating": 900},
+        {"username": "medium bot b", "placement": 3, "rating": 900},
     ])
     expected_bot_delta = round(
         (expected_seat_deltas["medium bot a"] + expected_seat_deltas["medium bot b"]) / 2

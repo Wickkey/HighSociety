@@ -1656,7 +1656,16 @@ def record_finished_game(*, room_code: str, seats: int, bot_mix: list,
                 is_rated = player_id is not None and (google_id is not None or p["is_bot"])
                 if is_rated:
                     rating_key = p.get("game_username") or p["username"]
-                    rated_standings.append({"username": rating_key, "points": p["points"], "rating": elo_before})
+                    # placement, not raw points -- see elo.compute_elo_deltas'
+                    # own docstring on why: this game's real winner is
+                    # whoever scored highest *among players not eliminated*
+                    # for having the least money, so the points leader can
+                    # genuinely finish last (placement_by_index above
+                    # already accounts for this correctly; points alone
+                    # never did).
+                    rated_standings.append({
+                        "username": rating_key, "placement": placement_by_index[index], "rating": elo_before,
+                    })
                     rated_player_ids[rating_key] = player_id
                     elo_before_by_player_id[player_id] = elo_before
 

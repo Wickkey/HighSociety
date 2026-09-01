@@ -136,12 +136,16 @@ export async function enterRoom(roomCode, event) {
 // home never leaves a stale panel expanded from a previous visit.
 const HOME_TILE_TARGETS = ['join', 'host', 'rules'];
 export function showHomeTile(target) {
-  hide($('home-tiles'));
-  // The global-stats/recent-games sections only make sense alongside the
-  // tile picker itself -- a sub-panel (e.g. the Host form) has no room or
-  // reason to show them too.
-  hide($('home-global-stats'));
-  hide($('home-recent-games'));
+  // Hiding the whole grid wrapper, not just #home-tiles inside it -- a
+  // real reported bug: #home-grid carries its own margin-top (the same
+  // --screen-top-gap every screen's top-level panel uses), and it never
+  // actually left the layout when only its *children* were hidden --
+  // an empty grid box, but still taking its own margin-top's worth of
+  // space above whichever sub-panel (Join/Host/Rules) rendered right
+  // after it. That pushed Join/Host/How to Play a full --screen-top-gap
+  // lower than Play/Leaderboard/Account, which never had this extra
+  // empty wrapper sitting above them.
+  hide($('home-grid'));
   HOME_TILE_TARGETS.forEach((t) => $(`home-panel-${t}`).classList.toggle('hidden', t !== target));
   setScreenPath(`/${target}`); // 'join'/'host'/'rules' -- matches web_server.py's static routes exactly
   // One less click for the single most common thing to do on this panel --
@@ -152,7 +156,7 @@ export function showHomeTile(target) {
   if (target === 'join') $('join-room-code').focus();
 }
 export function showHomeTiles() {
-  show($('home-tiles'));
+  show($('home-grid'));
   HOME_TILE_TARGETS.forEach((t) => hide($(`home-panel-${t}`)));
   setScreenPath('/');
   loadHomeGlobalStats();

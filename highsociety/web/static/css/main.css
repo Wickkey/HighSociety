@@ -485,7 +485,7 @@ input.needs-attention {
   /* A continuously-spinning ring is more insistent motion than the
      screen-settle fade above -- left as a static ring (still reads as
      "loading"), not hidden outright. */
-  .account-elo-chart.loading::after { animation: none; }
+  .tile-loading-spinner::after { animation: none; }
 }
 
 .panel {

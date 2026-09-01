@@ -13,10 +13,12 @@ import { createEloChartController } from '../ui/eloChart.js';
 
 // Same shared chart Account's own screen uses (see ui/eloChart.js), a
 // separate controller instance so this screen's chart state (fetched
-// history, live chart object) is never confused with Account's own.
+// history, live chart object) is never confused with Account's own. No
+// sectionId -- the chart's own tile is a permanent part of the layout
+// (see index.html's .account-stats-chart-row comment), never hidden as
+// a whole.
 const eloChartController = createEloChartController({
   containerId: 'player-profile-elo-chart',
-  sectionId: 'player-profile-elo-chart-section',
   rangeToggleId: 'player-profile-elo-chart-range-toggle',
 });
 export function onPlayerProfileEloChartRangeClick(e) { eloChartController.onRangeClick(e); }
@@ -56,11 +58,11 @@ export function showPlayerProfileScreen(username, returnTo = 'leaderboard') {
   hide($('player-profile-meta-row'));
   hide($('player-profile-elo-hero'));
   $('player-profile-stats-row').classList.add('loading');
-  hide($('player-profile-elo-chart-section'));
-  $('player-profile-elo-chart').classList.add('loading');
-  hide($('player-profile-history-section'));
+  $('player-profile-elo-chart').classList.add('tile-loading-spinner');
+  $('player-profile-history-list').classList.add('tile-loading-spinner');
   $('player-profile-history-list').innerHTML = '';
   delete $('player-profile-history-list').dataset.renderedHtml; // a stale renderIfChanged memo from a *different* profile must never suppress this one's first real paint
+  hide($('player-profile-history-empty'));
 
   // All three run independently -- none awaits or blocks another, same as
   // Account's own screen-open already does. The chart's own relevance
@@ -69,7 +71,10 @@ export function showPlayerProfileScreen(username, returnTo = 'leaderboard') {
   // plausible than a login/logout cycle) could otherwise paint a slow
   // first fetch's stale data into a screen that's since moved on.
   loadPlayerProfileStats(username);
-  eloChartController.load(`/api/profile/${encodeURIComponent(username)}/rating_history`, () => username === profileUsername);
+  eloChartController.load(`/api/profile/${encodeURIComponent(username)}/rating_history`, {
+    isStillRelevant: () => username === profileUsername,
+    emptyMessage: 'No rated games yet.',
+  });
   loadPlayerProfileHistoryPage();
 }
 
@@ -126,16 +131,21 @@ async function loadPlayerProfileHistoryPage() {
   if (username !== profileUsername || offset !== profileOffset) return; // Prev/Next (or a whole new profile) already moved on
   if (fresh) paintPlayerProfileHistoryPage(fresh, username, offset);
   else if (!cached) {
-    hide($('player-profile-history-section'));
+    // A genuine fetch failure -- still just a message in the list's own
+    // slot, never hiding the tile around it (see this screen's own
+    // .account-stats-chart-row/tile-loading-spinner comments).
+    const list = $('player-profile-history-list');
+    list.classList.remove('tile-loading-spinner');
+    list.innerHTML = '';
+    show($('player-profile-history-empty'));
   }
 }
 
 function paintPlayerProfileHistoryPage(page, username, offset) {
-  const section = $('player-profile-history-section');
   const list = $('player-profile-history-list');
   const empty = $('player-profile-history-empty');
   const pagination = $('player-profile-history-pagination');
-  show(section);
+  list.classList.remove('tile-loading-spinner');
   if (page.games.length === 0 && offset === 0) {
     list.innerHTML = '';
     show(empty);

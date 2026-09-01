@@ -274,6 +274,37 @@
   50% { opacity: 0.8; }
 }
 
+/* Stats and the Elo chart side by side (see index.html's own comment on
+   the Account/Player Profile tile that holds this) -- reported as both
+   looking oversized once there was a reference layout showing them this
+   way, and as the actual cause of a real layout-shift bug: the chart's
+   own separate tile settling in later than everything around it visibly
+   relocated whatever came after it. Single column below 641px -- a
+   6-stat grid squeezed into half of an already-narrow phone screen
+   reads worse than just stacking normally, so mobile keeps the stats
+   grid's original full-width sizing (its own <480px 2-column rule still
+   applies underneath this). */
+.account-stats-chart-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.2rem;
+  align-items: start;
+  margin-top: 1.2rem;
+}
+@media (max-width: 640px) {
+  .account-stats-chart-row { grid-template-columns: 1fr; gap: 1rem; }
+}
+.account-stats-chart-row .account-stats-row { margin-top: 0; }
+@media (min-width: 641px) {
+  .account-stats-chart-row .account-stats-grid { grid-template-columns: repeat(2, 1fr); gap: 0.5rem; }
+  .account-stats-chart-row .account-stat { padding: 0.5rem 0.4rem; }
+  .account-stats-chart-row .account-stat-value { font-size: 1.05rem; }
+  .account-stats-chart-row .account-stat-label { font-size: 0.68rem; }
+  .account-stats-chart-row .account-stat-icon { width: 18px; height: 18px; }
+  .account-stats-chart-row .account-stat-icon svg { width: 10px; height: 10px; }
+}
+.account-elo-chart-col h3 { margin-bottom: 0.5rem; }
+
 /* A small icon badge inline with a section heading -- not scoped to any
    one screen: "Elo progress" and "Game History" on Account, and "Game
    History" on Home, all opt in via this same .section-icon class, matching
@@ -311,19 +342,29 @@ h3:has(.section-icon) { display: flex; align-items: center; gap: 0.5rem; }
    observed, even with height:200 and the legend/toolbar both disabled),
    which silently grows the tile 15px past the size actually asked for
    ("too large" was the original complaint) unless overridden here. */
-.account-elo-chart { width: 100%; height: 200px; min-height: 200px !important; overflow: hidden; position: relative; }
-/* Same pulsing-placeholder language as the stat cards above (so "still
-   loading" reads consistently within this one screen), plus a real
-   spinning ring centered on top -- this tile's own wait is longer and
-   more variable than a plain stat card's (a network fetch *and* a
-   ~500KB charting library the first time it's ever needed), so a flat
-   pulsing block alone read as inert rather than actively working. */
-.account-elo-chart.loading {
+/* Shrunk from 200px -- reported as too large once it's sharing a row
+   with the (also now smaller) stats grid instead of owning the full
+   tile width on its own. ui/eloChart.js's own numeric chart.height
+   config must stay in sync with this value (see its own comment on why
+   a percentage height isn't reliable here). */
+.account-elo-chart { width: 100%; height: 160px; min-height: 160px !important; overflow: hidden; position: relative; }
+/* Reusable "this content area is loading" treatment -- a pulsing tint
+   (same skeleton language the plain-text stat cards use, via
+   stat-skeleton-pulse) plus a real spinning ring centered on top, for
+   any tile whose wait is longer/more variable than a stat card's simple
+   text swap (a network fetch, sometimes *and* a real external library
+   the first time it's ever needed -- see the Elo chart). Applies
+   wherever a tile is meant to keep its footprint constant and just show
+   this in place while loading, rather than the tile itself being
+   hidden/revealed -- the Elo chart and Game History both use it (see
+   index.html/account.js/playerProfile.js). */
+.tile-loading-spinner {
+  position: relative;
   border-radius: var(--radius-sm);
   background: var(--panel-bg-soft);
   animation: stat-skeleton-pulse 1.4s ease-in-out infinite;
 }
-.account-elo-chart.loading::after {
+.tile-loading-spinner::after {
   content: "";
   position: absolute;
   top: 50%;
@@ -366,6 +407,11 @@ h3:has(.section-icon) { display: flex; align-items: center; gap: 0.5rem; }
 }
 .account-elo-chart-range-btn:hover { border-color: var(--accent-light); }
 .account-elo-chart-range-btn.selected { background: var(--accent); border-color: var(--accent); color: #fff; }
+/* Disabled whenever there's genuinely nothing to filter (see
+   ui/eloChart.js's setRangeToggleEnabled) -- without this, a disabled
+   pill looked identical to a clickable one, misleadingly. */
+.account-elo-chart-range-btn:disabled { opacity: 0.45; cursor: default; }
+.account-elo-chart-range-btn:disabled:hover { border-color: var(--panel-border); }
 
 /* Locked tiles are fully desaturated (grayscale + faded) so an unlock reads
    as a real color reveal, not just a border/shadow change. Icon badge
@@ -755,6 +801,25 @@ h3:has(.section-icon) { display: flex; align-items: center; gap: 0.5rem; }
    demo/gallery tile specifically needs on top of that. */
 .rules-card-tile .status-card { position: relative; }
 .rules-card-tile .status-card .green-dot { top: 6px; right: 6px; }
+
+/* Same green as the live game's own money chips (.chip.money) -- a
+   plain static swatch here rather than reusing that class directly,
+   since .chip bakes in cursor:pointer/hover-lift meant for an actually
+   clickable bid chip, which would be misleading on a page that's just
+   illustrating what the cards look like. */
+.rules-money-gallery { display: flex; flex-wrap: wrap; gap: 0.5rem; margin: 0.7rem 0; }
+.rules-money-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 2.4rem;
+  padding: 0.4rem 0.6rem;
+  border-radius: var(--radius-card);
+  background: var(--chip-money);
+  color: #fff;
+  font-weight: 700;
+  font-size: 0.9rem;
+}
 
 /* ---------------- how to play: scripted auction demo ---------------- */
 /* See rulesDemo.js -- entirely canned/fixed data, no backend or real
@@ -1413,6 +1478,11 @@ button.secondary.standalone { margin-top: 0.9rem; display: inline-block; }
 /* ---------------- recent games / My Games (Part G) ---------------- */
 
 .recent-games-list { display: flex; flex-direction: column; gap: 0.4rem; margin-top: 0.8rem; }
+/* With zero rows in it yet (the loading state, before any row exists to
+   give it real height), .tile-loading-spinner would otherwise collapse
+   to 0 height and its own spinner/pulse would have nothing to paint
+   into. */
+.recent-games-list.tile-loading-spinner { min-height: 88px; }
 /* A row -- rank badge, opponents/date, a chevron -- rather than two
    stacked lines with the placement pill floating at the top: reads more
    like a real list of clickable rows (the chevron is the "this opens

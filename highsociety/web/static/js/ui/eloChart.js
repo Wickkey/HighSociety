@@ -7,7 +7,19 @@
 // instance), and even within one screen, navigating from one profile to
 // another needs a clean slate, not state left over from whoever was
 // viewed before.
-import { $, hide, show } from '../utils/dom.js';
+//
+// Deliberately never hides its own container -- a real reported bug:
+// this chart used to live in its own tile that stayed hidden until its
+// (slower) async fetch resolved, and whenever that took longer than
+// whatever sat around it, the chart would pop in *after* the screen had
+// already settled, visibly relocating everything below it. The caller
+// (account.js/playerProfile.js) now reserves this exact slot up front
+// and keeps it reserved permanently; this controller only ever swaps
+// what's *inside* the slot between a loading spinner (the container's
+// own .loading class, set by the caller before load() is even called),
+// the real chart, or a short explanation of why there's nothing to plot
+// -- never removing the slot itself.
+import { $ } from '../utils/dom.js';
 import { fetchJSON } from '../lobby/lobby.js';
 
 // Real axes/gridlines/tooltips via a real charting library, vendored
@@ -50,23 +62,41 @@ function filterHistoryByRange(history, range) {
   return history.filter((h) => new Date(h.created_at).getTime() >= cutoffMs);
 }
 
-// `containerId`/`sectionId`/`rangeToggleId`: the 3 elements every caller
-// of this chart already has (see index.html's Account and Player Profile
+// `containerId`/`rangeToggleId`: the two elements every caller of this
+// chart already has (see index.html's Account and Player Profile
 // markup, identical structure, different ids) -- a heading with a
-// .section-icon, the range-toggle button row, and the chart's own div.
-export function createEloChartController({ containerId, sectionId, rangeToggleId }) {
+// .section-icon sits above both, owned by the caller's own static HTML,
+// not this controller.
+export function createEloChartController({ containerId, rangeToggleId }) {
   let chart = null; // the live ApexCharts instance, if any
   let fullHistory = []; // the unfiltered fetch, so the 7D/30D/All toggle can re-slice without a new request
+
+  function setRangeToggleEnabled(enabled) {
+    document.querySelectorAll(`#${rangeToggleId} .account-elo-chart-range-btn`).forEach((b) => {
+      b.disabled = !enabled;
+    });
+  }
+
+  // A plain message in place of the chart -- used for "nothing to plot"
+  // (no rated games at all, a guest who hasn't signed in, ApexCharts
+  // itself failing to load) as well as filtered-empty ("no games in
+  // this 7D/30D window"). Never touches the container's own visibility,
+  // only what's inside it.
+  function renderMessage(text) {
+    if (chart) { chart.destroy(); chart = null; }
+    const container = $(containerId);
+    container.classList.remove('tile-loading-spinner');
+    container.innerHTML = `<p class="muted account-elo-chart-empty">${text}</p>`;
+  }
 
   // `history`: [{old_rating, new_rating, created_at}, ...] oldest first
   // (see get_rating_history), already narrowed to whatever range is
   // currently selected (see filterHistoryByRange) -- an empty array here
-  // means "no games in this window", which shows a small inline message
-  // rather than hiding the whole tile (the range toggle above it should
-  // stay reachable so a different window can still be picked). Plots
-  // every new_rating, prefixed by the very first entry's old_rating so
-  // the line actually starts somewhere instead of jumping in mid-air on
-  // its first point.
+  // means "no games in this window" (renderMessage handles it), not
+  // "nothing to plot at all" (load's own guard below handles that case
+  // before this is ever called). Plots every new_rating, prefixed by the
+  // very first entry's old_rating so the line actually starts somewhere
+  // instead of jumping in mid-air on its first point.
   //
   // A real datetime x-axis (each point keeps its actual timestamp)
   // rather than evenly-spaced-by-index -- an index-based layout would
@@ -78,22 +108,17 @@ export function createEloChartController({ containerId, sectionId, rangeToggleId
   // whole span back) purely so the line has a visible starting slope --
   // it's never a real game's own timestamp.
   async function render(history) {
+    if (history.length === 0) { renderMessage('No games in this range.'); return; }
     const container = $(containerId);
     if (chart) { chart.destroy(); chart = null; }
-    container.classList.remove('loading');
-    if (history.length === 0) {
-      container.innerHTML = '<p class="muted account-elo-chart-empty">No games in this range.</p>';
-      return;
-    }
+    container.classList.remove('tile-loading-spinner');
     container.innerHTML = '';
     try {
       await loadApexCharts();
     } catch (e) {
       // ApexCharts genuinely failed to load (offline, ad-blocker, ...) --
-      // unlike the empty-range case above, there's no chart at all to
-      // show regardless of range, so this hides the whole tile, range
-      // toggle included.
-      hide($(sectionId));
+      // still just a message in the same slot, not a hidden tile.
+      renderMessage("Couldn't load the chart.");
       return;
     }
 
@@ -111,13 +136,14 @@ export function createEloChartController({ containerId, sectionId, rangeToggleId
         type: 'area',
         // A numeric pixel height, not '100%' -- ApexCharts resolves a
         // percentage height against the parent at mount time, and that
-        // measurement came out taller than the container's own 200px
-        // (275px, observed), which the container (no overflow:hidden)
-        // doesn't clip -- the extra height visibly spilled out of the
-        // tile and over whatever sat below it. A concrete number
-        // matching the CSS height in lobby.css always lands exactly
-        // on-target.
-        height: 200,
+        // measurement came out taller than the container's own height
+        // (275px against 200px, observed), which the container (no
+        // overflow:hidden) doesn't clip -- the extra height visibly
+        // spilled out of the tile and over whatever sat below it. A
+        // concrete number matching the CSS height in lobby.css always
+        // lands exactly on-target. Keep this in sync with
+        // .account-elo-chart's own height there.
+        height: 160,
         fontFamily: 'inherit',
         background: 'transparent',
         toolbar: { show: false },
@@ -174,32 +200,45 @@ export function createEloChartController({ containerId, sectionId, rangeToggleId
 
   function onRangeClick(e) {
     const btn = e.target.closest('.account-elo-chart-range-btn');
-    if (!btn) return;
+    if (!btn || btn.disabled) return;
     document.querySelectorAll(`#${rangeToggleId} .account-elo-chart-range-btn`).forEach((b) => {
       b.classList.toggle('selected', b === btn);
     });
     render(filterHistoryByRange(fullHistory, btn.dataset.range));
   }
 
+  // Immediately shows `message` in place of the chart, skipping the
+  // fetch entirely -- for a case the caller already knows synchronously
+  // (a guest profile, before ever asking the server). Disables the
+  // range toggle too, since there's nothing to filter.
+  function showUnavailable(message) {
+    fullHistory = [];
+    setRangeToggleEnabled(false);
+    renderMessage(message);
+  }
+
   // Fetches `historyUrl` (the caller's own /api/profile/<username>/rating_history)
-  // and renders it -- hides the whole section if there's genuinely
-  // nothing to plot (no rated games yet) rather than showing an empty
-  // chart. Callers decide for themselves whether it's worth calling at
-  // all (Account gates on profile.google_id; a Player Profile just
-  // always tries, since bots are real rated participants too now).
+  // and renders it -- a plain message in the same slot (never hiding
+  // anything) if there's genuinely no rated history at all.
+  // `emptyMessage` lets each caller phrase that differently (Account:
+  // "you" phrasing; Player Profile: third person).
   //
   // `isStillRelevant`, if given, is checked right before touching the DOM
   // -- a Player Profile can navigate from one player to another before
   // this resolves (unlike Account, there's no login/logout gate slowing
   // that down), and without this a slow first fetch could paint stale
   // data into a screen that's since moved on to someone else entirely.
-  async function load(historyUrl, isStillRelevant = () => true) {
-    const section = $(sectionId);
+  async function load(historyUrl, { isStillRelevant = () => true, emptyMessage = 'No rated games yet.' } = {}) {
     try {
       const result = await fetchJSON(historyUrl);
       if (!isStillRelevant()) return;
       fullHistory = result.history || [];
-      if (fullHistory.length === 0) { hide(section); return; }
+      if (fullHistory.length === 0) {
+        setRangeToggleEnabled(false);
+        renderMessage(emptyMessage);
+        return;
+      }
+      setRangeToggleEnabled(true);
       // A fresh load (a different profile, or just re-opening this
       // screen) always starts from "All" -- a 7D/30D selection left over
       // from a previous visit silently carrying over would show a
@@ -208,12 +247,11 @@ export function createEloChartController({ containerId, sectionId, rangeToggleId
       document.querySelectorAll(`#${rangeToggleId} .account-elo-chart-range-btn`).forEach((b) => {
         b.classList.toggle('selected', b.dataset.range === 'all');
       });
-      show(section);
       await render(fullHistory);
     } catch (e) {
-      if (isStillRelevant()) hide(section);
+      if (isStillRelevant()) { setRangeToggleEnabled(false); renderMessage("Couldn't load Elo history."); }
     }
   }
 
-  return { load, onRangeClick };
+  return { load, onRangeClick, showUnavailable };
 }
