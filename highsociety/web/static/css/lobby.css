@@ -639,14 +639,6 @@ h3:has(.section-icon) { display: flex; align-items: center; gap: 0.5rem; }
   margin: 0;
 }
 .home-back:hover, .screen-back:hover { color: var(--accent-strong); }
-/* Account's own back button sits directly on the dark felt background
-   (outside any panel, see .account-screen-wrap in index.html) unlike
-   every other .screen-back usage, which stays the first element *inside*
-   its own light-colored .panel -- the shared muted/brown color those all
-   use read as nearly invisible against dark felt. Same light tone the
-   sidebar/topbar already use on this same background. */
-.account-screen-wrap > .screen-back { color: rgba(245, 241, 230, 0.78); }
-.account-screen-wrap > .screen-back:hover { color: #f5f1e6; }
 
 /* ---------------- host form ---------------- */
 
