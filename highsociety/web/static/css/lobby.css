@@ -1258,6 +1258,134 @@ button.secondary.standalone { margin-top: 0.9rem; display: inline-block; }
   font-size: 0.9rem;
 }
 
+/* ---------------- lobby seat grid ----------------
+   Replaces the old plain-text "Seats filled: 3/5 (Alice, Bob, Marble bot)"
+   line with a real per-seat grid (see JOIN_GAME_REWORK.MD) -- the same
+   live roster data (playerList.js's poll), just rendered as tiles instead
+   of a sentence, with host-only inline controls to add/remove a seat. */
+.lobby-seats-label {
+  margin: 0 0 0.6rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+.lobby-seats {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
+  gap: 0.6rem;
+  margin-bottom: 1.1rem;
+}
+.lobby-seat {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.7rem 0.4rem 0.6rem;
+  background: var(--panel-bg-soft);
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-sm);
+  text-align: center;
+}
+.lobby-seat-avatar {
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  font-size: 1rem;
+}
+.lobby-seat-avatar.is-human { border-radius: 50%; }
+.lobby-seat-name {
+  font-size: 0.78rem;
+  font-weight: 600;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+.lobby-seat-name span { display: block; font-weight: 500; color: var(--muted); font-size: 0.7rem; }
+
+/* Hover/focus-reveal remove button -- host-only (see canManageSeats in
+   playerList.js); a non-host viewer's grid never gets the .can-manage
+   class at all, so this never even renders for them. */
+.lobby-seat-remove {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  color: var(--muted);
+  font-size: 0.7rem;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  opacity: 0;
+  transform: scale(0.85);
+  transition: opacity 0.12s ease, transform 0.12s ease, background 0.12s ease, color 0.12s ease;
+}
+.lobby-seat:hover .lobby-seat-remove,
+.lobby-seat-remove:focus-visible {
+  opacity: 1;
+  transform: scale(1);
+}
+.lobby-seat-remove:hover { background: var(--danger); border-color: var(--danger); color: #fff; }
+
+.lobby-seat.open {
+  background: transparent;
+  border: 1.5px dashed var(--panel-border);
+}
+.lobby-seat.open .lobby-seat-name { color: var(--muted); font-weight: 500; }
+.lobby-seat-add-btn {
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  font-size: 1.05rem;
+  background: transparent;
+  border: 1.5px dashed var(--panel-border);
+  color: var(--muted);
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+}
+.lobby-seat-add-btn:hover, .lobby-seat.open.picker-open .lobby-seat-add-btn {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent-strong);
+}
+
+/* Add-a-bot popover, anchored under whichever open seat's + was clicked. */
+.lobby-bot-picker {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  width: 132px;
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 12px 28px -8px rgba(0, 0, 0, 0.35);
+  padding: 0.4rem;
+  z-index: 20;
+  text-align: left;
+}
+.lobby-bot-picker[hidden] { display: none; }
+.lobby-bot-option {
+  display: block;
+  width: 100%;
+  background: none;
+  border: none;
+  border-radius: 6px;
+  padding: 0.4rem 0.45rem;
+  font-family: inherit;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+}
+.lobby-bot-option:hover { background: var(--panel-bg-soft); }
+
 .room-code-display {
   display: flex;
   align-items: center;
@@ -1368,6 +1496,22 @@ button.secondary.standalone { margin-top: 0.9rem; display: inline-block; }
   font-size: 0.9rem;
 }
 .room-row button { margin-top: 0; }
+.room-row-main { display: flex; flex-direction: column; gap: 0.35rem; min-width: 0; flex: 1 1 auto; }
+.room-row-code { font-weight: 600; }
+/* A small fill-progress bar reads faster than the bare "(4/5 seats
+   filled)" text it replaces -- see JOIN_GAME_NON_HOST_UI.MD. */
+.room-row-progress { display: flex; align-items: center; gap: 0.5rem; }
+.room-row-bar {
+  flex: 1 1 auto;
+  max-width: 110px;
+  height: 5px;
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: 999px;
+  overflow: hidden;
+}
+.room-row-bar-fill { height: 100%; background: var(--accent); border-radius: 999px; }
+.room-row-progress-text { font-size: 0.78rem; color: var(--muted); white-space: nowrap; }
 
 /* A dashed, quieter treatment than a real .panel -- this is a "nothing to
    see here (yet)" state, not content of its own, so it shouldn't compete

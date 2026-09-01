@@ -31,6 +31,11 @@ PLAYER_MESSAGE_TYPES = {
     "REMATCH_UPDATE",  # a request was just made, or someone just voted on one
     "REMATCH_DECLINED",  # cancels a pending request
     "REMATCH_STARTING",  # unanimous accept — a fresh game is starting now
+    # The host removed this player from a still-open lobby (see
+    # web_server.py's api_remove_seat) -- GLOBAL_EVENT-shaped like the
+    # REMATCH_* trio above, just carrying a human-readable reason in `data`
+    # instead of a rematch payload.
+    "KICKED",
     # A quick emoji (see web_server.py's _relay_player_chat) -- shares
     # CHAT's live, off-thread relay path (WebSocketTransport filters both
     # the same way), but needs its own payload shape (from_user + data,
@@ -110,7 +115,7 @@ def build_player_payload(
             "created_at": created_at,
         }
     elif message_type in ("GLOBAL_EVENT", "AUCTION_RESULT", "AUCTION_UPDATE",
-                          "REMATCH_UPDATE", "REMATCH_DECLINED", "REMATCH_STARTING"):
+                          "REMATCH_UPDATE", "REMATCH_DECLINED", "REMATCH_STARTING", "KICKED"):
         payload = {
             "game_id": game_id,
             "message_type": message_type,
