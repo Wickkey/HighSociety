@@ -527,7 +527,13 @@ input.needs-attention {
    than one long panel, which the 460px width every plain form uses would
    leave cramped regardless. The wrapper (not each individual .panel)
    owns the centering/max-width now, since there are multiple sibling
-   panels to keep aligned as one column instead of just one. */
+   panels to keep aligned as one column instead of just one.
+   The Back button lives inside the *first* tile (same as every other
+   screen's own .panel), not as a wrapper-level sibling above it -- it
+   used to sit outside, which left an extra flex item + gap above the
+   actual visible tile, starting it visibly lower than every other
+   screen's first tile even though this wrapper's own margin-top matched
+   them exactly. A real reported misalignment, not a hypothetical one. */
 .account-screen-wrap {
   max-width: 680px;
   margin: var(--screen-top-gap) auto;
@@ -535,7 +541,6 @@ input.needs-attention {
   flex-direction: column;
   gap: 1.1rem;
 }
-.account-screen-wrap > .screen-back { align-self: flex-start; }
 .account-screen-wrap .account-panel { box-shadow: var(--shadow); margin-bottom: 0; }
 
 
