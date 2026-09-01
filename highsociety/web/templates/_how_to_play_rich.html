@@ -44,10 +44,18 @@
     <p>Players take turns raising the bid. Passing means you're out. The last one standing wins the card <strong>and pays their bid</strong>.</p>
   </div>
   <div class="rules-auction-card rules-auction-card-disgrace">
+    <!-- The exact same rising-bars-and-arrow icon as Normal auction,
+         mirrored (see .rules-auction-icon-disgrace's own CSS) rather than
+         a second hand-drawn glyph -- a custom "reversed" icon here
+         previously rendered small enough to look like an unrelated
+         script character instead of a clear icon. Flipping the one
+         icon that already reads cleanly guarantees this one does too,
+         and "same shape, upside down" is exactly what "opposite result"
+         means here. -->
     <span class="rules-auction-icon rules-auction-icon-disgrace" aria-hidden="true">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M4 4h16"/><path d="M7 4v8"/><path d="M12 4v13"/><path d="M17 4v8"/>
-        <path d="M17 20l3-3-3-3"/>
+        <path d="M4 20h16"/><path d="M7 20V12"/><path d="M12 20V7"/><path d="M17 20v-9"/>
+        <path d="M17 4l3 3-3 3"/>
       </svg>
     </span>
     <h4>Disgrace auction</h4>
@@ -63,7 +71,7 @@
       <path d="M7 21.9l-4-4 4-4"/><path d="M21 11.9v2a4 4 0 0 1-4 4H3"/>
     </svg>
   </span>
-  <p>In a disgrace auction, passing early is <em>winning</em>. Raising the bid is the risky move — it's the one you don't want to win.</p>
+  <p>In a disgrace auction, passing early is <em>winning</em>. Raising the bid risks real money: if anyone else passes before you do, every chip you raised is gone for nothing.</p>
 </div>
 
 <p class="hint">Money committed to a bid is locked in until the auction resolves — you can raise it later, but can't take it back. Anything you don't win with is returned to you.</p>

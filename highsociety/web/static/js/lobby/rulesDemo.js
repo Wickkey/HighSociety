@@ -2,17 +2,20 @@
 // (normal vs. disgrace) on the dedicated How to Play screen -- see
 // _how_to_play_rich.html. Entirely canned/fixed data: no backend call,
 // no real game state, just a fixed sequence of {seats, card, narration}
-// snapshots stepped through with Next/Prev. Simplified money (round
-// numbers, one running total per seat) rather than the real game's
-// discrete cash-denomination system -- the point here is teaching the
-// bid/pass/win *mechanic*, not replicating the exact cash mechanics the
-// rest of this page already explains in words.
+// snapshots stepped through with Next/Prev.
+//
+// Deliberately no running money total per seat -- an earlier version
+// showed one starting at a flat 100, which read as a real game mechanic
+// (a lump-sum counter) when the actual game has no such thing: money is
+// a fixed hand of specific cash-value cards (see HSConfig's
+// starting_cash_values), never a single number that ticks up or down.
+// The bid *amounts* named in the narration below are real and worth
+// keeping; a per-seat running total was the misleading, invented part.
 import { $ } from '../utils/dom.js';
 
 const SEAT_NAMES = ['You', 'Marble bot', 'Ziggy bot'];
-const START_MONEY = 100;
 
-// Each step: `card` ({label, kind}) and `seats` (money/bid/passed/active/
+// Each step: `card` ({label, kind}) and `seats` (bid/passed/active/
 // winner per seat, indices matching SEAT_NAMES) describe the state to
 // render *at* that step; `narration` is what's happening as it's reached.
 const DEMOS = {
@@ -22,39 +25,27 @@ const DEMOS = {
     steps: [
       {
         narration: 'A Painting worth 7 points is up for auction.',
-        seats: [
-          { money: START_MONEY }, { money: START_MONEY }, { money: START_MONEY },
-        ],
+        seats: [{}, {}, {}],
       },
       {
         narration: 'You open the bidding at 3.',
-        seats: [
-          { money: START_MONEY, bid: 3, active: true }, { money: START_MONEY }, { money: START_MONEY },
-        ],
+        seats: [{ bid: 3, active: true }, {}, {}],
       },
       {
         narration: 'Marble bot raises to 5.',
-        seats: [
-          { money: START_MONEY, bid: 3 }, { money: START_MONEY, bid: 5, active: true }, { money: START_MONEY },
-        ],
+        seats: [{ bid: 3 }, { bid: 5, active: true }, {}],
       },
       {
         narration: "You pass -- you're out, and nothing was ever actually taken from you.",
-        seats: [
-          { money: START_MONEY, passed: true }, { money: START_MONEY, bid: 5 }, { money: START_MONEY },
-        ],
+        seats: [{ passed: true }, { bid: 5 }, {}],
       },
       {
         narration: 'Ziggy bot raises to 8. Nobody else raises again.',
-        seats: [
-          { money: START_MONEY, passed: true }, { money: START_MONEY, bid: 5 }, { money: START_MONEY, bid: 8, active: true },
-        ],
+        seats: [{ passed: true }, { bid: 5 }, { bid: 8, active: true }],
       },
       {
-        narration: 'Ziggy bot wins the Painting for 8 -- pays 8, everyone else keeps every chip they never actually spent.',
-        seats: [
-          { money: START_MONEY, passed: true }, { money: START_MONEY }, { money: START_MONEY - 8, winner: true },
-        ],
+        narration: 'Ziggy bot wins the Painting, paying 8 -- everyone else keeps every chip they never actually spent.',
+        seats: [{ passed: true }, {}, { winner: true }],
       },
     ],
   },
@@ -64,33 +55,23 @@ const DEMOS = {
     steps: [
       {
         narration: "Faux Pas is up -- a disgrace auction. Remember: the FIRST to pass gets stuck with it.",
-        seats: [
-          { money: START_MONEY }, { money: START_MONEY }, { money: START_MONEY },
-        ],
+        seats: [{}, {}, {}],
       },
       {
         narration: 'You raise to 2, hoping someone else passes first.',
-        seats: [
-          { money: START_MONEY, bid: 2, active: true }, { money: START_MONEY }, { money: START_MONEY },
-        ],
+        seats: [{ bid: 2, active: true }, {}, {}],
       },
       {
         narration: 'Marble bot raises to 4 -- same idea, trying to outlast you.',
-        seats: [
-          { money: START_MONEY, bid: 2 }, { money: START_MONEY, bid: 4, active: true }, { money: START_MONEY },
-        ],
+        seats: [{ bid: 2 }, { bid: 4, active: true }, {}],
       },
       {
         narration: 'Ziggy bot passes first -- stuck with Faux Pas, but keeps every chip.',
-        seats: [
-          { money: START_MONEY, bid: 2 }, { money: START_MONEY, bid: 4 }, { money: START_MONEY, passed: true, winner: true },
-        ],
+        seats: [{ bid: 2 }, { bid: 4 }, { passed: true, winner: true }],
       },
       {
         narration: 'You and Marble bot get your raised money back -- you never actually spent it. Ziggy bot must now discard a Painting.',
-        seats: [
-          { money: START_MONEY }, { money: START_MONEY }, { money: START_MONEY, winner: true },
-        ],
+        seats: [{}, {}, { winner: true }],
       },
     ],
   },

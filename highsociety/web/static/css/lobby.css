@@ -724,6 +724,10 @@ h3:has(.section-icon) { display: flex; align-items: center; gap: 0.5rem; }
    cards read as a genuine pair rather than one being an afterthought. */
 .rules-auction-card-disgrace { background: rgba(163, 48, 42, 0.06); border-color: rgba(163, 48, 42, 0.25); }
 .rules-auction-icon-disgrace { background: var(--danger-soft); color: var(--danger); }
+/* Same icon markup as Normal auction's own, flipped -- see that icon's
+   own HTML comment for why this is a mirror rather than a second
+   hand-drawn glyph. */
+.rules-auction-icon-disgrace svg { transform: scaleY(-1); }
 
 .rules-card-gallery {
   display: grid;
