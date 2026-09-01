@@ -1,0 +1,132 @@
+<!-- The rich, visual How to Play content -- dedicated-screen only (see
+     index.html's own comment on #home-panel-rules): the Join screen's
+     collapsed summary keeps using the plain _how_to_play_body.html
+     partial instead, since cramming card art and a scripted demo into a
+     tiny <details> mid-flow would be more clutter than help there. -->
+
+<div class="htp-jump-links">
+  <a href="#htp2-goal">Goal</a>
+  <a href="#htp2-auctions">Auctions</a>
+  <a href="#htp2-cards">Cards</a>
+  <a href="#htp2-demo">Try it</a>
+</div>
+
+<p id="htp2-goal">
+  <strong>Goal:</strong> End the game with the most points — but there's a catch.
+  When the game ends, whoever has the <strong>least money left</strong> is eliminated
+  from winning entirely. If two or more players are tied for the least money, none of
+  them are eliminated — everyone stays in contention. Only then, among whoever remains,
+  does the highest score win.
+</p>
+
+<div class="rules-cue-card">
+  <span class="rules-cue-card-icon" aria-hidden="true">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M12 9v4"/><path d="M12 16.5h.01"/>
+      <path d="M10.3 3.9 2.6 17.5a1.8 1.8 0 0 0 1.56 2.7h15.68a1.8 1.8 0 0 0 1.56-2.7L13.7 3.9a1.8 1.8 0 0 0-3.4 0Z"/>
+    </svg>
+  </span>
+  <p>Spending every last chip can lose you the game outright, no matter how many points you're sitting on.</p>
+</div>
+
+<h3 id="htp2-auctions" class="rules-section-heading">Two kinds of auction</h3>
+
+<div class="rules-auction-compare">
+  <div class="rules-auction-card">
+    <span class="rules-auction-icon rules-auction-icon-normal" aria-hidden="true">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M4 20h16"/><path d="M7 20V12"/><path d="M12 20V7"/><path d="M17 20v-9"/>
+        <path d="M17 4l3 3-3 3"/>
+      </svg>
+    </span>
+    <h4>Normal auction</h4>
+    <p class="hint">Paintings, the Prestige Card</p>
+    <p>Players take turns raising the bid. Passing means you're out. The last one standing wins the card <strong>and pays their bid</strong>.</p>
+  </div>
+  <div class="rules-auction-card rules-auction-card-disgrace">
+    <!-- The exact same rising-bars-and-arrow icon as Normal auction,
+         mirrored (see .rules-auction-icon-disgrace's own CSS) rather than
+         a second hand-drawn glyph -- a custom "reversed" icon here
+         previously rendered small enough to look like an unrelated
+         script character instead of a clear icon. Flipping the one
+         icon that already reads cleanly guarantees this one does too,
+         and "same shape, upside down" is exactly what "opposite result"
+         means here. -->
+    <span class="rules-auction-icon rules-auction-icon-disgrace" aria-hidden="true">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M4 20h16"/><path d="M7 20V12"/><path d="M12 20V7"/><path d="M17 20v-9"/>
+        <path d="M17 4l3 3-3 3"/>
+      </svg>
+    </span>
+    <h4>Disgrace auction</h4>
+    <p class="hint">Faux Pas, Passe, Scandale</p>
+    <p>Same bidding, opposite result: the <strong>first player to pass</strong> gets stuck with the card and keeps their money. Everyone else forfeits what they raised.</p>
+  </div>
+</div>
+
+<div class="rules-cue-card rules-cue-card-flip">
+  <span class="rules-cue-card-icon" aria-hidden="true">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M17 2.1l4 4-4 4"/><path d="M3 12.1v-2a4 4 0 0 1 4-4h14"/>
+      <path d="M7 21.9l-4-4 4-4"/><path d="M21 11.9v2a4 4 0 0 1-4 4H3"/>
+    </svg>
+  </span>
+  <p>In a disgrace auction, passing early is <em>winning</em>. Raising the bid is a trade-off: you risk losing that money for nothing, in exchange for staying out of a card that could become a dealbreaker later on.</p>
+</div>
+
+<p class="hint">Money committed to a bid is locked in until the auction resolves — you can raise it later, but can't take it back. Anything you don't win with is returned to you.</p>
+
+<h3 id="htp2-cards" class="rules-section-heading">The cards</h3>
+
+<div class="rules-card-gallery">
+  <div class="rules-card-tile">
+    <div class="status-card big neutral">1–10</div>
+    <p><strong>Painting</strong><br>10 in the deck, one of each value — worth that many points.</p>
+  </div>
+  <div class="rules-card-tile">
+    <div class="status-card big green">×2<span class="green-dot" title="Green card"></span></div>
+    <p><strong>Prestige Card</strong><br>3 in the deck — doubles your entire final score.</p>
+  </div>
+  <div class="rules-card-tile">
+    <div class="status-card big">🚫</div>
+    <p><strong>Faux Pas</strong><br>1 in the deck — discard a Painting you own (or your next one, if you have none yet).</p>
+  </div>
+  <div class="rules-card-tile">
+    <div class="status-card big">−5</div>
+    <p><strong>Passe</strong><br>1 in the deck — costs 5 points off your final total.</p>
+  </div>
+  <div class="rules-card-tile">
+    <div class="status-card big green">÷2<span class="green-dot" title="Green card"></span></div>
+    <p><strong>Scandale</strong><br>1 in the deck — halves your entire final score.</p>
+  </div>
+</div>
+
+<div class="rules-cue-card">
+  <span class="rules-cue-card-icon rules-cue-card-icon-green" aria-hidden="true">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="12" cy="12" r="8.5"/>
+    </svg>
+  </span>
+  <p>Green cards can end the game early: the instant the 4th green card (Prestige or Scandale) is revealed, the game stops right there — even mid-round.</p>
+</div>
+
+<h3 id="htp2-demo" class="rules-section-heading">Try it: a scripted walkthrough</h3>
+<p class="hint">Not a real game — a fixed, step-by-step example so you can see how each auction actually plays out.</p>
+
+<div class="rules-demo-toggle" id="rules-demo-toggle">
+  <button type="button" class="pill-choice-btn selected" data-demo="normal">Normal auction</button>
+  <button type="button" class="pill-choice-btn" data-demo="disgrace">Disgrace auction</button>
+</div>
+
+<div id="rules-demo-box" class="rules-demo-box">
+  <div class="rules-demo-seats" id="rules-demo-seats"></div>
+  <div class="rules-demo-card-area">
+    <div id="rules-demo-card" class="status-card big"></div>
+  </div>
+  <p id="rules-demo-narration" class="rules-demo-narration"></p>
+  <div class="rules-demo-controls">
+    <button type="button" id="btn-rules-demo-prev" class="secondary" disabled>← Prev</button>
+    <span id="rules-demo-step-label" class="muted"></span>
+    <button type="button" id="btn-rules-demo-next" class="primary">Next →</button>
+  </div>
+</div>
