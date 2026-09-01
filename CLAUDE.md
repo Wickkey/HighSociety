@@ -2,6 +2,34 @@
 
 Project-specific instructions for Claude Code when working on this repo.
 
+## Branching: default to the current branch, don't spin up a new one per subtask
+
+The point of branching at all here is to keep `main` (prod) isolated from
+work in progress — not to give every subtask its own branch. Once a
+branch is checked out for a piece of work, keep committing to *that same
+branch* for follow-up subtasks, fixes, and related requests in the same
+area, even across separate messages/sessions. Do **not** create a fresh
+branch off `main` for each new subtask "to be tidy" — that fragments one
+person's related work across many small branches, which (a) causes real
+merge conflicts between them when they touch the same files and (b)
+means the user can't check out one branch and test the latest state of
+everything they asked for — they'd have to hunt across several.
+
+Only branch off `main` fresh when:
+- There is no branch currently checked out for this work (starting the
+  very first task in a new area), or
+- The user explicitly says to start a new branch / work separately from
+  what's currently checked out.
+
+When in doubt about whether new work belongs on the branch you're
+already on vs. a new one, ask rather than defaulting to a new branch —
+the cost of guessing wrong (fragmentation, merge conflicts, an
+un-testable `main`) is higher than the cost of asking.
+
+This does not change anything about *merging*: still use PRs
+(`gh pr create` / `gh pr merge`) and still don't merge to `main` without
+being told.
+
 ## Visual/CSS fixes: check the whole screen, not just the reported element
 
 When asked to fix a visual issue (alignment, spacing, sizing) on one
