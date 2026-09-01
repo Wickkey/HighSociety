@@ -174,25 +174,29 @@ async function loadAccountStats() {
 // The actual ApexCharts implementation lives in ui/eloChart.js now,
 // shared with a public Player Profile's own identical chart (see
 // lobby/playerProfile.js) -- this screen just owns one controller
-// instance pointed at its own ids.
+// instance pointed at its own ids. No sectionId any more -- the chart's
+// own tile is a permanent part of the layout now (see index.html's own
+// comment on .account-stats-chart-row), never hidden as a whole.
 const eloChartController = createEloChartController({
   containerId: 'account-elo-chart',
-  sectionId: 'account-elo-chart-section',
   rangeToggleId: 'account-elo-chart-range-toggle',
 });
 export function onEloChartRangeClick(e) { eloChartController.onRangeClick(e); }
 
 // Guests never accrue real rating history (record_finished_game only
 // rates google_id-linked players -- same gate account-elo's own Unrated
-// label already uses), so there's nothing meaningful to plot -- the
-// section stays hidden rather than showing an empty chart.
-// The section's own visibility for the "no profile / not Google-linked"
-// case is already decided synchronously in showAccountScreen (before this
-// even starts) -- checked again here only defensively, in case this is
-// ever called from somewhere that skipped that step.
+// label already uses), so there's nothing meaningful to plot -- shows a
+// plain explanation in the chart's own slot instead of an empty chart
+// (or, as before this screen reserved its layout permanently, hiding
+// the whole tile).
 async function loadEloChart(profile) {
-  if (!profile || !profile.google_id) { hide($('account-elo-chart-section')); return; }
-  await eloChartController.load(`/api/profile/${encodeURIComponent(profile.username)}/rating_history`);
+  if (!profile || !profile.google_id) {
+    eloChartController.showUnavailable('Sign in with Google to start tracking your Elo rating.');
+    return;
+  }
+  await eloChartController.load(`/api/profile/${encodeURIComponent(profile.username)}/rating_history`, {
+    emptyMessage: 'No rated games yet.',
+  });
 }
 
 // -------------------------------------------------------- recent activity --
@@ -209,20 +213,21 @@ async function loadEloChart(profile) {
 // fetch this session (e.g. a deep link straight to /account) pays for a
 // real round trip, same as Home's own widget would have anyway.
 async function loadRecentActivity(profile) {
-  const section = $('account-recent-activity-section');
   const list = $('account-recent-activity-list');
-  if (!profile) { hide(section); return; }
+  const empty = $('account-recent-activity-empty');
+  if (!profile) { list.classList.remove('tile-loading-spinner'); show(empty); return; }
   const paint = (page) => {
     const games = page.games.slice(0, 5);
-    if (games.length === 0) { hide(section); return; }
+    list.classList.remove('tile-loading-spinner');
+    if (games.length === 0) { list.innerHTML = ''; show(empty); return; }
+    hide(empty);
     renderIfChanged(list, games, profile.username);
-    show(section);
   };
   const { cached, freshPromise } = fetchGamesPage(profile.username, 0);
   if (cached) paint(cached);
   const fresh = await freshPromise;
   if (fresh) paint(fresh);
-  else if (!cached) hide(section);
+  else if (!cached) { list.classList.remove('tile-loading-spinner'); show(empty); }
 }
 
 // Cached per username, in memory for this tab's lifetime -- an unlocked
@@ -299,29 +304,16 @@ export function showAccountScreen() {
   hide($('account-error'));
   hide($('account-saved'));
   $('account-meta-row').classList.add('loading');
-  // The chart tile's own visibility is decided synchronously, right here,
-  // rather than staying hidden until its (slower) async fetch resolves --
-  // a real, reported bug: whenever the chart happened to take longer to
-  // load than Recent Activity below it (a fresh network fetch plus a real
-  // ~500KB charting library, vs. Recent Activity's near-instant cached
-  // paint), the chart tile would pop into existence *after* the screen had
-  // already settled, visibly shoving Recent Activity down without warning.
-  // google_id is already known synchronously (it's on the local profile,
-  // no fetch needed) and is the same condition loadEloChart's own guard
-  // uses, so reserving the space for it up front is safe in the common
-  // case; the rare remaining edge case (a Google account with zero rated
-  // games so far) still collapses it back down once the fetch confirms
-  // that, but that's a far rarer, smaller correction than every single
-  // successful load shifting late. See loadEloChart/renderEloChart's own
-  // comments for the other half of this.
-  $('account-elo-chart').classList.add('loading');
-  $('account-elo-chart-section').classList.toggle('hidden', !(profile && profile.google_id));
-  // Recent Activity has no equivalent slow-external-library concern, so
-  // it keeps the simpler "hidden until its own data says otherwise"
-  // behavior -- reset here for the same account-switch reason as before
+  // Neither the Elo chart nor Game History are ever hidden as a whole any
+  // more (see .account-stats-chart-row's own comment in index.html) --
+  // both tiles are a permanent part of this screen's layout, and this
+  // just resets their own *internal* loading state for a fresh profile
   // (logging out of a Google account with real data, back in as a fresh
-  // guest, shouldn't flash the previous profile's feed for a moment).
-  hide($('account-recent-activity-section'));
+  // guest, shouldn't flash the previous profile's chart/feed for a
+  // moment before the new one's own load overwrites it).
+  $('account-elo-chart').classList.add('tile-loading-spinner');
+  $('account-recent-activity-list').classList.add('tile-loading-spinner');
+  hide($('account-recent-activity-empty'));
   showScreen('screen-account');
   // Includes the username (chess.com-style) purely for a nicer/shareable
   // URL -- this is never a per-user viewer, so a stale or foreign

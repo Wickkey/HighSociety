@@ -172,13 +172,17 @@ async function loadHomeEloBadge(profile) {
 
 function paintHomeRecentGames(page, username, section) {
   const games = page.games.slice(0, 5);
-  // showHomeTile (lobby.js) hides this synchronously the instant a
+  // showHomeTile (lobby.js) hides #home-grid synchronously the instant a
   // sub-panel (Join/Host/Rules) is picked -- but this can resolve after
   // that happened, so it would otherwise un-hide it again on the wrong
   // screen (a real, reported bug: Recent Games appearing above the Host
-  // form). $('home-tiles') being hidden is exactly "no longer on the
-  // tile picker", regardless of which sub-panel is now showing instead.
-  if (games.length === 0 || $('home-tiles').classList.contains('hidden')) { hide(section); return; }
+  // form). $('home-grid') being hidden is exactly "no longer on the
+  // tile picker", regardless of which sub-panel is now showing instead
+  // (checking #home-tiles itself here used to work the same way, back
+  // when showHomeTile hid that element directly -- it now hides the
+  // whole #home-grid wrapper instead, see that function's own comment
+  // on why).
+  if (games.length === 0 || $('home-grid').classList.contains('hidden')) { hide(section); return; }
   const changed = renderIfChanged($('home-recent-games-list'), games, username);
   const alreadyShown = !section.classList.contains('hidden');
   if (changed || !alreadyShown) showEnter(section);

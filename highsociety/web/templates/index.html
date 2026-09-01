@@ -220,14 +220,20 @@
 
     <!-- ===================== ACCOUNT ===================== -->
     <section id="screen-account" class="screen hidden">
-      <!-- Three separate tiles (profile+stats, Elo chart, Recent Activity)
-           rather than one long panel holding everything -- per explicit
-           feedback that a single giant tile read as an undifferentiated
-           wall, plus a reference mockup showing this same content
-           segregated into its own cards. Each card keeps managing its own
-           visibility independently (chart/activity hide via their own
-           .hidden class, same as before) -- this only changes how they're
-           grouped/spaced when shown, not when each one appears. -->
+      <!-- Two tiles: profile/stats/Elo chart together, Game History
+           separate. Used to be three (stats, chart, and Recent Activity
+           each their own tile) -- collapsed the first two into one,
+           stats and the Elo chart now side by side inside it, per
+           explicit feedback: the chart's own tile popping in after the
+           other two (a slower fetch, plus a real charting library the
+           first time it's ever needed) visibly shoved Game History down
+           and relocated it -- looking like the whole screen was loading
+           "one tile at a time" rather than as one settled layout. Both
+           halves of this row now reserve their space immediately and
+           only ever swap their *internal* content between a loading
+           spinner, real data, or an empty-state message -- never the
+           collapse/reveal that caused the relocation. See
+           ui/eloChart.js's own comment on the same principle. -->
       <div class="account-screen-wrap">
         <div class="card panel account-panel">
           <button type="button" class="screen-back" id="btn-account-back">← Back</button>
@@ -308,100 +314,107 @@
         </div>
         <p id="account-saved" class="account-saved hidden">Saved.</p>
 
-        <!-- Each card's own leading icon is purely decorative (the label
-             below the number already says what it is) -- added because a
-             bare number+label read as noticeably less finished next to
-             every other icon-led element on this app (Home tiles, the
-             Host form's field headers, this very screen's own section
-             headings). Distinct, simple, bold-enough-at-12px glyphs per
-             stat rather than one repeated icon everywhere. -->
-        <div id="account-stats-row" class="account-stats-row account-stats-grid loading">
-          <div class="account-stat">
-            <span class="account-stat-icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                <rect x="4" y="4" width="16" height="16" rx="3"/>
-                <circle cx="8.5" cy="8.5" r="1.2" fill="currentColor" stroke="none"/>
-                <circle cx="12" cy="12" r="1.2" fill="currentColor" stroke="none"/>
-                <circle cx="15.5" cy="15.5" r="1.2" fill="currentColor" stroke="none"/>
-              </svg>
-            </span>
-            <span id="account-stat-games" class="account-stat-value">—</span>
-            <span class="account-stat-label">Games played</span>
+        <!-- Stats and the Elo chart side by side (see this tile's own
+             top comment) -- both smaller than their old standalone-tile
+             sizes, since a 3-column stat grid and a full-width chart
+             both read as oversized once they're sharing a row instead of
+             each owning the full tile width. -->
+        <div class="account-stats-chart-row">
+          <!-- Each card's own leading icon is purely decorative (the label
+               below the number already says what it is) -- added because a
+               bare number+label read as noticeably less finished next to
+               every other icon-led element on this app (Home tiles, the
+               Host form's field headers, this very screen's own section
+               headings). Distinct, simple, bold-enough-at-12px glyphs per
+               stat rather than one repeated icon everywhere. -->
+          <div id="account-stats-row" class="account-stats-row account-stats-grid loading">
+            <div class="account-stat">
+              <span class="account-stat-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                  <rect x="4" y="4" width="16" height="16" rx="3"/>
+                  <circle cx="8.5" cy="8.5" r="1.2" fill="currentColor" stroke="none"/>
+                  <circle cx="12" cy="12" r="1.2" fill="currentColor" stroke="none"/>
+                  <circle cx="15.5" cy="15.5" r="1.2" fill="currentColor" stroke="none"/>
+                </svg>
+              </span>
+              <span id="account-stat-games" class="account-stat-value">—</span>
+              <span class="account-stat-label">Games played</span>
+            </div>
+            <div class="account-stat">
+              <span class="account-stat-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="currentColor" stroke="none">
+                  <path d="M12 3.4l2.5 5.4 5.9.6-4.4 4 1.3 5.8L12 16.2l-5.3 3-1.3.9 1.3-5.8-4.4-4 5.9-.6z"/>
+                </svg>
+              </span>
+              <span id="account-stat-wins" class="account-stat-value">—</span>
+              <span class="account-stat-label">Wins</span>
+            </div>
+            <div class="account-stat">
+              <span class="account-stat-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                  <circle cx="12" cy="12" r="8.3"/><circle cx="12" cy="12" r="4.3"/><circle cx="12" cy="12" r="1" fill="currentColor" stroke="none"/>
+                </svg>
+              </span>
+              <span id="account-stat-winrate" class="account-stat-value">—</span>
+              <span class="account-stat-label">Win rate</span>
+            </div>
+            <div class="account-stat">
+              <span class="account-stat-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                  <rect x="3.5" y="14.5" width="4.5" height="6" rx="1"/><rect x="9.75" y="9.5" width="4.5" height="11" rx="1"/><rect x="16" y="4.5" width="4.5" height="16" rx="1"/>
+                </svg>
+              </span>
+              <span id="account-stat-avg-placement" class="account-stat-value">—</span>
+              <span class="account-stat-label">Avg. placement</span>
+            </div>
+            <div class="account-stat">
+              <span class="account-stat-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="currentColor" stroke="none">
+                  <path d="M12 3l7 7-7 11-7-11z"/>
+                </svg>
+              </span>
+              <span id="account-stat-avg-points" class="account-stat-value">—</span>
+              <span class="account-stat-label">Avg. points</span>
+            </div>
+            <div class="account-stat">
+              <span class="account-stat-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                  <circle cx="12" cy="12" r="8.3"/>
+                  <path d="M12 7.5v9M9.3 9.4c0-1.1 1-2 2.7-2s2.7.9 2.7 1.9c0 2.6-5.4 1.4-5.4 4 0 1.1 1.2 2 2.7 2s2.7-.8 2.7-1.9"/>
+                </svg>
+              </span>
+              <span id="account-stat-avg-money" class="account-stat-value">—</span>
+              <span class="account-stat-label">Avg. money left</span>
+            </div>
           </div>
-          <div class="account-stat">
-            <span class="account-stat-icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24" fill="currentColor" stroke="none">
-                <path d="M12 3.4l2.5 5.4 5.9.6-4.4 4 1.3 5.8L12 16.2l-5.3 3-1.3.9 1.3-5.8-4.4-4 5.9-.6z"/>
-              </svg>
-            </span>
-            <span id="account-stat-wins" class="account-stat-value">—</span>
-            <span class="account-stat-label">Wins</span>
-          </div>
-          <div class="account-stat">
-            <span class="account-stat-icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                <circle cx="12" cy="12" r="8.3"/><circle cx="12" cy="12" r="4.3"/><circle cx="12" cy="12" r="1" fill="currentColor" stroke="none"/>
-              </svg>
-            </span>
-            <span id="account-stat-winrate" class="account-stat-value">—</span>
-            <span class="account-stat-label">Win rate</span>
-          </div>
-          <div class="account-stat">
-            <span class="account-stat-icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                <rect x="3.5" y="14.5" width="4.5" height="6" rx="1"/><rect x="9.75" y="9.5" width="4.5" height="11" rx="1"/><rect x="16" y="4.5" width="4.5" height="16" rx="1"/>
-              </svg>
-            </span>
-            <span id="account-stat-avg-placement" class="account-stat-value">—</span>
-            <span class="account-stat-label">Avg. placement</span>
-          </div>
-          <div class="account-stat">
-            <span class="account-stat-icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24" fill="currentColor" stroke="none">
-                <path d="M12 3l7 7-7 11-7-11z"/>
-              </svg>
-            </span>
-            <span id="account-stat-avg-points" class="account-stat-value">—</span>
-            <span class="account-stat-label">Avg. points</span>
-          </div>
-          <div class="account-stat">
-            <span class="account-stat-icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                <circle cx="12" cy="12" r="8.3"/>
-                <path d="M12 7.5v9M9.3 9.4c0-1.1 1-2 2.7-2s2.7.9 2.7 1.9c0 2.6-5.4 1.4-5.4 4 0 1.1 1.2 2 2.7 2s2.7-.8 2.7-1.9"/>
-              </svg>
-            </span>
-            <span id="account-stat-avg-money" class="account-stat-value">—</span>
-            <span class="account-stat-label">Avg. money left</span>
+
+          <!-- Elo history -- ApexCharts (see ui/eloChart.js), the same real
+               plotting library already vendored for this exact purpose.
+               Never hidden as a whole any more (see this tile's own top
+               comment) -- #account-elo-chart always occupies this same
+               slot and only ever swaps its own internal content between a
+               loading spinner, the real chart, or a plain-text reason
+               there's nothing to plot (guest, or zero rated games yet). -->
+          <div class="account-elo-chart-col">
+            <h3>
+              <span class="section-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M3.5 18.5l5.5-6 4 3.5 6.5-8"/><path d="M15.5 7.5h4.5V12"/>
+                </svg>
+              </span>
+              Elo progress
+            </h3>
+            <!-- Purely a client-side filter over history already fetched in
+                 full -- see account.js's onEloChartRangeClick -- switching
+                 ranges never re-fetches. -->
+            <div id="account-elo-chart-range-toggle" class="account-elo-chart-range-toggle">
+              <button type="button" class="account-elo-chart-range-btn" data-range="7">7D</button>
+              <button type="button" class="account-elo-chart-range-btn" data-range="30">30D</button>
+              <button type="button" class="account-elo-chart-range-btn selected" data-range="all">All</button>
+            </div>
+            <div id="account-elo-chart" class="account-elo-chart tile-loading-spinner"></div>
           </div>
         </div>
-
-        </div>
-
-        <!-- Elo history -- ApexCharts (see account.js's loadEloChart), the
-             same real plotting library already vendored for this exact
-             purpose (moved here from the Leaderboard screen, where it was
-             built then asked to be pulled back out and relocated -- this
-             is that relocation). Hidden for a guest (elo never moves) or
-             anyone with no rated games yet -- see loadEloChart's own guard. -->
-        <div id="account-elo-chart-section" class="card panel account-panel hidden">
-          <h3>
-            <span class="section-icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M3.5 18.5l5.5-6 4 3.5 6.5-8"/><path d="M15.5 7.5h4.5V12"/>
-              </svg>
-            </span>
-            Elo progress
-          </h3>
-          <!-- Purely a client-side filter over history already fetched in
-               full -- see account.js's onEloChartRangeClick -- switching
-               ranges never re-fetches. -->
-          <div id="account-elo-chart-range-toggle" class="account-elo-chart-range-toggle">
-            <button type="button" class="account-elo-chart-range-btn" data-range="7">7D</button>
-            <button type="button" class="account-elo-chart-range-btn" data-range="30">30D</button>
-            <button type="button" class="account-elo-chart-range-btn selected" data-range="all">All</button>
-          </div>
-          <div id="account-elo-chart" class="account-elo-chart loading"></div>
         </div>
 
         <!-- Named "Game History" (not "Recent Activity") to match Home's
@@ -420,7 +433,12 @@
              can show comes from that same shared response (see
              get_recent_games' own docstring) and renders identically
              wherever this component appears, not just here. -->
-        <div id="account-recent-activity-section" class="card panel account-panel hidden">
+        <!-- Never hidden as a whole any more (see .account-stats-chart-row's
+             own comment above on the same principle) -- this tile always
+             occupies its slot, showing a loading spinner, real rows, or
+             "no games yet" inside #account-recent-activity-list without
+             ever collapsing/revealing the tile around it. -->
+        <div id="account-recent-activity-section" class="card panel account-panel">
           <div class="home-recent-games-header">
             <h3>
               <span class="section-icon" aria-hidden="true">
@@ -444,7 +462,8 @@
               </button>
             </div>
           </div>
-          <div id="account-recent-activity-list" class="recent-games-list"></div>
+          <div id="account-recent-activity-list" class="recent-games-list tile-loading-spinner"></div>
+          <p id="account-recent-activity-empty" class="muted hidden">No games recorded yet.</p>
         </div>
       </div>
     </section>
@@ -504,93 +523,99 @@
             </span>
           </div>
 
-          <div id="player-profile-stats-row" class="account-stats-row account-stats-grid loading">
-            <div class="account-stat">
-              <span class="account-stat-icon" aria-hidden="true">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                  <rect x="4" y="4" width="16" height="16" rx="3"/>
-                  <circle cx="8.5" cy="8.5" r="1.2" fill="currentColor" stroke="none"/>
-                  <circle cx="12" cy="12" r="1.2" fill="currentColor" stroke="none"/>
-                  <circle cx="15.5" cy="15.5" r="1.2" fill="currentColor" stroke="none"/>
-                </svg>
-              </span>
-              <span id="player-profile-stat-games" class="account-stat-value">—</span>
-              <span class="account-stat-label">Games played</span>
+          <div class="account-stats-chart-row">
+            <div id="player-profile-stats-row" class="account-stats-row account-stats-grid loading">
+              <div class="account-stat">
+                <span class="account-stat-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="4" y="4" width="16" height="16" rx="3"/>
+                    <circle cx="8.5" cy="8.5" r="1.2" fill="currentColor" stroke="none"/>
+                    <circle cx="12" cy="12" r="1.2" fill="currentColor" stroke="none"/>
+                    <circle cx="15.5" cy="15.5" r="1.2" fill="currentColor" stroke="none"/>
+                  </svg>
+                </span>
+                <span id="player-profile-stat-games" class="account-stat-value">—</span>
+                <span class="account-stat-label">Games played</span>
+              </div>
+              <div class="account-stat">
+                <span class="account-stat-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="currentColor" stroke="none">
+                    <path d="M12 3.4l2.5 5.4 5.9.6-4.4 4 1.3 5.8L12 16.2l-5.3 3-1.3.9 1.3-5.8-4.4-4 5.9-.6z"/>
+                  </svg>
+                </span>
+                <span id="player-profile-stat-wins" class="account-stat-value">—</span>
+                <span class="account-stat-label">Wins</span>
+              </div>
+              <div class="account-stat">
+                <span class="account-stat-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="12" cy="12" r="8.3"/><circle cx="12" cy="12" r="4.3"/><circle cx="12" cy="12" r="1" fill="currentColor" stroke="none"/>
+                  </svg>
+                </span>
+                <span id="player-profile-stat-winrate" class="account-stat-value">—</span>
+                <span class="account-stat-label">Win rate</span>
+              </div>
+              <div class="account-stat">
+                <span class="account-stat-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="3.5" y="14.5" width="4.5" height="6" rx="1"/><rect x="9.75" y="9.5" width="4.5" height="11" rx="1"/><rect x="16" y="4.5" width="4.5" height="16" rx="1"/>
+                  </svg>
+                </span>
+                <span id="player-profile-stat-avg-placement" class="account-stat-value">—</span>
+                <span class="account-stat-label">Avg. placement</span>
+              </div>
+              <div class="account-stat">
+                <span class="account-stat-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="currentColor" stroke="none">
+                    <path d="M12 3l7 7-7 11-7-11z"/>
+                  </svg>
+                </span>
+                <span id="player-profile-stat-avg-points" class="account-stat-value">—</span>
+                <span class="account-stat-label">Avg. points</span>
+              </div>
+              <div class="account-stat">
+                <span class="account-stat-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="12" cy="12" r="8.3"/>
+                    <path d="M12 7.5v9M9.3 9.4c0-1.1 1-2 2.7-2s2.7.9 2.7 1.9c0 2.6-5.4 1.4-5.4 4 0 1.1 1.2 2 2.7 2s2.7-.8 2.7-1.9"/>
+                  </svg>
+                </span>
+                <span id="player-profile-stat-avg-money" class="account-stat-value">—</span>
+                <span class="account-stat-label">Avg. money left</span>
+              </div>
             </div>
-            <div class="account-stat">
-              <span class="account-stat-icon" aria-hidden="true">
-                <svg viewBox="0 0 24 24" fill="currentColor" stroke="none">
-                  <path d="M12 3.4l2.5 5.4 5.9.6-4.4 4 1.3 5.8L12 16.2l-5.3 3-1.3.9 1.3-5.8-4.4-4 5.9-.6z"/>
-                </svg>
-              </span>
-              <span id="player-profile-stat-wins" class="account-stat-value">—</span>
-              <span class="account-stat-label">Wins</span>
-            </div>
-            <div class="account-stat">
-              <span class="account-stat-icon" aria-hidden="true">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                  <circle cx="12" cy="12" r="8.3"/><circle cx="12" cy="12" r="4.3"/><circle cx="12" cy="12" r="1" fill="currentColor" stroke="none"/>
-                </svg>
-              </span>
-              <span id="player-profile-stat-winrate" class="account-stat-value">—</span>
-              <span class="account-stat-label">Win rate</span>
-            </div>
-            <div class="account-stat">
-              <span class="account-stat-icon" aria-hidden="true">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                  <rect x="3.5" y="14.5" width="4.5" height="6" rx="1"/><rect x="9.75" y="9.5" width="4.5" height="11" rx="1"/><rect x="16" y="4.5" width="4.5" height="16" rx="1"/>
-                </svg>
-              </span>
-              <span id="player-profile-stat-avg-placement" class="account-stat-value">—</span>
-              <span class="account-stat-label">Avg. placement</span>
-            </div>
-            <div class="account-stat">
-              <span class="account-stat-icon" aria-hidden="true">
-                <svg viewBox="0 0 24 24" fill="currentColor" stroke="none">
-                  <path d="M12 3l7 7-7 11-7-11z"/>
-                </svg>
-              </span>
-              <span id="player-profile-stat-avg-points" class="account-stat-value">—</span>
-              <span class="account-stat-label">Avg. points</span>
-            </div>
-            <div class="account-stat">
-              <span class="account-stat-icon" aria-hidden="true">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                  <circle cx="12" cy="12" r="8.3"/>
-                  <path d="M12 7.5v9M9.3 9.4c0-1.1 1-2 2.7-2s2.7.9 2.7 1.9c0 2.6-5.4 1.4-5.4 4 0 1.1 1.2 2 2.7 2s2.7-.8 2.7-1.9"/>
-                </svg>
-              </span>
-              <span id="player-profile-stat-avg-money" class="account-stat-value">—</span>
-              <span class="account-stat-label">Avg. money left</span>
+
+            <!-- Elo history -- same shared ui/eloChart.js controller
+                 Account's own chart uses. Never hidden as a whole (see
+                 the Account tile's identical comment) -- always occupies
+                 this slot, swapping only its own internal content
+                 between a loading spinner, the real chart, or a plain
+                 reason there's nothing to plot (a bot with no known
+                 difficulty, or zero rated games). Shown for bots too:
+                 they're real rated participants now, and their Elo trend
+                 is genuine, not a placeholder. -->
+            <div class="account-elo-chart-col">
+              <h3>
+                <span class="section-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M3.5 18.5l5.5-6 4 3.5 6.5-8"/><path d="M15.5 7.5h4.5V12"/>
+                  </svg>
+                </span>
+                Elo progress
+              </h3>
+              <div id="player-profile-elo-chart-range-toggle" class="account-elo-chart-range-toggle">
+                <button type="button" class="account-elo-chart-range-btn" data-range="7">7D</button>
+                <button type="button" class="account-elo-chart-range-btn" data-range="30">30D</button>
+                <button type="button" class="account-elo-chart-range-btn selected" data-range="all">All</button>
+              </div>
+              <div id="player-profile-elo-chart" class="account-elo-chart tile-loading-spinner"></div>
             </div>
           </div>
         </div>
 
-        <!-- Elo history -- same shared ui/eloChart.js controller Account's
-             own chart uses (see playerProfile.js), not a second bespoke
-             implementation. Hidden for anyone with no rated games at all
-             (a guest, or a bot with no known difficulty) -- see
-             loadPlayerProfileEloChart's own guard. Shown for bots too:
-             they're real rated participants now, and their Elo trend is
-             genuine, not a placeholder. -->
-        <div id="player-profile-elo-chart-section" class="card panel account-panel hidden">
-          <h3>
-            <span class="section-icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M3.5 18.5l5.5-6 4 3.5 6.5-8"/><path d="M15.5 7.5h4.5V12"/>
-              </svg>
-            </span>
-            Elo progress
-          </h3>
-          <div id="player-profile-elo-chart-range-toggle" class="account-elo-chart-range-toggle">
-            <button type="button" class="account-elo-chart-range-btn" data-range="7">7D</button>
-            <button type="button" class="account-elo-chart-range-btn" data-range="30">30D</button>
-            <button type="button" class="account-elo-chart-range-btn selected" data-range="all">All</button>
-          </div>
-          <div id="player-profile-elo-chart" class="account-elo-chart loading"></div>
-        </div>
-
-        <div id="player-profile-history-section" class="card panel account-panel hidden">
+        <!-- Never hidden as a whole any more (see .account-stats-chart-row's
+             own comment above on the same principle). -->
+        <div id="player-profile-history-section" class="card panel account-panel">
           <h3>
             <span class="section-icon" aria-hidden="true">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
@@ -599,7 +624,7 @@
             </span>
             Game History
           </h3>
-          <div id="player-profile-history-list" class="recent-games-list"></div>
+          <div id="player-profile-history-list" class="recent-games-list tile-loading-spinner"></div>
           <p id="player-profile-history-empty" class="muted hidden">No games recorded yet.</p>
           <div id="player-profile-history-pagination" class="leaderboard-pagination hidden">
             <button type="button" id="btn-player-profile-history-prev" class="secondary" disabled>← Prev</button>
