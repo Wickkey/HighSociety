@@ -96,7 +96,6 @@ function renderStep() {
     return `
       <div class="${classes}">
         <div class="rules-demo-seat-name">${SEAT_NAMES[i]}</div>
-        <div class="rules-demo-seat-money">${s.money}</div>
         ${badge}
       </div>
     `;

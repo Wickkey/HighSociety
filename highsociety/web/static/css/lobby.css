@@ -774,7 +774,6 @@ h3:has(.section-icon) { display: flex; align-items: center; gap: 0.5rem; }
    nobody is "acting" any more. */
 .rules-demo-seat.winner { border-color: var(--chip-money); box-shadow: 0 0 0 2px rgba(31, 122, 77, 0.18); }
 .rules-demo-seat-name { font-weight: 700; font-size: 0.85rem; }
-.rules-demo-seat-money { font-size: 0.85rem; color: var(--chip-money); font-weight: 600; margin-top: 0.15rem; }
 .rules-demo-seat-bid {
   display: inline-block;
   margin-top: 0.35rem;
