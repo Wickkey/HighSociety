@@ -117,6 +117,24 @@ class TestReactionPayload:
         assert payload["data"] == {"emoji": "🔥"}
 
 
+class TestKickedPayload:
+    """Regression coverage for the exact same class of bug TestReactionPayload
+    documents above: web_server.py's api_remove_seat sent message_type="KICKED"
+    before it was ever added to PLAYER_MESSAGE_TYPES, which raised ValueError
+    from inside the Flask request handler (caught here at the protocol layer
+    instead of only live, unlike REACTION's — see tests/network/test_web_server.py's
+    test_remove_seat_kicks_a_human_and_notifies_them for the end-to-end half)."""
+
+    def test_player_payload_accepts_kicked_with_reason_data(self):
+        payload = build_player_payload(
+            game_id="g1", username="alice", message_type="KICKED", prompt="",
+            data={"reason": "The host removed you from this game."},
+        )
+        assert payload["message_type"] == "KICKED"
+        assert payload["data"] == {"reason": "The host removed you from this game."}
+        assert "player_id" not in payload  # GLOBAL_EVENT-shaped, not addressed to a specific player_id
+
+
 class TestStructuredDataField:
     """data lets any broadcast carry machine-parseable content (e.g. AUCTION_RESULT)
     alongside its human-readable prompt — this is what a bot actually parses."""

@@ -1059,6 +1059,7 @@ def _status_payload(room: Optional[GameRoom]) -> dict:
         "visibility": room.visibility,
         "state": room.state,
         "game_id": room.game_id,
+        "host_username": room.host_username,
         "seats": room.seats,
         "human_seats": room.human_seats,
         "bot_mix": room.bot_mix,
@@ -1120,13 +1121,27 @@ def api_rooms():
     return jsonify({"rooms": rooms})
 
 
+def _is_room_host(room: "GameRoom", requester_username: Optional[str]) -> bool:
+    """
+    True if `requester_username` may manage this room's seats (add/remove a
+    bot, kick a human). A room created without a known host (host_username
+    is None — an older client, or a matchmaking-created room; see
+    GameRoom.host_username's own comment) has no host concept at all, so
+    seat management stays open to anyone in it, exactly as it always has
+    been — this only *adds* a restriction where a host is actually known,
+    it never takes away access nothing previously required.
+    """
+    return room.host_username is None or requester_username == room.host_username
+
+
 @app.route("/api/add_bot", methods=["POST"])
 def api_add_bot():
     """
-    Lets anyone already waiting in a room's lobby fill an empty seat with a
-    bot — e.g. one friend backs out at the last minute and nobody wants to
-    wait around for a replacement. Same effect as configuring more bots at
-    creation time, just usable after the room already exists.
+    Lets the host of a room's lobby fill an empty seat with a bot — e.g. one
+    friend backs out at the last minute and nobody wants to wait around for
+    a replacement. Same effect as configuring more bots at creation time,
+    just usable after the room already exists. See _is_room_host for why
+    this is only host-only when a host is actually known.
     """
     body = request.get_json(silent=True) or {}
     room = _get_room(body.get("room"))
@@ -1138,6 +1153,8 @@ def api_add_bot():
         return jsonify({"error": f"Unknown bot type; choose from {list(BOT_TYPES)}"}), 400
 
     with room.lock:
+        if not _is_room_host(room, body.get("requester_username")):
+            return jsonify({"error": "Only the host can add a bot."}), 403
         if room.state != "lobby":
             return jsonify({"error": "This game has already started."}), 409
         if len(room.players) >= room.seats:
@@ -1152,6 +1169,70 @@ def api_add_bot():
 
     if room.try_start():
         room.run_game()
+
+    return jsonify(_status_payload(room))
+
+
+@app.route("/api/remove_seat", methods=["POST"])
+def api_remove_seat():
+    """
+    Host-only: frees up a seat in a still-open lobby, whether it's occupied
+    by a bot or a human (see _is_room_host for the same "no known host means
+    open to anyone" fallback add_bot uses).
+
+    Removing a bot is immediate and silent — just an inverse of add_bot,
+    including reversing its room.bot_mix/human_seats bookkeeping (matched
+    back to a bot_mix entry via its class in BOT_TYPES, since a bot has no
+    other record of which difficulty it was created as).
+
+    Removing a human is not a plain list removal: they're mid-connection
+    (see ws_player), so their own _run_player_session loop is what actually
+    detaches them once notified. This handler sends them a KICKED message
+    (network/messages.js's frontend counterpart shows a toast and redirects
+    home, deliberately not routed through the normal game-message path —
+    see that file's own comment) and closes their transport; that flips
+    NetworkPlayer.active to False, which ws_player's own tail (the
+    lobby-disconnect cleanup already used for a plain dropped connection)
+    removes from room.players. Removing them from room.players here too,
+    inside this same lock, means the very next /api/status poll already
+    reflects it rather than racing that connection's teardown.
+    """
+    body = request.get_json(silent=True) or {}
+    room = _get_room(body.get("room"))
+    if room is None:
+        return jsonify({"error": "No such room."}), 404
+
+    target_username = body.get("username")
+    if not target_username:
+        return jsonify({"error": "username is required."}), 400
+
+    kicked_player = None
+    with room.lock:
+        if not _is_room_host(room, body.get("requester_username")):
+            return jsonify({"error": "Only the host can remove a seat."}), 403
+        if room.state != "lobby":
+            return jsonify({"error": "This game has already started."}), 409
+
+        target = next((p for p in room.players if p.username == target_username), None)
+        if target is None:
+            return jsonify({"error": "No such player in this room."}), 404
+        if room.host_username is not None and target_username == room.host_username:
+            return jsonify({"error": "The host can't remove themselves."}), 400
+
+        room.players.remove(target)
+        if isinstance(target, NetworkPlayer):
+            kicked_player = target
+            room.rejoin_tokens = {t: u for t, u in room.rejoin_tokens.items() if u != target_username}
+        else:
+            bot_type = next((bt for bt in room.bot_mix if isinstance(target, BOT_TYPES[bt])), None)
+            if bot_type is not None:
+                room.bot_mix.remove(bot_type)
+            room.human_seats += 1  # this seat is available for a human again
+        room.touch()
+
+    if kicked_player is not None:
+        kicked_player.send_message("", message_type="KICKED", data={"reason": "The host removed you from this game."})
+        kicked_player.close()
 
     return jsonify(_status_payload(room))
 

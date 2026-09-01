@@ -23,7 +23,7 @@ import {
   startRoomsPolling, currentRoomCode, isActivelyPlayingLiveGame,
   applySpectateIdentityDefaults, refreshStatus, leaveToHome, setCurrentRoomCode,
 } from './lobby/lobby.js';
-import { onAddBot } from './lobby/playerList.js';
+import { initLobbySeatGrid } from './lobby/playerList.js';
 import {
   showGameHistoryScreen, onGameHistoryPrevClick, onGameHistoryNextClick, getGameHistoryReturnTo,
 } from './lobby/gameHistory.js';
@@ -104,8 +104,8 @@ function wireStaticHandlers() {
   $('btn-copy-room-link').addEventListener('click', onCopyRoomLink);
   $('room-link-input').addEventListener('focus', (e) => e.target.select());
   $('room-link-input').addEventListener('click', (e) => e.target.select());
-  $('btn-add-bot').addEventListener('click', onAddBot);
   $('btn-join').addEventListener('click', onJoin);
+  initLobbySeatGrid();
   $('btn-spectate-link').addEventListener('click', () => {
     applySpectateIdentityDefaults();
     showScreen('screen-spectate-join');

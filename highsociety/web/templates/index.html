@@ -1235,7 +1235,24 @@
             <span>Copy</span>
           </button>
         </div>
-        <div id="lobby-status" class="lobby-status"></div>
+        <!-- Plain text fallback -- reconnect failure / "already in progress"
+             messages (see network/messages.js, lobby.js's renderForStatus)
+             that aren't real seat data, so they don't belong in the grid
+             below. Never shown at the same time as #lobby-seats-wrap. -->
+        <div id="lobby-status" class="lobby-status hidden"></div>
+
+        <!-- Real per-seat grid (see JOIN_GAME_REWORK.MD) -- built by
+             playerList.js from the same live roster poll that used to
+             render as a single "Seats filled: x/y (...)" sentence. The
+             host (or anyone, in a room with no host on record -- see
+             web_server.py's _is_room_host) gets inline controls here to
+             add a bot to an open seat or remove any seat; everyone else
+             sees the identical grid read-only. -->
+        <div id="lobby-seats-wrap" class="hidden">
+          <p id="lobby-seats-label" class="lobby-seats-label"></p>
+          <div id="lobby-seats" class="lobby-seats"></div>
+          <p id="lobby-seats-error" class="error hidden"></p>
+        </div>
 
         <div id="join-form">
           <p id="join-as-label" class="hidden">Joining as <strong id="join-as-name"></strong>.
@@ -1249,20 +1266,10 @@
 
         <div id="join-waiting" class="hidden">
           <p>✅ You're in! Waiting for the rest of the table…</p>
-          <div class="bot-add-row">
-            <label class="bot-add-label" for="waiting-bot-type">
-              Fill an empty seat with
-              <span class="bot-add-select-wrap">a
-                <select id="waiting-bot-type">
-                  <option value="easy">Easy</option>
-                  <option value="medium" selected>Medium</option>
-                  <option value="hard">Hard</option>
-                </select>
-                bot</span>
-            </label>
-            <button id="btn-add-bot" class="secondary">Add</button>
-          </div>
-          <p id="add-bot-error" class="error hidden"></p>
+          <!-- Adding/removing a seat now happens inline in the grid above
+               (host-only -- see .lobby-seat-add-btn/.lobby-seat-remove and
+               #lobby-seats-error for its errors); nothing left to show
+               here besides the confirmation line itself. -->
         </div>
 
         <button id="btn-spectate-link" class="secondary standalone">Watch as a spectator instead</button>

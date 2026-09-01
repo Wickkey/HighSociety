@@ -12,6 +12,7 @@
 // is read inside a function body, never at this module's own top-level
 // evaluation, so load order never matters.
 import { $, hide, show, showError, showScreen, setScreenPath } from '../utils/dom.js';
+import { escapeHtml } from '../utils/formatting.js';
 import { ensureProfileSet, loadProfile, renderProfileChip, saveProfile, setSessionStatus } from '../auth/profile.js';
 import { game, resetGameState, seedOpponents, applyRoomDisplaySettings } from '../game/gameState.js';
 import { renderOpponents } from '../game/gameRenderer.js';
@@ -330,14 +331,21 @@ function renderRoomsList(rooms) {
   rooms.forEach((r) => {
     const row = document.createElement('div');
     row.className = 'room-row';
-    const label = document.createElement('span');
-    label.textContent = `Room ${r.room_code} (${r.joined}/${r.seats} seats filled)`;
+    const fillPct = Math.round((r.joined / r.seats) * 100);
+    const main = document.createElement('div');
+    main.className = 'room-row-main';
+    main.innerHTML = `
+      <span class="room-row-code">Room ${escapeHtml(r.room_code)}</span>
+      <span class="room-row-progress">
+        <span class="room-row-bar"><span class="room-row-bar-fill" style="width: ${fillPct}%"></span></span>
+        <span class="room-row-progress-text">${r.joined}/${r.seats} seats</span>
+      </span>`;
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'secondary';
     btn.textContent = 'Join';
     btn.addEventListener('click', (event) => enterRoom(r.room_code, event));
-    row.appendChild(label);
+    row.appendChild(main);
     row.appendChild(btn);
     container.appendChild(row);
   });
@@ -416,6 +424,8 @@ export function renderForStatus(status) {
     showScreen('screen-join');
     $('join-form').classList.add('hidden');
     $('join-waiting').classList.add('hidden');
+    hide($('lobby-seats-wrap')); // no real seat data worth showing once a game's already running
+    show($('lobby-status'));
     $('lobby-status').textContent = hasResigned
       ? "You resigned from this game. You can watch as a spectator."
       : 'A game is already in progress. You can watch as a spectator.';

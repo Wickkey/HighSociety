@@ -5,14 +5,15 @@
 // expected and safe: every one of these is only ever touched inside a
 // function body (never at this module's own top-level evaluation), by
 // which point every module involved has finished loading.
-import { $, showError, showScreen } from '../utils/dom.js';
+import { $, hide, show, showError, showScreen } from '../utils/dom.js';
 import { setSessionStatus } from '../auth/profile.js';
 import { game } from '../game/gameState.js';
 import { applyGameMessage, ensureGameScreenVisible } from '../game/gameEvents.js';
 import { ws } from './websocket.js';
-import { currentRoomCode, clearRejoinInfo, saveRejoinInfo } from '../lobby/lobby.js';
+import { currentRoomCode, clearRejoinInfo, saveRejoinInfo, leaveToHome } from '../lobby/lobby.js';
 import { startWaitingRoomPolling } from '../lobby/playerList.js';
 import { handleRematchMessage } from '../lobby/rematch.js';
+import { showToast } from '../ui/notifications.js';
 
 // pendingJoin/pendingSpectate: the {username, name} this connection is
 // identifying as, set right before opening the socket (see lobby.js's
@@ -65,6 +66,8 @@ export function handlePlayerMessage(msg) {
         showScreen('screen-join');
         $('join-form').classList.add('hidden');
         $('join-waiting').classList.add('hidden');
+        hide($('lobby-seats-wrap'));
+        show($('lobby-status'));
         $('lobby-status').textContent = msg.prompt || 'A game is already in progress. You can watch as a spectator.';
       } else {
         pendingIdentifyError = msg.prompt;
@@ -96,6 +99,17 @@ export function handlePlayerMessage(msg) {
     case 'REMATCH_DECLINED':
     case 'REMATCH_STARTING':
       handleRematchMessage(msg);
+      break;
+    // The host removed this player from a lobby that hasn't started yet
+    // (see web_server.py's api_remove_seat) -- this only ever arrives while
+    // still waiting, so there's no live game underneath to protect; skip
+    // applyGameMessage() entirely (its ensureGameScreenVisible() call makes
+    // no sense here) and just tell them, then send them home the same way
+    // "Return to Home" already does.
+    case 'KICKED':
+      ws.close();
+      showToast((msg.data && msg.data.reason) || 'You were removed from this game.');
+      leaveToHome();
       break;
     default:
       applyGameMessage(msg, false);

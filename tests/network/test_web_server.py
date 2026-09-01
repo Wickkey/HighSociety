@@ -346,6 +346,115 @@ def test_add_bot_fills_an_empty_seat_and_can_start_the_game(running_web_server):
     assert non_preset.status_code == 400
 
 
+def test_status_reports_host_username(running_web_server):
+    client = web_server.app.test_client()
+    room_code = client.post(
+        "/api/create_game", json={"seats": 2, "bot_mix": [], "host_username": "alice"}
+    ).get_json()["room_code"]
+    assert client.get(f"/api/status?room={room_code}").get_json()["host_username"] == "alice"
+
+
+def test_add_bot_is_host_only_once_a_host_is_known(running_web_server):
+    client = web_server.app.test_client()
+    room_code = client.post(
+        "/api/create_game", json={"seats": 3, "bot_mix": [], "host_username": "alice"}
+    ).get_json()["room_code"]
+
+    # No requester, or the wrong requester -- rejected.
+    denied = client.post("/api/add_bot", json={"room": room_code, "bot_type": "greedy"})
+    assert denied.status_code == 403
+    wrong_user = client.post(
+        "/api/add_bot", json={"room": room_code, "bot_type": "greedy", "requester_username": "mallory"}
+    )
+    assert wrong_user.status_code == 403
+    assert web_server._rooms[room_code].players == []  # neither attempt actually added anything
+
+    # The real host succeeds.
+    ok = client.post(
+        "/api/add_bot", json={"room": room_code, "bot_type": "greedy", "requester_username": "alice"}
+    )
+    assert ok.status_code == 200
+    assert len(ok.get_json()["joined"]) == 1
+
+
+def test_add_bot_stays_open_to_anyone_when_no_host_is_known(running_web_server):
+    """A room created without a host_username (an older client, or a
+    matchmaking-created room) has no host concept -- add_bot must keep
+    working exactly as it did before this host-only restriction existed."""
+    client = web_server.app.test_client()
+    room_code = client.post("/api/create_game", json={"seats": 2, "bot_mix": []}).get_json()["room_code"]
+
+    resp = client.post("/api/add_bot", json={"room": room_code, "bot_type": "greedy"})
+    assert resp.status_code == 200
+
+
+def test_remove_seat_removes_a_bot_and_reverses_its_bookkeeping(running_web_server):
+    port = running_web_server
+    client = web_server.app.test_client()
+    room_code = client.post(
+        "/api/create_game", json={"seats": 3, "bot_mix": [], "host_username": "alice"}
+    ).get_json()["room_code"]
+    added = client.post(
+        "/api/add_bot", json={"room": room_code, "bot_type": "greedy", "requester_username": "alice"}
+    ).get_json()
+    assert added["human_seats"] == 2
+    bot_username = added["joined"][0]["username"]
+
+    denied = client.post(
+        "/api/remove_seat", json={"room": room_code, "username": bot_username, "requester_username": "mallory"}
+    )
+    assert denied.status_code == 403
+
+    resp = client.post(
+        "/api/remove_seat", json={"room": room_code, "username": bot_username, "requester_username": "alice"}
+    )
+    assert resp.status_code == 200
+    body = resp.get_json()
+    assert body["joined"] == []
+    assert body["human_seats"] == 3  # back to fully open, same as before the bot was added
+    assert web_server._rooms[room_code].bot_mix == []
+
+    missing = client.post(
+        "/api/remove_seat", json={"room": room_code, "username": "nobody", "requester_username": "alice"}
+    )
+    assert missing.status_code == 404
+
+    # The host can't remove themselves -- but only once they're actually a
+    # seated player; before that (as above), there's simply no such player
+    # to find yet, hence the 404 rather than this 400.
+    host = ScriptedWSClient(_ws_url(port, f"/ws?room={room_code}"), "alice")
+    host.handshake()
+    host.start()
+    self_removal = client.post(
+        "/api/remove_seat", json={"room": room_code, "username": "alice", "requester_username": "alice"}
+    )
+    assert self_removal.status_code == 400
+
+
+def test_remove_seat_kicks_a_human_and_notifies_them(running_web_server):
+    port = running_web_server
+    client = web_server.app.test_client()
+    room_code = client.post(
+        "/api/create_game", json={"seats": 2, "bot_mix": [], "host_username": "alice"}
+    ).get_json()["room_code"]
+
+    victim = ScriptedWSClient(_ws_url(port, f"/ws?room={room_code}"), "bob")
+    victim.handshake()
+    victim.start()
+
+    resp = client.post(
+        "/api/remove_seat", json={"room": room_code, "username": "bob", "requester_username": "alice"}
+    )
+    assert resp.status_code == 200
+    assert resp.get_json()["joined"] == []
+
+    deadline = time.time() + 5
+    while time.time() < deadline and not victim.messages_of_type("KICKED"):
+        threading.Event().wait(0.1)
+    assert victim.messages_of_type("KICKED"), "kicked player was never notified"
+    assert "bob" not in [p.username for p in web_server._rooms[room_code].players]
+
+
 def test_player_receives_a_live_countdown_when_the_host_sets_a_turn_time_limit(running_web_server):
     port = running_web_server
     room_code = web_server.app.test_client().post(
