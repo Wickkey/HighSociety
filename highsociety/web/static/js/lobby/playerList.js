@@ -134,11 +134,38 @@ function renderBotPickerPanel(status) {
   show(panel);
 }
 
+// Stays visible however the host currently holds their spot in the room
+// (seated, spectating, or having stepped away) -- host_username is a
+// property of the room, never of whichever seat/connection they happen
+// to have right now (GameRoom.host_username is independent of
+// room.players membership; see _is_room_host), so who's hosting
+// shouldn't blink in and out of view just because they left their own
+// seat to go watch instead.
+function renderHostLabel(labelId, status) {
+  const el = $(labelId);
+  if (status.host_username) {
+    el.textContent = `Hosted by ${status.host_username}`;
+    show(el);
+  } else {
+    hide(el); // an older client/matchmaking room with no known host -- nothing to show
+  }
+}
+
+// "Watch as a spectator instead" only makes sense worded that way before
+// you've actually taken a seat -- once you're seated, clicking it means
+// giving that seat up, so the label says so plainly instead of leaving a
+// confirm dialog to explain the consequence after the fact (see
+// JOIN_HOST_UX plan's confirmed scenario 4).
+export function setSpectateLinkLabel(seated) {
+  $('btn-spectate-link').textContent = seated ? 'Leave your seat and watch instead' : 'Watch as a spectator instead';
+}
+
 function renderSeatsGrid(status) {
   lastStatus = status;
   hide($('lobby-status'));
   show($('lobby-seats-wrap'));
   $('lobby-seats-label').textContent = `Seats filled: ${status.joined.length}/${status.seats}`;
+  renderHostLabel('lobby-host-label', status);
   const canManage = canManageSeats(status);
   const html = buildSeatsHtml(status, canManage);
   const container = $('lobby-seats');
@@ -165,6 +192,7 @@ export function renderLobby(status) {
   showScreen('screen-join');
   $('join-form').classList.remove('hidden');
   $('join-waiting').classList.add('hidden');
+  setSpectateLinkLabel(false); // this render path only ever runs pre-join (see renderForStatus's `if (ws) return` guard) -- never seated yet
   const isFreshRoom = lastRenderedLobbyRoomCode !== status.room_code;
   if (isFreshRoom) {
     lastRenderedLobbyRoomCode = status.room_code;
@@ -330,6 +358,7 @@ export function initLobbySeatGrid() {
 // never needs anything like canManageSeats.
 export function renderSpectateLobbyWait(status) {
   $('spectate-lobby-seats-label').textContent = `Seats filled: ${status.joined.length}/${status.seats}`;
+  renderHostLabel('spectate-lobby-host-label', status);
   const html = buildSeatsHtml(status, false);
   const container = $('spectate-lobby-seats');
   if (container.dataset.renderedHtml === html) return;

@@ -1258,7 +1258,16 @@
              add a bot to an open seat or remove any seat; everyone else
              sees the identical grid read-only. -->
         <div id="lobby-seats-wrap" class="hidden">
-          <p id="lobby-seats-label" class="lobby-seats-label"></p>
+          <div class="lobby-seats-label-row">
+            <p id="lobby-seats-label" class="lobby-seats-label"></p>
+            <!-- Stays visible regardless of whether the host is currently
+                 seated, spectating, or has left the room entirely -- host
+                 status is a property of the room (host_username), not of
+                 whichever seat/connection they currently happen to hold,
+                 so this shouldn't disappear just because they stepped
+                 away from their seat (see JOIN_HOST_UX plan's scenario 5). -->
+            <p id="lobby-host-label" class="lobby-host-label hidden"></p>
+          </div>
           <div id="lobby-seats" class="lobby-seats"></div>
           <!-- One shared panel below the grid, not a small floating popover
                per seat -- a deliberate, clearly-labeled block (which open
@@ -1457,7 +1466,10 @@
       <div id="spectate-lobby-wait" class="card panel hidden">
         <h2>Watching this game</h2>
         <p id="spectate-lobby-wait-status" class="muted">Waiting for the host to start the game…</p>
-        <p id="spectate-lobby-seats-label" class="lobby-seats-label"></p>
+        <div class="lobby-seats-label-row">
+          <p id="spectate-lobby-seats-label" class="lobby-seats-label"></p>
+          <p id="spectate-lobby-host-label" class="lobby-host-label hidden"></p>
+        </div>
         <div id="spectate-lobby-seats" class="lobby-seats"></div>
         <button id="btn-stop-watching-lobby-wait" class="secondary standalone">Stop Watching</button>
       </div>

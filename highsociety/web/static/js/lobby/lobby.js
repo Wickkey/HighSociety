@@ -686,6 +686,22 @@ export async function onCreateGame() {
     lastStatusValue = status;
     renderLobby(status);
     startPolling();
+    // Hosting used to leave the host sitting on the exact same join-form
+    // every other joiner sees, requiring a separate, redundant "Join
+    // Game" click on their own room -- a real reported point of
+    // confusion. renderLobby() above already pre-filled #join-username
+    // from the host's own saved profile (applyJoinIdentityDefaults), so
+    // onJoin() below just reuses that -- same identity handling/
+    // resetGameState/seedOpponents/connectPlayerSocket() path a manual
+    // click would take, no duplicated logic. Both calls are synchronous
+    // (nothing here awaits until connectPlayerSocket's own WebSocket
+    // opens), so the browser never actually paints the intermediate
+    // join-form state -- no visible flash before landing on "You're in!".
+    // If the auto-join's socket fails to open, connectPlayerSocket's own
+    // onclose -> refreshStatus() -> renderLobby() fallback already lands
+    // back on a normal, manually-clickable join-form -- an existing
+    // safety net, not new failure-handling.
+    onJoin();
   } catch (e) {
     showError($('host-error'), e.message);
   }

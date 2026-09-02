@@ -1357,12 +1357,22 @@ button.secondary.standalone { margin-top: 0.9rem; display: inline-block; }
    line with a real per-seat grid (see JOIN_GAME_REWORK.MD) -- the same
    live roster data (playerList.js's poll), just rendered as tiles instead
    of a sentence, with host-only inline controls to add/remove a seat. */
+.lobby-seats-label-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
 .lobby-seats-label {
   margin: 0 0 0.6rem;
   font-size: 0.85rem;
   font-weight: 600;
   color: var(--muted);
 }
+/* Stays visible whether the host is seated, spectating, or has left --
+   see renderHostLabel's own comment in playerList.js. */
+.lobby-host-label { margin: 0 0 0.6rem; font-size: 0.8rem; color: var(--muted); font-style: italic; }
 .lobby-seats {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
