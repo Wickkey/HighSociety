@@ -79,7 +79,9 @@ function seatTileHtml(seat, index, canManage) {
     const selected = openPickerSeatIndex === index;
     return `
       <div class="lobby-seat open${selected ? ' selected' : ''}">
-        <button type="button" class="lobby-seat-add-btn" aria-label="Add a bot" data-action="toggle-picker" data-seat-index="${index}">+</button>
+        <button type="button" class="lobby-seat-add-btn" aria-label="Add a bot" data-action="toggle-picker" data-seat-index="${index}">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+        </button>
         <div class="lobby-seat-name">Open</div>
       </div>`;
   }
@@ -120,16 +122,15 @@ export function buildSeatsHtml(status, canManage) {
 
 // The one shared "add a bot" panel below the grid -- see its own
 // index.html comment for why this replaced a per-seat floating popover.
-// Seat count in the heading (not just "this seat") since seats aren't
-// individually numbered anywhere else in this UI; disambiguating by
-// position reads more naturally than an arbitrary index would.
+// Plain "this seat" rather than naming a seat number: the targeted seat
+// is already highlighted directly (see seatTileHtml's .selected class),
+// so a number here would just be redundant, unrequested detail.
 function renderBotPickerPanel(status) {
   const panel = $('lobby-bot-picker-panel');
   if (openPickerSeatIndex === null || !status || openPickerSeatIndex >= status.seats) {
     hide(panel);
     return;
   }
-  $('lobby-bot-picker-heading').textContent = `Fill seat ${openPickerSeatIndex + 1} with a bot?`;
   show(panel);
 }
 
@@ -148,16 +149,31 @@ function renderSeatsGrid(status) {
   renderBotPickerPanel(status); // not gated by the html diff above -- open/closed state can change with no roster change at all
 }
 
+// The room this screen was last freshly initialized for -- lets renderLobby
+// tell "a genuinely new room" (reset everything, including the bot picker)
+// apart from "the same room's own status poll firing again" (every 1.5s
+// the whole time you're sitting on the pre-join form, via lobby.js's
+// refreshStatus/renderForStatus -- startWaitingRoomPolling doesn't even
+// exist yet at this point, you haven't joined). Before this, renderLobby
+// unconditionally reset openPickerSeatIndex on every call, so opening the
+// bot picker and then not immediately clicking a tier button lost the race
+// against the very next poll tick -- a real reported bug ("the bot
+// selector disappears immediately, I can't click it").
+let lastRenderedLobbyRoomCode = null;
+
 export function renderLobby(status) {
   showScreen('screen-join');
   $('join-form').classList.remove('hidden');
   $('join-waiting').classList.add('hidden');
-  hide($('lobby-seats-error')); // a stale error from a previous room must never bleed into this one
-  // A fresh entry point (not the ongoing poll) -- reset local seat-grid UI
-  // state so a previous room's open bot-picker or diff cache can never
-  // bleed into this one.
-  openPickerSeatIndex = null;
-  $('lobby-seats').dataset.renderedHtml = '';
+  const isFreshRoom = lastRenderedLobbyRoomCode !== status.room_code;
+  if (isFreshRoom) {
+    lastRenderedLobbyRoomCode = status.room_code;
+    hide($('lobby-seats-error')); // a stale error from a previous room must never bleed into this one
+    // Reset local seat-grid UI state so a previous room's open bot-picker
+    // or diff cache can never bleed into this one.
+    openPickerSeatIndex = null;
+    $('lobby-seats').dataset.renderedHtml = '';
+  }
   applyJoinIdentityDefaults();
   $('room-code-value').textContent = status.room_code;
   const isPrivate = status.visibility === 'private';
