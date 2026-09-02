@@ -205,6 +205,7 @@ function wireStaticHandlers() {
   $('btn-change-spectate-identity').addEventListener('click', onChangeSpectateIdentity);
   $('home-link').addEventListener('click', onHomeLinkClick);
   $('btn-stop-watching').addEventListener('click', onHomeLinkClick);
+  $('btn-stop-watching-lobby-wait').addEventListener('click', onHomeLinkClick);
   $('home-link').addEventListener('keydown', (e) => {
     if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onHomeLinkClick(); }
   });

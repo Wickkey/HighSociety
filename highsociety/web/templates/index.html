@@ -718,7 +718,7 @@
             <button type="button" id="btn-matchmaking-add-bots" class="primary">Fill with bots and start</button>
           </div>
 
-          <button type="button" id="btn-matchmaking-cancel" class="matchmaking-cancel-link">Cancel</button>
+          <button type="button" id="btn-matchmaking-cancel" class="quiet-action-link">Cancel</button>
         </div>
       </div>
     </section>
@@ -1219,8 +1219,17 @@
           </div>
         </details>
 
+        <!-- Room code as its own labeled block (eyebrow + big value) plus a
+             dot-indicator visibility tag, replacing the old single plain-
+             text "Room code: XY743 (public)" line -- easier to scan at a
+             glance and the visibility no longer reads like an afterthought
+             stuffed in parentheses. -->
         <div id="room-code-display" class="room-code-display hidden">
-          <span id="room-code-text"></span>
+          <div class="room-code-block">
+            <span class="room-code-eyebrow">Room code</span>
+            <span id="room-code-value" class="room-code-value"></span>
+          </div>
+          <span id="room-visibility-tag" class="room-visibility-tag"></span>
         </div>
         <div id="room-link-row" class="room-link-row hidden">
           <input type="text" id="room-link-input" class="room-link-input" readonly aria-label="Invite link">
@@ -1251,6 +1260,20 @@
         <div id="lobby-seats-wrap" class="hidden">
           <p id="lobby-seats-label" class="lobby-seats-label"></p>
           <div id="lobby-seats" class="lobby-seats"></div>
+          <!-- One shared panel below the grid, not a small floating popover
+               per seat -- a deliberate, clearly-labeled block (which open
+               seat it's for is named right in its own heading) rather than
+               something that could read as fragile/about to disappear.
+               Shown/hidden by playerList.js's own openPickerSeatIndex
+               state; toggle-picker is the only action that opens it. -->
+          <div id="lobby-bot-picker-panel" class="lobby-bot-picker-panel hidden">
+            <p id="lobby-bot-picker-heading" class="lobby-bot-picker-heading">Fill this seat with a bot?</p>
+            <div class="lobby-bot-picker-options">
+              <button type="button" class="lobby-bot-option" data-action="add-bot" data-bot-type="easy">Easy bot</button>
+              <button type="button" class="lobby-bot-option" data-action="add-bot" data-bot-type="medium">Medium bot</button>
+              <button type="button" class="lobby-bot-option" data-action="add-bot" data-bot-type="hard">Hard bot</button>
+            </div>
+          </div>
           <p id="lobby-seats-error" class="error hidden"></p>
         </div>
 
@@ -1260,7 +1283,7 @@
           <div id="join-identity-fields">
             <label>Username <input type="text" id="join-username" placeholder="e.g. alex" autocomplete="off" maxlength="24"></label>
           </div>
-          <button id="btn-join" class="primary">Join Game</button>
+          <button id="btn-join" class="primary join-cta">Join Game</button>
           <p id="join-error" class="error hidden"></p>
         </div>
 
@@ -1272,7 +1295,11 @@
                here besides the confirmation line itself. -->
         </div>
 
-        <button id="btn-spectate-link" class="secondary standalone">Watch as a spectator instead</button>
+        <!-- A quiet text link, not a same-weight bordered button --
+             watching is a real secondary path, but it shouldn't visually
+             compete with Join Game above it the way an equally-styled
+             .secondary button did. -->
+        <button id="btn-spectate-link" class="quiet-action-link">Watch as a spectator instead</button>
       </div>
     </section>
 
@@ -1407,7 +1434,28 @@
 
     <!-- ===================== SPECTATOR VIEW ===================== -->
     <section id="screen-spectate" class="screen hidden">
-      <div class="table-layout">
+      <!-- Shown instead of the live table below while the room is still in
+           its lobby, waiting for the host to start -- previously a
+           spectator got dropped straight into the live layout the instant
+           they connected, showing a nonsensical "Your turn" / "Waiting for
+           the next auction..." / "Current Highest Bid: 0" table for a game
+           that hadn't started, while a player looking at the exact same
+           room correctly saw a real waiting-room view (a real reported
+           inconsistency). Renders through the exact same seat-grid builder
+           the Join screen's own waiting room uses (playerList.js's
+           buildSeatsHtml), just always read-only -- a spectator never
+           manages seats regardless of who they are. Swapped for the real
+           live layout the instant any real game message arrives (see
+           gameEvents.js's ensureGameScreenVisible), the same signal that
+           already means "the game is actually live now". -->
+      <div id="spectate-lobby-wait" class="card panel hidden">
+        <h2>Watching this game</h2>
+        <p id="spectate-lobby-wait-status" class="muted">Waiting for the host to start the game…</p>
+        <p id="spectate-lobby-seats-label" class="lobby-seats-label"></p>
+        <div id="spectate-lobby-seats" class="lobby-seats"></div>
+        <button id="btn-stop-watching-lobby-wait" class="secondary standalone">Stop Watching</button>
+      </div>
+      <div id="spectate-live-layout" class="table-layout hidden">
         <div class="center-col">
           <div class="card panel auction-panel">
             <div class="auction-header">

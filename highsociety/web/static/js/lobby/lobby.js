@@ -20,7 +20,7 @@ import { ws, closeSocket, attemptReconnect, connectPlayerSocket, connectSpectato
 import { setPendingJoin, setPendingSpectate } from '../network/messages.js';
 import { confirmDialog } from '../ui/modals.js';
 import { renderFinished } from './rematch.js';
-import { renderLobby } from './playerList.js';
+import { renderLobby, showSpectateForStatus } from './playerList.js';
 import { loadHomeRecentGames } from './gameHistory.js';
 
 export async function fetchJSON(url, opts) {
@@ -759,12 +759,19 @@ export function onSpectateJoin() {
   saveProfile(username, username); // this device's identity going forward — see loadProfile
   stopPolling();
   resetGameState(null, lastStatusValue);
+  // Defaults to the live layout (showSpectateForStatus(null) below) so a
+  // slow/failed status fetch still shows *something* sane -- exactly
+  // today's pre-fix behavior, not a new failure mode -- while the common
+  // case (the fetch succeeds) picks the right view for whatever's actually
+  // true right now instead of always assuming a live game.
+  showSpectateForStatus(null);
   fetchJSON(`/api/status?room=${encodeURIComponent(currentRoomCodeValue)}`)
     .then((status) => {
       seedOpponents(status, null);
       game.revealCards = status.reveal_cards !== false;
       game.showLogs = status.show_logs !== false;
       applyRoomDisplaySettings();
+      showSpectateForStatus(status);
     }).catch(() => {});
   connectSpectatorSocket();
   showScreen('screen-spectate');

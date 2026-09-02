@@ -1,14 +1,19 @@
 // The waiting-room roster (before a game starts) -- a real per-seat grid
 // (see JOIN_GAME_REWORK.MD), replacing the old plain-text "Seats filled:
 // 3/5 (Alice, Bob, Marble bot 🤖)" line. Host-only inline controls here
-// add a bot to an open seat or remove any seat (bot or human) -- see
-// canManageSeats and web_server.py's _is_room_host for the exact same
-// "no known host means open to anyone" fallback on both sides.
+// add a bot to an open seat (via one shared "Fill seat N with a bot?"
+// panel below the grid, not a per-seat popover) or remove any seat (bot
+// or human) -- see canManageSeats and web_server.py's _is_room_host for
+// the exact same "no known host means open to anyone" fallback on both
+// sides. buildSeatsHtml is also reused as-is (always read-only) for the
+// spectate screen's own lobby-wait view further down this file, so both
+// experiences genuinely look the same, not two near-copies.
 //
 // Circular with network/messages.js (which imports startWaitingRoomPolling
-// from here) and ui/modals.js (confirmDialog, which itself imports from
-// lobby.js, which imports renderLobby from here) -- safe, same reasoning
-// as lobby.js's own note: everything here is read inside a function body,
+// from here), ui/modals.js (confirmDialog, which itself imports from
+// lobby.js, which imports renderLobby from here), and game/gameEvents.js
+// (which imports revealSpectateLiveLayout) -- safe, same reasoning as
+// lobby.js's own note: everything here is read inside a function body,
 // never at this module's own top-level evaluation.
 import { $, hide, show, showError, showScreen } from '../utils/dom.js';
 import { fetchJSON, currentRoomCode, applyJoinIdentityDefaults } from './lobby.js';
@@ -17,16 +22,36 @@ import { loadProfile } from '../auth/profile.js';
 import { confirmDialog } from '../ui/modals.js';
 import { escapeHtml } from '../utils/formatting.js';
 
-const BOT_TIERS = [
-  { type: 'easy', label: 'Easy' },
-  { type: 'medium', label: 'Medium' },
-  { type: 'hard', label: 'Hard' },
+// Distinct emoji + tinted background per bot, so a table of several bots
+// doesn't read as one repeated grey 🤖 tile -- deterministically assigned
+// from the bot's own (stable, unique-within-the-room) username via
+// _hashString below, not random, so a given bot keeps the same look
+// across every re-render/poll tick rather than visibly flickering colors.
+// Colors are soft tints of hues already used elsewhere in this app's own
+// palette (green/purple/teal/terracotta/tan), not the mockup's own
+// unrelated named-bot-tier colors.
+const BOT_AVATAR_STYLES = [
+  { bg: 'rgba(47, 168, 79, 0.22)', emoji: '🐝' },
+  { bg: 'rgba(133, 112, 191, 0.22)', emoji: '🎩' },
+  { bg: 'rgba(199, 120, 63, 0.22)', emoji: '🔭' },
+  { bg: 'rgba(70, 138, 150, 0.22)', emoji: '🍀' },
+  { bg: 'rgba(140, 129, 113, 0.22)', emoji: '🐣' },
+  { bg: 'rgba(180, 130, 170, 0.22)', emoji: '🦉' },
 ];
+function _hashString(s) {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
+  return Math.abs(h);
+}
+function botAvatarStyle(username) {
+  return BOT_AVATAR_STYLES[_hashString(username) % BOT_AVATAR_STYLES.length];
+}
 
-// Which open seat's "add a bot" popover is showing, by seat index, or
-// null -- purely local UI state, deliberately NOT part of the rendered-html
-// diff below, so a poll tick that doesn't actually change the roster
-// leaves an open popover alone instead of yanking it shut every 1.5s.
+// Which open seat the shared "add a bot" panel below the grid is currently
+// targeting, by seat index, or null -- purely local UI state, deliberately
+// NOT part of the rendered-html diff below, so a poll tick that doesn't
+// actually change the roster leaves an open panel alone instead of
+// yanking it shut every 1.5s.
 let openPickerSeatIndex = null;
 // The last status this screen rendered -- lets a local-only UI change
 // (opening/closing the bot picker) redraw immediately without waiting for
@@ -47,29 +72,65 @@ function seatTileHtml(seat, index, canManage) {
     if (!canManage) {
       return '<div class="lobby-seat open"><div class="lobby-seat-name">Open</div></div>';
     }
-    const pickerOpen = openPickerSeatIndex === index;
-    const options = BOT_TIERS.map(
-      (t) => `<button type="button" class="lobby-bot-option" data-action="add-bot" data-seat-index="${index}" data-bot-type="${t.type}">${t.label}</button>`
-    ).join('');
+    // Highlighted while this is the seat the shared picker panel below
+    // (not a per-seat popover any more -- see #lobby-bot-picker-panel's
+    // own comment) is currently targeting, so it's obvious at a glance
+    // which seat "Fill this seat with a bot?" actually refers to.
+    const selected = openPickerSeatIndex === index;
     return `
-      <div class="lobby-seat open${pickerOpen ? ' picker-open' : ''}">
+      <div class="lobby-seat open${selected ? ' selected' : ''}">
         <button type="button" class="lobby-seat-add-btn" aria-label="Add a bot" data-action="toggle-picker" data-seat-index="${index}">+</button>
         <div class="lobby-seat-name">Open</div>
-        <div class="lobby-bot-picker"${pickerOpen ? '' : ' hidden'}>${options}</div>
       </div>`;
   }
   const safeName = escapeHtml(seat.name);
-  const avatarContent = seat.is_bot ? '🤖' : escapeHtml(seat.name.charAt(0).toUpperCase());
+  let avatarStyle = '';
+  let avatarContent;
+  if (seat.is_bot) {
+    const style = botAvatarStyle(seat.username);
+    avatarStyle = ` style="background: ${style.bg}"`;
+    avatarContent = style.emoji;
+  } else {
+    avatarContent = escapeHtml(seat.name.charAt(0).toUpperCase());
+  }
   const nameHtml = seat.is_bot ? `${safeName}<span>Bot</span>` : safeName;
   const removeBtn = canManage
-    ? `<button type="button" class="lobby-seat-remove" aria-label="Remove ${safeName}" data-action="remove-seat" data-username="${escapeHtml(seat.username)}" data-is-bot="${seat.is_bot}" data-name="${safeName}">×</button>`
+    ? `<button type="button" class="lobby-seat-remove" aria-label="Remove ${safeName}" data-action="remove-seat" data-username="${escapeHtml(seat.username)}" data-is-bot="${seat.is_bot}" data-name="${safeName}">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      </button>`
     : '';
   return `
     <div class="lobby-seat">
       ${removeBtn}
-      <div class="lobby-seat-avatar${seat.is_bot ? '' : ' is-human'}">${avatarContent}</div>
+      <div class="lobby-seat-avatar${seat.is_bot ? '' : ' is-human'}"${avatarStyle}>${avatarContent}</div>
       <div class="lobby-seat-name">${nameHtml}</div>
     </div>`;
+}
+
+// Pure HTML builder, shared by the join screen's own grid below and the
+// spectate screen's read-only lobby-wait view (see spectateLobby.js) --
+// the whole point of both showing "the same thing" (the actual literal
+// ask: a spectator's wait experience should look consistent with a
+// player's) is that they paint through this exact one function, not two
+// parallel near-copies that could quietly drift apart later.
+export function buildSeatsHtml(status, canManage) {
+  const seats = Array.from({ length: status.seats }, (_, i) => status.joined[i] || null);
+  return seats.map((seat, i) => seatTileHtml(seat, i, canManage)).join('');
+}
+
+// The one shared "add a bot" panel below the grid -- see its own
+// index.html comment for why this replaced a per-seat floating popover.
+// Seat count in the heading (not just "this seat") since seats aren't
+// individually numbered anywhere else in this UI; disambiguating by
+// position reads more naturally than an arbitrary index would.
+function renderBotPickerPanel(status) {
+  const panel = $('lobby-bot-picker-panel');
+  if (openPickerSeatIndex === null || !status || openPickerSeatIndex >= status.seats) {
+    hide(panel);
+    return;
+  }
+  $('lobby-bot-picker-heading').textContent = `Fill seat ${openPickerSeatIndex + 1} with a bot?`;
+  show(panel);
 }
 
 function renderSeatsGrid(status) {
@@ -78,12 +139,13 @@ function renderSeatsGrid(status) {
   show($('lobby-seats-wrap'));
   $('lobby-seats-label').textContent = `Seats filled: ${status.joined.length}/${status.seats}`;
   const canManage = canManageSeats(status);
-  const seats = Array.from({ length: status.seats }, (_, i) => status.joined[i] || null);
-  const html = seats.map((seat, i) => seatTileHtml(seat, i, canManage)).join('');
+  const html = buildSeatsHtml(status, canManage);
   const container = $('lobby-seats');
-  if (container.dataset.renderedHtml === html) return; // no real change -- leave any open popover alone
-  container.innerHTML = html;
-  container.dataset.renderedHtml = html;
+  if (container.dataset.renderedHtml !== html) {
+    container.innerHTML = html;
+    container.dataset.renderedHtml = html;
+  }
+  renderBotPickerPanel(status); // not gated by the html diff above -- open/closed state can change with no roster change at all
 }
 
 export function renderLobby(status) {
@@ -97,8 +159,12 @@ export function renderLobby(status) {
   openPickerSeatIndex = null;
   $('lobby-seats').dataset.renderedHtml = '';
   applyJoinIdentityDefaults();
-  const visibilityNote = status.visibility === 'private' ? ' (private, share this code with friends)' : ' (public)';
-  $('room-code-text').textContent = `Room code: ${status.room_code}${visibilityNote}`;
+  $('room-code-value').textContent = status.room_code;
+  const isPrivate = status.visibility === 'private';
+  const tag = $('room-visibility-tag');
+  tag.textContent = isPrivate ? 'Private game' : 'Public game';
+  tag.classList.toggle('is-private', isPrivate);
+  tag.title = isPrivate ? 'Only joinable with this room code' : 'Listed for anyone to join';
   show($('room-code-display'));
   $('room-link-input').value = `${location.origin}${location.pathname}?room=${encodeURIComponent(status.room_code)}`;
   show($('room-link-row'));
@@ -175,10 +241,7 @@ async function addBot(botType) {
 
 async function removeSeat(username, isBot, name) {
   if (!isBot) {
-    const confirmed = await confirmDialog(
-      `This removes ${name} from the game right away. They'll be notified and sent back to the home screen.`,
-      'Remove player'
-    );
+    const confirmed = await confirmDialog(`Kick ${name}?`, 'Kick');
     if (!confirmed) return;
   }
   hide($('lobby-seats-error'));
@@ -201,47 +264,108 @@ async function removeSeat(username, isBot, name) {
   }
 }
 
-// Single delegated listener, wired once at boot (see app.js) -- the grid's
-// own innerHTML is fully replaced on every real change (renderSeatsGrid),
-// so binding to individual buttons after each render would mean rebinding
-// constantly; delegating to the never-replaced container avoids that.
+// Single delegated listener on the whole wrap (grid + the shared bot-
+// picker panel below it), wired once at boot (see app.js) -- the grid's
+// own innerHTML is fully replaced on every real roster change
+// (renderSeatsGrid), so binding to individual buttons after each render
+// would mean rebinding constantly; delegating to the never-replaced
+// wrapper avoids that, and covers the picker panel's own buttons too
+// since they're a sibling of the grid, not inside it.
 export function initLobbySeatGrid() {
-  const container = $('lobby-seats');
-  container.addEventListener('click', (e) => {
+  const wrap = $('lobby-seats-wrap');
+  wrap.addEventListener('click', (e) => {
     const target = e.target.closest('[data-action]');
     if (!target) return;
     // Never let this bubble to the document-level click-away listener
-    // below -- relying on it to correctly no-op via e.target.closest on a
-    // node that renderSeatsGridForced may have just detached (toggling the
-    // picker replaces this container's whole innerHTML synchronously,
-    // before bubbling reaches document) is fragile; just stop it here.
+    // below -- toggling the picker re-renders the grid synchronously
+    // (different .selected state = different html, see seatTileHtml),
+    // and relying on a click-away check to correctly no-op against a node
+    // that render may have just detached is fragile; just stop it here.
     e.stopPropagation();
     const action = target.dataset.action;
     if (action === 'toggle-picker') {
       const index = Number(target.dataset.seatIndex);
       openPickerSeatIndex = openPickerSeatIndex === index ? null : index;
-      if (lastStatus) renderSeatsGridForced(lastStatus);
+      if (lastStatus) renderSeatsGrid(lastStatus);
     } else if (action === 'add-bot') {
       addBot(target.dataset.botType);
     } else if (action === 'remove-seat') {
       removeSeat(target.dataset.username, target.dataset.isBot === 'true', target.dataset.name);
     }
   });
-  // Clicking anywhere outside an open seat's own picker closes it --
-  // same pattern as the card-info-popover elsewhere in this app.
+  // Clicking anywhere outside the picker panel closes it -- same pattern
+  // as the card-info-popover elsewhere in this app. Every click that
+  // should instead *change* openPickerSeatIndex (a "+", a tier button)
+  // already stopped its own propagation above, so this only ever fires
+  // for a genuine click-away.
   document.addEventListener('click', (e) => {
     if (openPickerSeatIndex === null) return;
-    if (e.target.closest('.lobby-seat.open')) return;
+    if (e.target.closest('#lobby-bot-picker-panel')) return;
     openPickerSeatIndex = null;
-    if (lastStatus) renderSeatsGridForced(lastStatus);
+    if (lastStatus) renderSeatsGrid(lastStatus);
   });
 }
 
-// renderSeatsGrid skips its own re-render when the html signature hasn't
-// changed (see its own comment) -- exactly what a purely-local toggle like
-// opening/closing the bot picker needs to bypass, since the roster itself
-// hasn't changed at all.
-function renderSeatsGridForced(status) {
-  $('lobby-seats').dataset.renderedHtml = '';
-  renderSeatsGrid(status);
+// ---------------- spectating a room still in its lobby ----------------
+// See index.html's own comment on #spectate-lobby-wait for the bug this
+// fixes. Always read-only (a spectator never manages seats, regardless of
+// whose account they're signed in as -- even the room's own host, watching
+// their own game from a second tab, gets the plain view here), so this
+// never needs anything like canManageSeats.
+export function renderSpectateLobbyWait(status) {
+  $('spectate-lobby-seats-label').textContent = `Seats filled: ${status.joined.length}/${status.seats}`;
+  const html = buildSeatsHtml(status, false);
+  const container = $('spectate-lobby-seats');
+  if (container.dataset.renderedHtml === html) return;
+  container.innerHTML = html;
+  container.dataset.renderedHtml = html;
+}
+
+// Reveals the real live table and hides the lobby-wait view -- called the
+// instant any real game message arrives (see gameEvents.js's
+// ensureGameScreenVisible), which is exactly the same "the game is
+// actually live now" signal a player's own screen already keys off of.
+// A no-op once already showing, so calling this on every single message
+// (not just the first) costs nothing.
+export function revealSpectateLiveLayout() {
+  stopSpectateLobbyPolling();
+  hide($('spectate-lobby-wait'));
+  show($('spectate-live-layout'));
+}
+
+let spectateLobbyPollTimer = null;
+
+async function _tickSpectateLobbyStatus() {
+  let status;
+  try {
+    status = await fetchJSON(`/api/status?room=${encodeURIComponent(currentRoomCode())}`);
+  } catch (e) {
+    return;
+  }
+  if (!status.exists) return; // let the shared status poll's own !exists handling take it from here
+  if (status.state !== 'lobby') { revealSpectateLiveLayout(); return; }
+  renderSpectateLobbyWait(status);
+}
+
+export function startSpectateLobbyPolling() {
+  if (spectateLobbyPollTimer) return;
+  _tickSpectateLobbyStatus();
+  spectateLobbyPollTimer = setInterval(_tickSpectateLobbyStatus, 1500);
+}
+export function stopSpectateLobbyPolling() {
+  if (spectateLobbyPollTimer) { clearInterval(spectateLobbyPollTimer); spectateLobbyPollTimer = null; }
+}
+
+// Called once from onSpectateJoin with the room's status at connect time --
+// decides which of the two views (lobby-wait vs. the real live table)
+// this spectate session actually starts on.
+export function showSpectateForStatus(status) {
+  $('spectate-lobby-seats').dataset.renderedHtml = ''; // a previous spectate session's grid must never bleed into this one
+  if (status && status.state === 'lobby') {
+    hide($('spectate-live-layout'));
+    show($('spectate-lobby-wait'));
+    startSpectateLobbyPolling();
+  } else {
+    revealSpectateLiveLayout();
+  }
 }
