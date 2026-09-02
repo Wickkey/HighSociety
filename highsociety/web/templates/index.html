@@ -1288,7 +1288,13 @@
         </div>
 
         <div id="join-waiting" class="hidden">
-          <p>✅ You're in! Waiting for the rest of the table…</p>
+          <!-- A real success banner (same green "you're good" language as
+               .rules-cue-card-flip/.elo-reveal.gain elsewhere in this app),
+               not a bare emoji + plain paragraph text. -->
+          <p class="lobby-joined-banner">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>
+            You're in! Waiting for the rest of the table…
+          </p>
           <!-- Adding/removing a seat now happens inline in the grid above
                (host-only -- see .lobby-seat-add-btn/.lobby-seat-remove and
                #lobby-seats-error for its errors); nothing left to show

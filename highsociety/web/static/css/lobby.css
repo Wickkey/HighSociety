@@ -1325,6 +1325,24 @@ button.secondary.standalone { margin-top: 0.9rem; display: inline-block; }
    than a same-weight bordered button competing with it. */
 .join-cta { width: 100%; padding: 0.8rem 1.3rem; font-size: 1rem; }
 
+/* A real success banner, not a bare "✅" emoji glyph glued to plain
+   paragraph text -- same green "you're good" language this app already
+   uses for a positive Elo change / a saved setting (see .rules-cue-card-
+   flip, .elo-reveal.gain, --chip-money's own comment). */
+.lobby-joined-banner {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  background: rgba(31, 122, 77, 0.1);
+  border-left: 3px solid var(--chip-money);
+  border-radius: var(--radius-sm);
+  padding: 0.7rem 1rem;
+  margin: 0 0 0.6rem;
+  font-weight: 600;
+  color: var(--text);
+}
+.lobby-joined-banner svg { flex-shrink: 0; width: 1.1rem; height: 1.1rem; color: var(--chip-money); }
+
 .lobby-status {
   background: var(--panel-bg-soft);
   border: 1px solid var(--panel-border);
@@ -1368,8 +1386,26 @@ button.secondary.standalone { margin-top: 0.9rem; display: inline-block; }
   height: 34px;
   border-radius: 9px;
   font-size: 1rem;
+  /* Missing entirely before -- a bot's emoji/a human's initial is plain
+     inline text with no centering at all, so it just sat at the box's
+     top-left corner (following normal text flow) instead of in the
+     middle of its own tinted square. */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
 }
-.lobby-seat-avatar.is-human { border-radius: 50%; }
+/* A human seat never got a background at all (only a bot's inline style=
+   sets one) -- just a bare letter floating with nothing behind it. Same
+   solid-circle treatment as this app's own account/profile-chip avatars
+   elsewhere, so a human seat reads as consistent with the rest of the app,
+   not merely "less finished" than a bot's own tinted tile. */
+.lobby-seat-avatar.is-human {
+  border-radius: 50%;
+  background: var(--accent-light);
+  color: #1c1a16;
+  font-weight: 700;
+}
 .lobby-seat-name {
   font-size: 0.78rem;
   font-weight: 600;
