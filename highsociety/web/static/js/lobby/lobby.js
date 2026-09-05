@@ -20,7 +20,7 @@ import { ws, closeSocket, attemptReconnect, connectPlayerSocket, connectSpectato
 import { setPendingJoin, setPendingSpectate } from '../network/messages.js';
 import { confirmDialog } from '../ui/modals.js';
 import { renderFinished } from './rematch.js';
-import { renderLobby } from './playerList.js';
+import { renderLobby, showSpectateForStatus } from './playerList.js';
 import { loadHomeRecentGames } from './gameHistory.js';
 
 export async function fetchJSON(url, opts) {
@@ -686,6 +686,22 @@ export async function onCreateGame() {
     lastStatusValue = status;
     renderLobby(status);
     startPolling();
+    // Hosting used to leave the host sitting on the exact same join-form
+    // every other joiner sees, requiring a separate, redundant "Join
+    // Game" click on their own room -- a real reported point of
+    // confusion. renderLobby() above already pre-filled #join-username
+    // from the host's own saved profile (applyJoinIdentityDefaults), so
+    // onJoin() below just reuses that -- same identity handling/
+    // resetGameState/seedOpponents/connectPlayerSocket() path a manual
+    // click would take, no duplicated logic. Both calls are synchronous
+    // (nothing here awaits until connectPlayerSocket's own WebSocket
+    // opens), so the browser never actually paints the intermediate
+    // join-form state -- no visible flash before landing on "You're in!".
+    // If the auto-join's socket fails to open, connectPlayerSocket's own
+    // onclose -> refreshStatus() -> renderLobby() fallback already lands
+    // back on a normal, manually-clickable join-form -- an existing
+    // safety net, not new failure-handling.
+    onJoin();
   } catch (e) {
     showError($('host-error'), e.message);
   }
@@ -759,12 +775,23 @@ export function onSpectateJoin() {
   saveProfile(username, username); // this device's identity going forward — see loadProfile
   stopPolling();
   resetGameState(null, lastStatusValue);
+  // Seeds with whatever status this tab already knows (from the polling
+  // that was already running to reach this screen), not null -- a real
+  // reported bug: defaulting to "assume it's live" while the fresh fetch
+  // below is still in flight meant every spectate of a still-in-lobby
+  // room visibly flashed the live game layout for a moment before
+  // snapping back to the correct waiting view the instant that fetch
+  // resolved ("goes to game -> comes back", not smooth at all). Falls
+  // back to the live layout only if this tab genuinely has no status yet
+  // (e.g. a direct link with nothing polled first) -- same as before.
+  showSpectateForStatus(lastStatusValue);
   fetchJSON(`/api/status?room=${encodeURIComponent(currentRoomCodeValue)}`)
     .then((status) => {
       seedOpponents(status, null);
       game.revealCards = status.reveal_cards !== false;
       game.showLogs = status.show_logs !== false;
       applyRoomDisplaySettings();
+      showSpectateForStatus(status);
     }).catch(() => {});
   connectSpectatorSocket();
   showScreen('screen-spectate');

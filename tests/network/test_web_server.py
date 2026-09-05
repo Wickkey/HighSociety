@@ -731,6 +731,103 @@ def test_game_thread_crash_marks_the_room_finished_and_closes_connections(runnin
     player.close()
 
 
+def _spectate_handshake(spectator, name, username):
+    """Shared IDENTIFY handshake for a raw `Client` spectator connection --
+    name then username, per ws_spectate's own prompt order. Returns the
+    parsed IDENTIFY_SUCCESS payload."""
+    spectator.receive(timeout=5)  # "Enter your name"
+    spectator.send(json.dumps({"message_type": "IDENTIFY_ACK", "prompt": name}))
+    spectator.receive(timeout=5)  # "Enter your username"
+    spectator.send(json.dumps({"message_type": "IDENTIFY_ACK", "prompt": username}))
+    return json.loads(spectator.receive(timeout=5))
+
+
+def test_spectator_joining_a_lobby_gets_a_waiting_message_not_a_live_one(running_web_server):
+    """Regression coverage for the exact inconsistency reported: a spectator
+    connecting to a room that hasn't started yet used to get "You are now
+    watching the game live" -- flatly untrue, and (see gameEvents.js's own
+    fix) the frontend used to render the live game table's skeleton for it
+    too. The IDENTIFY_SUCCESS wording itself should reflect a lobby is
+    still just a lobby."""
+    port = running_web_server
+    room_code = web_server.app.test_client().post(
+        "/api/create_game", json={"seats": 3, "bot_mix": []}
+    ).get_json()["room_code"]
+
+    spectator = Client(_ws_url(port, f"/ws_spectate?room={room_code}"))
+    welcome = _spectate_handshake(spectator, "watcher", "watcher-user")
+    assert welcome["message_type"] == "IDENTIFY_SUCCESS"
+    assert "live" not in welcome["prompt"].lower()
+    assert "waiting" in welcome["prompt"].lower()
+    spectator.close()
+
+
+def test_spectator_joining_mid_game_gets_a_catchup_not_a_blank_table(running_web_server):
+    """Regression coverage: ws_spectate never sent a fresh spectator anything
+    about the game already in progress -- no roster, no current auction, no
+    turn order -- unlike a reconnecting player (_send_reconnect_catchup).
+    A spectator joining anything already underway saw a completely blank
+    table until the next live event happened to arrive."""
+    port = running_web_server
+    room_code = web_server.app.test_client().post(
+        "/api/create_game", json={"seats": 2, "bot_mix": ["pass"], "seed": 5, "bot_think_time": 0}
+    ).get_json()["room_code"]
+
+    alice = ScriptedWSClient(_ws_url(port, f"/ws?room={room_code}"), "alice")
+    alice.handshake()
+    alice.start()
+
+    room = web_server._rooms[room_code]
+    deadline = time.time() + 10
+    while time.time() < deadline and room.game is None:
+        threading.Event().wait(0.1)
+    assert room.game is not None, "game never actually started"
+
+    spectator = Client(_ws_url(port, f"/ws_spectate?room={room_code}"))
+    welcome = _spectate_handshake(spectator, "watcher", "watcher-user")
+    assert "live" in welcome["prompt"].lower()
+
+    seen_player_order = False
+    seen_roster = False
+    deadline = time.time() + 5
+    while time.time() < deadline and not (seen_player_order and seen_roster):
+        raw = spectator.receive(timeout=0.5)
+        if raw is None:
+            continue
+        msg = json.loads(raw)
+        data = msg.get("data") or {}
+        if data.get("event") == "player_order":
+            seen_player_order = True
+        elif data.get("event") == "opponent_state_sync":
+            seen_roster = True
+    assert seen_player_order, "spectator never got the turn order catch-up"
+    assert seen_roster, "spectator never got the opponent roster catch-up"
+
+    alice.close()
+    spectator.close()
+
+
+def test_reap_stale_rooms_closes_spectator_connections_too(running_web_server):
+    """Regression coverage: the reaper already closed a stale room's player
+    connections but never touched its spectators at all -- an orphaned
+    spectator socket (and its receiver thread) would otherwise sit open
+    forever once the room itself was deleted from `_rooms`."""
+    room_code = web_server.app.test_client().post(
+        "/api/create_game", json={"seats": 3, "bot_mix": []}
+    ).get_json()["room_code"]
+    room = web_server._rooms[room_code]
+
+    spectator = MagicMock()
+    spectator.active = True
+    room.spectators.append(spectator)
+    room.last_active_at = time.time() - web_server._ROOM_LOBBY_IDLE_TIMEOUT_SECONDS - 1
+
+    web_server._reap_stale_rooms_once()
+
+    assert room_code not in web_server._rooms
+    spectator.close.assert_called_once()
+
+
 def test_spectator_sees_the_game_live(running_web_server):
     port = running_web_server
     room_code = web_server.app.test_client().post(

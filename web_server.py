@@ -440,6 +440,46 @@ def _get_room(room_code: Optional[str]) -> Optional[GameRoom]:
         return _rooms.get(room_code)
 
 
+def _reap_stale_rooms_once() -> None:
+    """
+    One pass of the background hygiene loop below -- factored out so a test
+    can call it directly on demand instead of waiting for the real
+    background thread's own long interval.
+    """
+    if isinstance(decision_service.default_decision_service, WorkerPoolBotDecisionService):
+        decision_service.default_decision_service.reap_idle_pools()
+    now = time.time()
+    with _rooms_lock:
+        stale = [
+            (code, room) for code, room in _rooms.items()
+            if (room.state == "lobby" and now - room.last_active_at > _ROOM_LOBBY_IDLE_TIMEOUT_SECONDS)
+            or (room.state == "finished" and now - room.last_active_at > _ROOM_FINISHED_RETENTION_SECONDS)
+        ]
+        for code, _room in stale:
+            del _rooms[code]
+    # A finished room's human connections are deliberately kept open past
+    # game-end for rematches (see GameRoom.run_game) — once the room itself
+    # is gone, nobody's still-open tab should linger forever; close them
+    # here instead. Outside the lock: NetworkPlayer.close() can block
+    # briefly on the socket, and nothing else touches these rooms once
+    # they're out of `_rooms`.
+    #
+    # Spectators need the exact same cleanup and were missing it entirely:
+    # a spectator watching a lobby that never filled up (or lingering on a
+    # long-finished game's standings) had nothing that ever closed their
+    # connection once the room itself was deleted -- ws_spectate's own loop
+    # only exits on spectator.active/transport.is_connected turning false,
+    # neither of which this reap ever touched, leaking that connection (and
+    # its receiver thread) for as long as the process runs.
+    for _code, room in stale:
+        for p in room.players:
+            if isinstance(p, NetworkPlayer) and p.active:
+                p.close()
+        for s in room.spectators:
+            if s.active:
+                s.close()
+
+
 def _reap_stale_rooms() -> None:
     """
     Background hygiene for rooms nobody's using anymore: a lobby that never
@@ -447,35 +487,10 @@ def _reap_stale_rooms() -> None:
     for. Without this, `_rooms` only ever grows for the lifetime of the
     process. Runs forever as a daemon thread — see its start call near the
     bottom of this module.
-
-    Also reaps idle bot worker pools (see BOT_POOL_SIZE above) on the same
-    cadence -- an unrelated kind of staleness, but sharing this loop's
-    existing periodic wakeup avoids a whole second background thread just
-    for it.
     """
     while True:
         threading.Event().wait(_ROOM_REAPER_INTERVAL_SECONDS)
-        if isinstance(decision_service.default_decision_service, WorkerPoolBotDecisionService):
-            decision_service.default_decision_service.reap_idle_pools()
-        now = time.time()
-        with _rooms_lock:
-            stale = [
-                (code, room) for code, room in _rooms.items()
-                if (room.state == "lobby" and now - room.last_active_at > _ROOM_LOBBY_IDLE_TIMEOUT_SECONDS)
-                or (room.state == "finished" and now - room.last_active_at > _ROOM_FINISHED_RETENTION_SECONDS)
-            ]
-            for code, _room in stale:
-                del _rooms[code]
-        # A finished room's human connections are deliberately kept open past
-        # game-end for rematches (see GameRoom.run_game) — once the room
-        # itself is gone, nobody's still-open tab should linger forever;
-        # close them here instead. Outside the lock: NetworkPlayer.close()
-        # can block briefly on the socket, and nothing else touches these
-        # rooms once they're out of `_rooms`.
-        for _code, room in stale:
-            for p in room.players:
-                if isinstance(p, NetworkPlayer) and p.active:
-                    p.close()
+        _reap_stale_rooms_once()
 
 
 threading.Thread(target=_reap_stale_rooms, daemon=True, name="RoomReaper").start()
@@ -1511,7 +1526,7 @@ def _broadcast_spectator_count(room: "GameRoom") -> None:
             p.send_message("", message_type="GLOBAL_EVENT", data=data)
 
 
-def _send_opponent_roster(player: NetworkPlayer, room: "GameRoom") -> None:
+def _send_opponent_roster(player: "NetworkPlayer | NetworkSpectator", room: "GameRoom") -> None:
     """
     Tells `player` about every other seat at the table right now — status
     cards, active state, bot-ness — as a batch of synthetic
@@ -1523,6 +1538,13 @@ def _send_opponent_roster(player: NetworkPlayer, room: "GameRoom") -> None:
     (being the random starting player, or reaching their first turn) —
     leaving an already-seated, real opponent looking like they didn't exist
     yet for however long that took.
+
+    Also reused as-is for a spectator's own catch-up (see
+    _send_spectator_catchup) -- the `other is player` self-exclusion below
+    only ever matters for an actual player (never true for a spectator,
+    since a spectator is never a member of room.players to begin with), so
+    every real seat is included correctly with no spectator-specific branch
+    needed; both types share the same send_message(...) shape.
     """
     for other in room.players:
         if other is player:
@@ -1587,6 +1609,44 @@ def _send_reconnect_catchup(player: NetworkPlayer, room: "GameRoom") -> None:
         "", message_type="GLOBAL_EVENT",
         data={"event": "spectator_count", "count": sum(1 for s in room.spectators if s.active)},
     )
+
+
+def _send_spectator_catchup(spectator: NetworkSpectator, room: "GameRoom") -> None:
+    """
+    Mirrors _send_reconnect_catchup above, but for a spectator connecting to
+    a game already underway (or already finished) -- ws_spectate never had
+    any equivalent of this at all, so a spectator joining anything but a
+    freshly-created, still-empty lobby saw a completely blank table (no
+    players listed, no current auction, "Current Highest Bid: 0") until the
+    next live event happened to arrive -- which, for an already-finished
+    game, never comes. No hand/points to send (a spectator only ever sees
+    what every player's own public status cards already reveal, never a
+    private hand), so this is just the turn order plus the same synthetic
+    "sync" auction state and opponent roster a reconnecting player gets.
+    """
+    if room.game is None:
+        return
+    spectator.send_message(
+        "", message_type="GLOBAL_EVENT",
+        data={"event": "player_order", "usernames": [p.username for p in room.game.players]},
+    )
+    live_state = room.game.get_live_auction_state()
+    if live_state.get("card") is not None:
+        spectator.send_message(
+            "", message_type="AUCTION_UPDATE",
+            data={
+                "round_number": live_state["round_number"],
+                "kind": "sync",
+                "card": live_state["card"],
+                "max_bid": live_state["max_bid"],
+                "turn_player": live_state["turn_player"],
+            },
+        )
+    # _send_opponent_roster only special-cases skipping the recipient's own
+    # seat (`if other is player: continue`) -- a spectator is never in
+    # room.players to begin with, so every real seat is included exactly as
+    # it should be; no spectator-specific variant needed.
+    _send_opponent_roster(spectator, room)
 
 
 def _handle_player_reconnect(ws, room: "GameRoom", rejoin_token: str) -> None:
@@ -1764,7 +1824,17 @@ def ws_spectate(ws):
     room.spectators.append(spectator)
     _broadcast_spectator_count(room)
 
-    _send(ws, game_id, "IDENTIFY_SUCCESS", f"Welcome {name}! You are now watching the game live.")
+    # Wording matches what's actually true right now -- "watching live" was
+    # shown even for a room still sitting in its lobby with nobody playing
+    # yet (see JS's own onSpectateJoin, which now renders a waiting view
+    # instead of the live table for exactly this state).
+    welcome = (
+        f"Welcome {name}! Waiting for the host to start the game…"
+        if room.state == "lobby"
+        else f"Welcome {name}! You are now watching the game live."
+    )
+    _send(ws, game_id, "IDENTIFY_SUCCESS", welcome)
+    _send_spectator_catchup(spectator, room)
 
     chat_thread = threading.Thread(target=_spectator_chat_listener, args=(spectator, room),
                                     daemon=True, name=f"Chat-{username}")

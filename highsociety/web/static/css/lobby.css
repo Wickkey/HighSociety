@@ -52,8 +52,13 @@
    text action below everything else, not a full button competing with
    the primary actions above it. Resets every default <button> property
    (background/border/margin/underline) a plain button or .link-button
-   would otherwise apply, same fix as the profile popover menu items. */
-.matchmaking-cancel-link {
+   would otherwise apply, same fix as the profile popover menu items.
+   Shared by the matchmaking screen's Cancel and (see lobby.css's own
+   join-screen section) the Join screen's "Watch as a spectator instead" --
+   both are a secondary path that shouldn't visually compete with the
+   real primary action above it (Find Match / Join Game), which a same-
+   weight bordered button used to do. */
+.quiet-action-link {
   display: block;
   width: auto;
   margin: 1.2rem auto 0;
@@ -68,7 +73,7 @@
   text-decoration: none;
   cursor: pointer;
 }
-.matchmaking-cancel-link:hover { background: var(--panel-bg-soft); color: var(--text); }
+.quiet-action-link:hover { background: var(--panel-bg-soft); color: var(--text); }
 
 /* ---------------- login screen ---------------- */
 
@@ -1314,6 +1319,30 @@ button.secondary.standalone { margin-top: 0.9rem; display: inline-block; }
 }
 .bot-add-label select:focus { outline: none; border-color: var(--accent); }
 
+/* The one real action on this screen -- full-width and slightly taller
+   than a default button so it actually reads as the main event, now that
+   "Watch as a spectator instead" below it is a quiet text link rather
+   than a same-weight bordered button competing with it. */
+.join-cta { width: 100%; padding: 0.8rem 1.3rem; font-size: 1rem; }
+
+/* A real success banner, not a bare "✅" emoji glyph glued to plain
+   paragraph text -- same green "you're good" language this app already
+   uses for a positive Elo change / a saved setting (see .rules-cue-card-
+   flip, .elo-reveal.gain, --chip-money's own comment). */
+.lobby-joined-banner {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  background: rgba(31, 122, 77, 0.1);
+  border-left: 3px solid var(--chip-money);
+  border-radius: var(--radius-sm);
+  padding: 0.7rem 1rem;
+  margin: 0 0 0.6rem;
+  font-weight: 600;
+  color: var(--text);
+}
+.lobby-joined-banner svg { flex-shrink: 0; width: 1.1rem; height: 1.1rem; color: var(--chip-money); }
+
 .lobby-status {
   background: var(--panel-bg-soft);
   border: 1px solid var(--panel-border);
@@ -1328,12 +1357,22 @@ button.secondary.standalone { margin-top: 0.9rem; display: inline-block; }
    line with a real per-seat grid (see JOIN_GAME_REWORK.MD) -- the same
    live roster data (playerList.js's poll), just rendered as tiles instead
    of a sentence, with host-only inline controls to add/remove a seat. */
+.lobby-seats-label-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
 .lobby-seats-label {
   margin: 0 0 0.6rem;
   font-size: 0.85rem;
   font-weight: 600;
   color: var(--muted);
 }
+/* Stays visible whether the host is seated, spectating, or has left --
+   see renderHostLabel's own comment in playerList.js. */
+.lobby-host-label { margin: 0 0 0.6rem; font-size: 0.8rem; color: var(--muted); font-style: italic; }
 .lobby-seats {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
@@ -1357,8 +1396,26 @@ button.secondary.standalone { margin-top: 0.9rem; display: inline-block; }
   height: 34px;
   border-radius: 9px;
   font-size: 1rem;
+  /* Missing entirely before -- a bot's emoji/a human's initial is plain
+     inline text with no centering at all, so it just sat at the box's
+     top-left corner (following normal text flow) instead of in the
+     middle of its own tinted square. */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
 }
-.lobby-seat-avatar.is-human { border-radius: 50%; }
+/* A human seat never got a background at all (only a bot's inline style=
+   sets one) -- just a bare letter floating with nothing behind it. Same
+   solid-circle treatment as this app's own account/profile-chip avatars
+   elsewhere, so a human seat reads as consistent with the rest of the app,
+   not merely "less finished" than a bot's own tinted tile. */
+.lobby-seat-avatar.is-human {
+  border-radius: 50%;
+  background: var(--accent-light);
+  color: #1c1a16;
+  font-weight: 700;
+}
 .lobby-seat-name {
   font-size: 0.78rem;
   font-weight: 600;
@@ -1376,11 +1433,18 @@ button.secondary.standalone { margin-top: 0.9rem; display: inline-block; }
   right: -6px;
   width: 20px;
   height: 20px;
+  /* The generic `button { padding: 0.65rem 1.3rem }` rule (see main.css)
+     was never reset here -- fighting with this explicit 20x20 size, it
+     rendered as an oval/pill instead of a circle (same root cause the
+     .bot-add-row/.button-row margin-top comments elsewhere in this file
+     already document for a different property: a small icon-sized button
+     inheriting a large generic button rule meant for full-size buttons). */
+  padding: 0;
+  margin: 0;
   border-radius: 50%;
   background: var(--panel-bg);
   border: 1px solid var(--panel-border);
   color: var(--muted);
-  font-size: 0.7rem;
   line-height: 1;
   display: flex;
   align-items: center;
@@ -1396,75 +1460,152 @@ button.secondary.standalone { margin-top: 0.9rem; display: inline-block; }
   transform: scale(1);
 }
 .lobby-seat-remove:hover { background: var(--danger); border-color: var(--danger); color: #fff; }
+/* A real stroked SVG cross, not a text "×" glyph -- at 20px, a font's own
+   glyph metrics rarely optically center inside a perfect circle (the
+   literal "X button looks weird" complaint); a fixed-geometry icon does,
+   regardless of font/rendering differences across browsers. */
+.lobby-seat-remove svg { width: 11px; height: 11px; }
 
 .lobby-seat.open {
+  /* Even top/bottom padding, unlike the base .lobby-seat's own extra top
+     clearance for the hover-reveal remove button (see .lobby-seat-remove)
+     -- an open seat never shows one, so keeping that extra top space just
+     left its "+"/"Open" content sitting visibly off-center vertically. */
+  padding-top: 0.6rem;
   background: transparent;
   border: 1.5px dashed var(--panel-border);
 }
 .lobby-seat.open .lobby-seat-name { color: var(--muted); font-weight: 500; }
+/* A plain solid-outline circle, not its own second dashed rectangle inside
+   the seat's already-dashed one -- two nested dashed borders at slightly
+   different scales was the actual "doesn't look symmetrical" complaint,
+   not the padding alone. One dashed boundary (the seat itself, marking
+   "this slot is open") is enough. */
 .lobby-seat-add-btn {
   width: 34px;
   height: 34px;
-  border-radius: 9px;
-  font-size: 1.05rem;
-  background: transparent;
-  border: 1.5px dashed var(--panel-border);
+  /* Same fix as .lobby-seat-remove above -- the generic button padding
+     rule was never reset here either, so the "+" sat off-center inside a
+     box that wasn't actually the 34x34 circle it looked like. */
+  padding: 0;
+  margin: 0;
+  border-radius: 50%;
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
   color: var(--muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
   cursor: pointer;
   transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
 }
-.lobby-seat-add-btn:hover, .lobby-seat.open.picker-open .lobby-seat-add-btn {
-  background: var(--accent-soft);
-  border-color: var(--accent);
-  color: var(--accent-strong);
-}
+.lobby-seat-add-btn:hover { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-strong); }
+/* A real stroked SVG plus, not a text "+" glyph -- same reasoning as the
+   remove button's own SVG cross (font glyph metrics don't reliably
+   optically center in a small circle). */
+.lobby-seat-add-btn svg { width: 14px; height: 14px; }
+/* The targeted seat itself -- the shared "Fill this seat with a bot?"
+   panel below never names which seat it means (see its own comment), so
+   a solid accent border here is the only way to tell which "Open" tile
+   it's actually talking about, especially with more than one open seat. */
+.lobby-seat.open.selected { border-color: var(--accent); border-style: solid; }
+.lobby-seat.open.selected .lobby-seat-add-btn { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-strong); }
 
-/* Add-a-bot popover, anchored under whichever open seat's + was clicked. */
-.lobby-bot-picker {
-  position: absolute;
-  top: calc(100% + 6px);
-  left: 50%;
-  transform: translateX(-50%);
-  width: 132px;
+/* One shared, clearly-labeled panel below the whole grid instead of a
+   small popover anchored under whichever seat's + was clicked -- see
+   index.html's own comment on #lobby-bot-picker-panel for why. The tinted
+   heading ("in a different color fill", per the original request) makes
+   this read as its own deliberate step, not something about to vanish. */
+.lobby-bot-picker-panel {
+  margin-top: 0.9rem;
+  border: 1px solid var(--accent-light);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+.lobby-bot-picker-heading {
+  margin: 0;
+  padding: 0.55rem 0.9rem;
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+.lobby-bot-picker-options {
+  display: flex;
+  gap: 0.5rem;
+  padding: 0.7rem 0.9rem;
   background: var(--panel-bg);
+}
+.lobby-bot-option {
+  flex: 1 1 0;
+  background: var(--panel-bg-soft);
   border: 1px solid var(--panel-border);
   border-radius: var(--radius-sm);
-  box-shadow: 0 12px 28px -8px rgba(0, 0, 0, 0.35);
-  padding: 0.4rem;
-  z-index: 20;
-  text-align: left;
-}
-.lobby-bot-picker[hidden] { display: none; }
-.lobby-bot-option {
-  display: block;
-  width: 100%;
-  background: none;
-  border: none;
-  border-radius: 6px;
-  padding: 0.4rem 0.45rem;
+  padding: 0.55rem 0.4rem;
   font-family: inherit;
   font-size: 0.82rem;
   font-weight: 600;
   color: var(--text);
   cursor: pointer;
-  text-align: left;
+  text-align: center;
+  transition: background 0.12s ease, border-color 0.12s ease;
 }
-.lobby-bot-option:hover { background: var(--panel-bg-soft); }
+.lobby-bot-option:hover { background: var(--accent-soft); border-color: var(--accent-light); }
 
 .room-code-display {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 0.6rem;
+  flex-wrap: wrap;
+  gap: 0.7rem;
+  margin-bottom: 0.6rem;
+}
+
+/* A labeled block (small eyebrow + a big, letter-spaced code) rather than
+   the room code sitting inline in a sentence -- the one piece of
+   information this whole screen exists to hand over, so it gets to look
+   like it. Left accent border echoes the account-elo-chart-col's own
+   "important block" treatment elsewhere in this app. */
+.room-code-block {
   background: var(--accent-soft);
   border: 1px solid var(--accent-light);
+  border-left: 4px solid var(--accent);
   border-radius: var(--radius-sm);
-  padding: 0.6rem 0.9rem;
-  margin-bottom: 0.6rem;
-  font-size: 0.95rem;
-  font-weight: 600;
-  letter-spacing: 0.02em;
+  padding: 0.45rem 1rem 0.5rem;
 }
+.room-code-eyebrow {
+  display: block;
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.room-code-value {
+  font-size: 1.35rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--accent-strong);
+}
+
+/* A colored dot + label instead of "(public)"/"(private)" stuffed in
+   parentheses after the code -- reads as its own real piece of status,
+   not an afterthought. */
+.room-visibility-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+.room-visibility-tag::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+.room-visibility-tag.is-private::before { background: var(--muted); }
 
 /* A dedicated row (its own line, below the room-code badge above) for the
    invite link -- an icon-only button next to a bare room-code badge was
@@ -1575,7 +1716,13 @@ button.secondary.standalone { margin-top: 0.9rem; display: inline-block; }
   border-radius: 999px;
   overflow: hidden;
 }
-.room-row-bar-fill { height: 100%; background: var(--accent); border-radius: 999px; }
+/* display:block is load-bearing here, not decoration -- .room-row-bar-fill
+   is a <span> (inline by default), and CSS width/height have no effect at
+   all on inline elements. Without this, the inline style="width: X%" set
+   in JS was silently ignored every time, so the fill never actually
+   reflected how full a room was -- a real reported bug, not just hard to
+   see. */
+.room-row-bar-fill { display: block; height: 100%; background: var(--accent); border-radius: 999px; }
 .room-row-progress-text { font-size: 0.78rem; color: var(--muted); white-space: nowrap; }
 
 /* A dashed, quieter treatment than a real .panel -- this is a "nothing to

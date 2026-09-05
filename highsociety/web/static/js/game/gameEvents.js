@@ -15,10 +15,16 @@ import {
 } from '../ui/notifications.js';
 import { appendChatLine } from '../ui/chat.js';
 import { refreshStatus } from '../lobby/lobby.js';
+import { revealSpectateLiveLayout } from '../lobby/playerList.js';
 
 export function ensureGameScreenVisible(isSpectator) {
   const id = isSpectator ? 'screen-spectate' : 'screen-game';
   if ($(id).classList.contains('hidden')) showScreen(id);
+  // A real game message is the same "this is actually live now" signal a
+  // player's own screen implicitly relies on -- see index.html's own
+  // comment on #spectate-lobby-wait for the bug this replaces. A no-op
+  // once already showing the live layout.
+  if (isSpectator) revealSpectateLiveLayout();
 }
 
 // gameplay.py broadcasts a plain-text GLOBAL_EVENT narration line right next
