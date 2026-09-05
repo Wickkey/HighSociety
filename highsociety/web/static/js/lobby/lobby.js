@@ -775,12 +775,16 @@ export function onSpectateJoin() {
   saveProfile(username, username); // this device's identity going forward — see loadProfile
   stopPolling();
   resetGameState(null, lastStatusValue);
-  // Defaults to the live layout (showSpectateForStatus(null) below) so a
-  // slow/failed status fetch still shows *something* sane -- exactly
-  // today's pre-fix behavior, not a new failure mode -- while the common
-  // case (the fetch succeeds) picks the right view for whatever's actually
-  // true right now instead of always assuming a live game.
-  showSpectateForStatus(null);
+  // Seeds with whatever status this tab already knows (from the polling
+  // that was already running to reach this screen), not null -- a real
+  // reported bug: defaulting to "assume it's live" while the fresh fetch
+  // below is still in flight meant every spectate of a still-in-lobby
+  // room visibly flashed the live game layout for a moment before
+  // snapping back to the correct waiting view the instant that fetch
+  // resolved ("goes to game -> comes back", not smooth at all). Falls
+  // back to the live layout only if this tab genuinely has no status yet
+  // (e.g. a direct link with nothing polled first) -- same as before.
+  showSpectateForStatus(lastStatusValue);
   fetchJSON(`/api/status?room=${encodeURIComponent(currentRoomCodeValue)}`)
     .then((status) => {
       seedOpponents(status, null);
