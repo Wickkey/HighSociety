@@ -374,10 +374,10 @@ def is_configured() -> bool:
 # slower than it needs to be, on every request. A small pool of already-
 # established connections, reused across calls, removes that handshake
 # from the common case entirely. minconn/maxconn are deliberately modest
-# (not "as many as this process could use") -- this app still uses
-# DATABASE_URL's *direct* connection (not Supabase's own pooler), which
-# has its own real ceiling on live connections that a future move to
-# their pooler endpoint would raise independently of this.
+# (not "as many as this process could use") -- DATABASE_URL already
+# points at Supabase's own connection pooler (not a direct connection),
+# which still has its own real ceiling on live sessions this process
+# shouldn't try to hog.
 _MIN_POOL_CONNECTIONS = 1
 _MAX_POOL_CONNECTIONS = 10
 _pool = None
@@ -398,12 +398,57 @@ def _get_pool():
     return _pool
 
 
+_CONNECT_RETRY_ATTEMPTS = 3
+
+
 def _connect():
+    """
+    Hands back a pooled connection that's actually known-good, not just
+    "the pool still has a reference to it" -- a real production incident
+    this exact gap caused: after several idle days with no traffic,
+    Supabase's own pooler silently dropped every one of this pool's
+    idle connections. psycopg2's pool has no way to notice that on its
+    own (it only ever checks conn.closed, which stays 0 for a connection
+    that was cleanly dropped out from under it while idle -- that only
+    flips once something actually tries to use it and fails), so it kept
+    handing out those dead connections to every single request from then
+    on. Every one of this module's callers has its own broad `except
+    Exception` around the query itself, so each failure quietly mapped to
+    whatever fail-safe response that call site already had for "the
+    database is unreachable" -- get_leaderboard/get_rating_history/etc.
+    silently returning empty, username_is_taken() failing safe toward
+    "taken" (see its own docstring) -- with nothing to ever recover until
+    a manual process restart happened to hand out a fresh pool.
+
+    A cheap SELECT 1 here (much cheaper than the TCP+TLS handshake this
+    pool exists to avoid in the first place) catches that before the
+    caller ever sees a dead connection: a connection that fails it gets
+    discarded from the pool outright (never recycled again) and a
+    replacement is fetched instead. Capped at _CONNECT_RETRY_ATTEMPTS so
+    a genuine outage (not just some stale idle connections) still fails
+    fast, in roughly the same number of attempts as before, rather than
+    retrying indefinitely against a database that's actually down.
+    """
     # Imported lazily so merely importing this module (which web_server.py
     # does unconditionally) never fails for a dev/test setup that hasn't
     # installed psycopg2 — only actually needed once DATABASE_URL is set.
     import psycopg2  # noqa: F401 -- see _get_pool's own lazy psycopg2.pool import
-    return _get_pool().getconn()
+    pool = _get_pool()
+    last_error = None
+    for _ in range(_CONNECT_RETRY_ATTEMPTS):
+        try:
+            conn = pool.getconn()
+        except Exception as e:  # noqa: BLE001 -- the pool itself couldn't produce a connection (exhausted, or the database is genuinely unreachable)
+            last_error = e
+            continue
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT 1")
+            return conn
+        except Exception as e:  # noqa: BLE001 -- this specific connection is dead; discard it and try another
+            last_error = e
+            pool.putconn(conn, close=True)
+    raise last_error
 
 
 def _release_connection(conn) -> None:
