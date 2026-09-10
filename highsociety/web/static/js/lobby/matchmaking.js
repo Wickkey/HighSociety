@@ -9,12 +9,60 @@ let matchmakingPollTimer = null;
 let matchmakingSeats = null;
 let matchmakingStartedAt = null;
 let matchmakingElapsedTimer = null;
+let queueDepthPollTimer = null;
 
 export function onPlayClick() {
   showScreen('screen-matchmaking');
   setScreenPath('/play');
   show($('matchmaking-setup'));
   hide($('matchmaking-waiting'));
+  startQueueDepthPolling();
+}
+
+function currentSeatChoice() {
+  return parseInt($('matchmaking-seats').value, 10) || 3;
+}
+
+// Segmented 2-5 picker -- same shape as lobby.js's onSeatCountButtonClick
+// for the host form, just for this screen's own hidden input. Wired once
+// at boot (see app.js).
+export function onMatchmakingSeatButtonClick(e) {
+  const btn = e.target.closest('.pill-choice-btn');
+  if (!btn) return;
+  document.querySelectorAll('#matchmaking-seats-buttons .pill-choice-btn').forEach((b) => {
+    b.classList.toggle('selected', b === btn);
+  });
+  $('matchmaking-seats').value = btn.dataset.value;
+  refreshQueueDepth(); // the count is per match-size -- switching sizes should re-fetch, not wait for the next tick
+}
+
+// A gentle "you're not alone" (or "you'd be first") signal on the setup
+// screen, before actually joining the queue. Self-stops once navigation
+// leaves the setup view (onFindMatch / cancelMatchmakingTicketQuietly).
+function startQueueDepthPolling() {
+  stopQueueDepthPolling();
+  refreshQueueDepth();
+  queueDepthPollTimer = setInterval(refreshQueueDepth, 3000);
+}
+
+function stopQueueDepthPolling() {
+  if (queueDepthPollTimer) { clearInterval(queueDepthPollTimer); queueDepthPollTimer = null; }
+}
+
+async function refreshQueueDepth() {
+  const seats = currentSeatChoice();
+  let data;
+  try {
+    data = await fetchJSON(`/api/matchmaking/queue?seats=${seats}`);
+  } catch (e) {
+    return; // transient -- the pill just doesn't update this tick
+  }
+  if (currentSeatChoice() !== data.seats) return; // the choice changed while this was in flight
+  const n = data.waiting_count;
+  $('matchmaking-queue-text').textContent = n > 0
+    ? `${n} ${n === 1 ? 'player' : 'players'} searching for a ${seats}-player match`
+    : `No one's queued for a ${seats}-player match yet — you'd be first`;
+  show($('matchmaking-queue-pill'));
 }
 
 export async function onFindMatch() {
@@ -22,6 +70,7 @@ export async function onFindMatch() {
   if (!profile) { showScreen('screen-login'); return; } // defensive -- see ensureProfileSet
   const seats = parseInt($('matchmaking-seats').value, 10) || 3;
   matchmakingSeats = seats;
+  stopQueueDepthPolling(); // leaving the setup screen -- the pre-join hint no longer applies
   hide($('matchmaking-setup'));
   hide($('matchmaking-timeout-options'));
   $('matchmaking-status-text').textContent = 'Finding you an opponent…';
@@ -114,6 +163,7 @@ async function enterJustMatchedRoom(roomCode) {
 export function cancelMatchmakingTicketQuietly() {
   stopMatchmakingPolling();
   stopMatchmakingElapsedTimer();
+  stopQueueDepthPolling(); // also covers leaving the setup screen before ever pressing Find Match
   const ticketId = matchmakingTicketId;
   matchmakingTicketId = null;
   if (ticketId) {

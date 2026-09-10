@@ -808,6 +808,21 @@ def api_matchmaking_cancel():
     return jsonify({})
 
 
+@app.route("/api/matchmaking/queue")
+def api_matchmaking_queue():
+    """Pre-join queue depth for a given match size -- powers the live
+    "N players searching for an N-player match" hint on the matchmaking
+    setup screen, before the visitor has actually joined the queue."""
+    try:
+        seats = int(request.args.get("seats", ""))
+    except (TypeError, ValueError):
+        return jsonify({"error": "seats must be an integer"}), 400
+    error = validate_player_count(seats)
+    if error:
+        return jsonify({"error": error}), 400
+    return jsonify({"seats": seats, "waiting_count": matchmaking.queue_depth(seats)})
+
+
 # ------------------------------------------------------- achievements/profile --
 
 @app.route("/api/achievements")

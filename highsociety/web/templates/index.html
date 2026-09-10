@@ -696,11 +696,33 @@
         <button type="button" class="screen-back" id="btn-matchmaking-back">← Back</button>
 
         <div id="matchmaking-setup">
+          <span class="matchmaking-suits" aria-hidden="true"><span>&#9824;</span><span>&#9829;</span><span>&#9827;</span></span>
           <h2>Play</h2>
           <p class="muted">Find an opponent close to your rating.</p>
-          <label>Players
-            <input type="number" id="matchmaking-seats" min="2" max="5" value="3">
-          </label>
+
+          <!-- Segmented 2-5 picker (same .pill-choice-btn look as the host
+               form's seat/time pickers) writing into the hidden
+               #matchmaking-seats input matchmaking.js's onFindMatch
+               already reads unchanged. -->
+          <span class="matchmaking-field-label">Players</span>
+          <div id="matchmaking-seats-buttons" class="pill-choice-grid">
+            <div class="pill-choice-row">
+              <button type="button" class="pill-choice-btn" data-value="2">2</button>
+              <button type="button" class="pill-choice-btn selected" data-value="3">3</button>
+              <button type="button" class="pill-choice-btn" data-value="4">4</button>
+              <button type="button" class="pill-choice-btn" data-value="5">5</button>
+            </div>
+          </div>
+          <input type="hidden" id="matchmaking-seats" value="3">
+          <p class="matchmaking-hint">Fewer players usually match faster.</p>
+
+          <!-- Live pre-join queue depth (see /api/matchmaking/queue),
+               polled by matchmaking.js while this setup screen is open. -->
+          <div id="matchmaking-queue-pill" class="matchmaking-queue-pill hidden">
+            <span class="matchmaking-queue-dot"></span>
+            <span id="matchmaking-queue-text"></span>
+          </div>
+
           <button type="button" id="btn-find-match" class="primary">Find Match</button>
         </div>
 

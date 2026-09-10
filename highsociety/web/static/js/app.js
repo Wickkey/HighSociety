@@ -34,7 +34,7 @@ import {
   getPlayerProfileReturnTo, onPlayerProfileHistoryPrevClick, onPlayerProfileHistoryNextClick,
   onPlayerProfileEloChartRangeClick,
 } from './lobby/playerProfile.js';
-import { onPlayClick, onFindMatch, onMatchmakingCancel, onMatchmakingAddBots } from './lobby/matchmaking.js';
+import { onPlayClick, onFindMatch, onMatchmakingCancel, onMatchmakingAddBots, onMatchmakingSeatButtonClick } from './lobby/matchmaking.js';
 import { showRulesDemo, onRulesDemoToggleClick, onRulesDemoPrevClick, onRulesDemoNextClick } from './lobby/rulesDemo.js';
 import {
   onRequestRematchClick, onCancelRematchForm, onSendRematchRequest, onAcceptRematch, onDeclineRematch,
@@ -192,6 +192,7 @@ function wireStaticHandlers() {
   // right below it; the profile chip's own popover menu (wired below)
   // is the one remaining, already-functional way to log out.
   $('btn-find-match').addEventListener('click', onFindMatch);
+  $('matchmaking-seats-buttons').addEventListener('click', onMatchmakingSeatButtonClick);
   $('btn-matchmaking-cancel').addEventListener('click', onMatchmakingCancel);
   $('btn-matchmaking-back').addEventListener('click', onMatchmakingCancel);
   $('btn-matchmaking-add-bots').addEventListener('click', onMatchmakingAddBots);

@@ -16,7 +16,7 @@
 // lobby.js's own note: everything here is read inside a function body,
 // never at this module's own top-level evaluation.
 import { $, hide, show, showError, showScreen } from '../utils/dom.js';
-import { fetchJSON, currentRoomCode, applyJoinIdentityDefaults } from './lobby.js';
+import { fetchJSON, currentRoomCode, applyJoinIdentityDefaults, resetCopyRoomLinkButton } from './lobby.js';
 import { takePendingIdentifyError } from '../network/messages.js';
 import { loadProfile } from '../auth/profile.js';
 import { confirmDialog } from '../ui/modals.js';
@@ -67,7 +67,7 @@ function canManageSeats(status) {
   return !!profile && profile.username === status.host_username;
 }
 
-function seatTileHtml(seat, index, canManage) {
+function seatTileHtml(seat, index, canManage, selfUsername) {
   if (!seat) {
     if (!canManage) {
       return '<div class="lobby-seat open"><div class="lobby-seat-name">Open</div></div>';
@@ -96,8 +96,13 @@ function seatTileHtml(seat, index, canManage) {
     avatarContent = escapeHtml(seat.name.charAt(0).toUpperCase());
   }
   const nameHtml = seat.is_bot ? `${safeName}<span>Bot</span>` : safeName;
+  // The manager's own seat still gets an x -- clicking it just isn't a
+  // kick (see initLobbySeatGrid's remove-seat handler): it shows a plain
+  // inline "you can't kick yourself" rather than the "Kick {name}?"
+  // confirm dialog, since there's no name-and-confirm decision to make.
+  const isSelf = !seat.is_bot && !!selfUsername && seat.username === selfUsername;
   const removeBtn = canManage
-    ? `<button type="button" class="lobby-seat-remove" aria-label="Remove ${safeName}" data-action="remove-seat" data-username="${escapeHtml(seat.username)}" data-is-bot="${seat.is_bot}" data-name="${safeName}">
+    ? `<button type="button" class="lobby-seat-remove" aria-label="Remove ${safeName}" data-action="remove-seat" data-username="${escapeHtml(seat.username)}" data-is-bot="${seat.is_bot}" data-is-self="${isSelf}" data-name="${safeName}">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
       </button>`
     : '';
@@ -116,8 +121,9 @@ function seatTileHtml(seat, index, canManage) {
 // player's) is that they paint through this exact one function, not two
 // parallel near-copies that could quietly drift apart later.
 export function buildSeatsHtml(status, canManage) {
+  const selfUsername = loadProfile() ? loadProfile().username : null;
   const seats = Array.from({ length: status.seats }, (_, i) => status.joined[i] || null);
-  return seats.map((seat, i) => seatTileHtml(seat, i, canManage)).join('');
+  return seats.map((seat, i) => seatTileHtml(seat, i, canManage, selfUsername)).join('');
 }
 
 // The one shared "add a bot" panel below the grid -- see its own
@@ -197,6 +203,7 @@ export function renderLobby(status) {
   if (isFreshRoom) {
     lastRenderedLobbyRoomCode = status.room_code;
     hide($('lobby-seats-error')); // a stale error from a previous room must never bleed into this one
+    resetCopyRoomLinkButton(); // a previous room's "Copied!" state shouldn't carry over to this room's own (different) link
     // Reset local seat-grid UI state so a previous room's open bot-picker
     // or diff cache can never bleed into this one.
     openPickerSeatIndex = null;
@@ -283,7 +290,11 @@ async function addBot(botType) {
   }
 }
 
-async function removeSeat(username, isBot, name) {
+async function removeSeat(username, isBot, name, isSelf) {
+  if (isSelf) {
+    seatGridError('You can’t kick yourself — use “Leave your seat and watch instead” below to give up your seat.');
+    return;
+  }
   if (!isBot) {
     const confirmed = await confirmDialog(`Kick ${name}?`, 'Kick');
     if (!confirmed) return;
@@ -334,7 +345,7 @@ export function initLobbySeatGrid() {
     } else if (action === 'add-bot') {
       addBot(target.dataset.botType);
     } else if (action === 'remove-seat') {
-      removeSeat(target.dataset.username, target.dataset.isBot === 'true', target.dataset.name);
+      removeSeat(target.dataset.username, target.dataset.isBot === 'true', target.dataset.name, target.dataset.isSelf === 'true');
     }
   });
   // Clicking anywhere outside the picker panel closes it -- same pattern

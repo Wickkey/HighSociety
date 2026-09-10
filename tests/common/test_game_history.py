@@ -1499,10 +1499,10 @@ def test_record_finished_game_gives_distinct_placements_to_same_difficulty_bot_s
     assert placements_by_name == {"alice": 2, "Milo bot": 1, "Ziggy bot": 3}
 
 
-def test_get_leaderboard_excludes_guests_and_bots_by_query(database_url):
+def test_get_leaderboard_excludes_guests_bots_and_the_never_played_by_query(database_url):
     """Doesn't fake a real WHERE-clause result (that's Postgres' job) --
-    just confirms the query text actually filters both, and the shape of
-    what comes back."""
+    just confirms the query text actually filters all three, and the
+    shape of what comes back."""
     game_history._schema_ready = True
     conn, cursor = _fake_connection()
     cursor.fetchall = MagicMock(return_value=[("alice", 1200, 10, 6)])
@@ -1510,6 +1510,7 @@ def test_get_leaderboard_excludes_guests_and_bots_by_query(database_url):
         result = game_history.get_leaderboard()
     query = cursor.execute.call_args.args[0]
     assert "google_id IS NOT NULL" in query
+    assert "games_played > 0" in query  # a linked account that never played is just noise on the board
     assert "NOT IN (SELECT player_id FROM bots)" in query
     assert result == {"rows": [{"username": "alice", "elo": 1200, "games_played": 10, "games_won": 6}],
                        "has_more": False}

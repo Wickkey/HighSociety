@@ -1917,6 +1917,21 @@ def test_matchmaking_status_404s_for_an_unknown_ticket(clean_matchmaking_queue):
     assert resp.status_code == 404
 
 
+def test_matchmaking_queue_reports_pre_join_depth_per_size(clean_matchmaking_queue, monkeypatch):
+    monkeypatch.setattr(game_history, "get_player_elo", lambda username: 1000)
+    client = web_server.app.test_client()
+
+    assert client.get("/api/matchmaking/queue?seats=3").get_json() == {"seats": 3, "waiting_count": 0}
+
+    client.post("/api/matchmaking/join", json={"username": "alice", "seats": 3})
+    client.post("/api/matchmaking/join", json={"username": "bob", "seats": 2})
+    assert client.get("/api/matchmaking/queue?seats=3").get_json()["waiting_count"] == 1
+    assert client.get("/api/matchmaking/queue?seats=2").get_json()["waiting_count"] == 1
+
+    assert client.get("/api/matchmaking/queue?seats=99").status_code == 400
+    assert client.get("/api/matchmaking/queue?seats=abc").status_code == 400
+
+
 def test_matchmaking_status_reports_waiting_below_the_seat_count(clean_matchmaking_queue, monkeypatch):
     monkeypatch.setattr(game_history, "get_player_elo", lambda username: 1000)
     client = web_server.app.test_client()

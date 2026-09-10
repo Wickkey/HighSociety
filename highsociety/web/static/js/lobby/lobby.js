@@ -743,16 +743,23 @@ export async function onCopyRoomLink() {
   } catch (e) {
     return; // clipboard permission denied/unavailable -- silently no-op, nothing else useful to do
   }
+  // Stays "Copied!" rather than reverting after a beat -- the link doesn't
+  // change while you're in this room, so re-arming a "Copy" affordance
+  // just invites a pointless second copy of the identical string. Reset
+  // happens on the next fresh room instead (renderLobby).
   const btn = $('btn-copy-room-link');
   btn.classList.add('copied');
   btn.title = 'Copied!';
   btn.querySelector('span').textContent = 'Copied!';
-  clearTimeout(onCopyRoomLink._resetTimer);
-  onCopyRoomLink._resetTimer = setTimeout(() => {
-    btn.classList.remove('copied');
-    btn.title = 'Copy invite link';
-    btn.querySelector('span').textContent = 'Copy';
-  }, 1500);
+}
+
+// Called by renderLobby on a genuinely new room -- see onCopyRoomLink on
+// why the copied state otherwise sticks for the life of a room.
+export function resetCopyRoomLinkButton() {
+  const btn = $('btn-copy-room-link');
+  btn.classList.remove('copied');
+  btn.title = 'Copy invite link';
+  btn.querySelector('span').textContent = 'Copy';
 }
 
 export function onJoin() {
