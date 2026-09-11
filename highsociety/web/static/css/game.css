@@ -169,6 +169,39 @@
 .event-toast.tone-green { background: var(--green-dot); }
 .event-toast.tone-start { background: var(--toast-start); }
 
+/* Tutorial-only coaching card (see gameEvents.js's maybeShowTutorialCoach)
+   -- reuses .rules-cue-card's shell (left accent bar, tinted background,
+   icon) from lobby.css, in normal document flow rather than an overlay
+   (unlike .final-green-overlay below) so it never blocks the auction card
+   or move panel underneath: it just pushes them down while visible, the
+   same "reserve nothing, just insert" behavior any other in-flow banner
+   gets. Same hidden->show two-step as showToast (see notifications.js) for
+   a fade+rise transition rather than an abrupt pop-in. */
+.tutorial-coach-card {
+  opacity: 0;
+  transform: translateY(-6px);
+  transition: opacity 0.25s ease, transform 0.25s ease;
+  position: relative;
+  padding-right: 2.4rem;
+}
+.tutorial-coach-card.show { opacity: 1; transform: translateY(0); }
+.tutorial-coach-card-dismiss {
+  position: absolute;
+  top: 0.6rem;
+  right: 0.6rem;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  color: var(--accent-strong);
+  cursor: pointer;
+}
+.tutorial-coach-card-dismiss svg { width: 13px; height: 13px; }
+
 /* Final green card overlay: distinctly bigger/louder than the routine
    green-card toast above, because this specific reveal ends the game
    immediately — a player should recognize "it's over" at a glance rather

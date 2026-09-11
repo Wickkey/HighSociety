@@ -755,6 +755,26 @@
            so wrapping them in one grid changes nothing about when either
            shows, only how they're laid out together when both do. -->
       <div id="home-grid" class="home-grid">
+        <!-- Suggested, not forced: shown once (see refreshTutorialCta's own
+             comment in lobby.js for the hs_tutorial_offered localStorage
+             flag) to a brand-new account, never auto-launched. Dismissing
+             it or starting the tutorial both retire it for good; "Play the
+             tutorial again" stays permanently available from the How to
+             Play screen regardless. -->
+        <div id="home-tutorial-cta" class="home-tutorial-cta hidden">
+          <button type="button" id="btn-dismiss-tutorial-cta" class="home-tutorial-cta-dismiss" aria-label="Dismiss">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+          </button>
+          <span class="home-tutorial-cta-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M5 3l14 9-14 9V3z"/>
+            </svg>
+          </span>
+          <span class="home-tutorial-cta-text">
+            <strong>New here?</strong> Try a guided first game — a real 3-seat match against two scripted opponents, with on-screen tips.
+          </span>
+          <button type="button" id="btn-start-tutorial" class="primary">Play guided game</button>
+        </div>
         <div id="home-tiles" class="home-tiles">
           <button type="button" class="home-tile" data-home-target="join">
             <span id="home-tile-live-badge" class="home-tile-live-badge hidden"></span>
@@ -1397,6 +1417,24 @@
             </div>
           </div>
 
+          <!-- Tutorial-only coaching (see gameEvents.js's maybeShowTutorialCoach)
+               -- hidden/no-op entirely for a real game (game.isTutorial is
+               only ever true for the guided first-game room). Reuses the
+               same .rules-cue-card visual language as the How to Play
+               screen's own callouts, plus a show/hide transition like the
+               other in-game overlays (see notifications.js). -->
+          <div id="tutorial-coach-card" class="rules-cue-card tutorial-coach-card hidden">
+            <span class="rules-cue-card-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 9v4"/><path d="M12 16.5h.01"/><circle cx="12" cy="12" r="9"/>
+              </svg>
+            </span>
+            <p id="tutorial-coach-card-text"></p>
+            <button type="button" id="btn-dismiss-tutorial-coach" class="tutorial-coach-card-dismiss" aria-label="Dismiss tip">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+            </button>
+          </div>
+
           <div id="move-panel" class="card panel move-panel hidden">
             <div class="move-panel-inner">
               <div id="move-timer" class="move-timer hidden"></div>
@@ -1637,6 +1675,16 @@
               <button id="btn-decline-rematch" class="danger">Decline</button>
             </div>
           </div>
+        </div>
+
+        <!-- Replaces #rematch-panel on a tutorial game's finished screen
+             (see renderRematchPanel's own comment) -- a rematch vote makes
+             no sense for a fixed-seed, bots-only-vs-you walkthrough, so
+             this offers the one thing that does: doing it again. "Return
+             to Home" below still works exactly the same for going on to a
+             real game. -->
+        <div id="tutorial-finished-actions" class="tutorial-finished-actions hidden">
+          <button type="button" id="btn-replay-tutorial" class="primary">Play the tutorial again</button>
         </div>
 
         <button id="btn-new-game" class="primary">Return to Home</button>

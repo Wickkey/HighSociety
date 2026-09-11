@@ -32,7 +32,7 @@ from dotenv import load_dotenv
 from flask import Flask, Response, jsonify, render_template, request
 from flask_sock import Sock
 
-from highsociety.code.ai import BOT_TYPES, create_bot_players
+from highsociety.code.ai import BOT_TYPES, create_bot_players, create_tutorial_bots
 from highsociety.code.ai.mcts import decision_service
 from highsociety.code.ai.mcts.worker_pool_decision_service import WorkerPoolBotDecisionService
 from highsociety.code.common import achievements, matchmaking
@@ -120,6 +120,21 @@ if _BOT_POOL_SIZE > 0:
 # modified/non-browser client sends.
 _TURN_TIME_PRESETS = frozenset({15.0, 30.0, 60.0, 90.0, 120.0})
 
+# The guided first-game tutorial (see api_create_game's "tutorial" branch)
+# is always this exact table: the human plus two TutorialBots, no clock, no
+# hidden info. The seed is curated, not random -- picked by hand (see
+# highsociety/code/gamecore/dev_tools/inspect_seed.py --seed 8) because its
+# draw order hits every teaching moment a new player needs inside one short
+# game: a disgrace auction as the very first card (Passe), a green Prestige
+# Card right after, a Scandale (a disgrace card that's *also* green) partway
+# through, a FauxPas, and a natural ending via the 4th-green-card rule --
+# all in 8 rounds. Changing this seed changes what the tutorial teaches, so
+# don't touch it without re-running that inspection tool to verify the new
+# order still covers the same ground.
+_TUTORIAL_SEATS = 3
+_TUTORIAL_SEED = 8
+_TUTORIAL_BOT_THINK_TIME = 1.2
+
 
 def _compute_disconnect_grace_seconds(turn_time_limit: Optional[float]) -> float:
     """
@@ -144,11 +159,19 @@ class GameRoom:
 
     def __init__(self, room_code: str, seats: int, bot_mix: list[str], seed: Optional[int],
                  bot_think_time: float, visibility: str, turn_time_limit: Optional[float] = None,
-                 reveal_cards: bool = True, show_logs: bool = True, host_username: Optional[str] = None):
+                 reveal_cards: bool = True, show_logs: bool = True, host_username: Optional[str] = None,
+                 is_tutorial: bool = False):
         self.room_code = room_code
         self.game_id = generate_game_id()
         self.seats = seats
         self.bot_mix = bot_mix
+        # A scripted, one-off walkthrough game (see api_create_game) --
+        # never written to game_history (run_game's success/crash paths
+        # both check this), so it can never touch a real Elo/leaderboard/
+        # achievements row. See _TUTORIAL_SEED's own comment for why this
+        # is safe to keep fully deterministic regardless of what the human
+        # actually does.
+        self.is_tutorial = is_tutorial
         # Whoever's browser called /api/create_game -- purely informational
         # (game_history.py's games.host_player_id), resolved to a player_id
         # at game-history-write time the same way any other participant is.
@@ -179,7 +202,17 @@ class GameRoom:
         # rematch's early turns aren't missing the context of who just won.
         self.auction_history = AuctionHistory()
 
-        self.players = create_bot_players(bot_mix, bot_think_time) if bot_mix else []
+        # Tutorial players are built directly (create_tutorial_bots), not via
+        # create_bot_players/BOT_TYPES -- TutorialBot is deliberately not in
+        # that shared registry (see its own docstring), so bot_mix for a
+        # tutorial room stays [] rather than naming a bot type nothing else
+        # would recognize.
+        if is_tutorial:
+            self.players = create_tutorial_bots(bot_think_time)
+        elif bot_mix:
+            self.players = create_bot_players(bot_mix, bot_think_time)
+        else:
+            self.players = []
         self.human_seats = seats - len(self.players)
         self.spectators = []
 
@@ -279,8 +312,10 @@ class GameRoom:
                 # and "never happened" were indistinguishable in history.
                 # No participants (final_standings may never have been
                 # populated) -- is_finished_successfully=False is the
-                # entire signal this write exists to record.
-                if game_history.is_configured():
+                # entire signal this write exists to record. Skipped
+                # entirely for a tutorial room -- see is_tutorial's own
+                # comment, same as the success path below.
+                if not self.is_tutorial and game_history.is_configured():
                     game_history.record_finished_game_async(
                         room_code=self.room_code,
                         seats=self.seats,
@@ -327,7 +362,7 @@ def _record_game_history(room: "GameRoom", game: PlayGame, started_at: datetime.
     to its fire-and-forget writer — cheap to call even when no database is
     configured, since is_configured() short-circuits before touching a
     network connection."""
-    if not game_history.is_configured():
+    if room.is_tutorial or not game_history.is_configured():
         room.elo_changes = {}  # nothing to compute -- let the reveal poll resolve immediately, not time out
         return
     winner_usernames = {w.username for w in (game.winners or [])}
@@ -415,7 +450,7 @@ def _generate_room_code() -> str:
 def _create_room(seats: int, bot_mix: list[str], seed: Optional[int], bot_think_time: float,
                   visibility: str, turn_time_limit: Optional[float] = None,
                   reveal_cards: bool = True, show_logs: bool = True,
-                  host_username: Optional[str] = None) -> GameRoom:
+                  host_username: Optional[str] = None, is_tutorial: bool = False) -> GameRoom:
     with _rooms_lock:
         for _ in range(20):
             code = _generate_room_code()
@@ -428,7 +463,7 @@ def _create_room(seats: int, bot_mix: list[str], seed: Optional[int], bot_think_
         room = GameRoom(room_code=code, seats=seats, bot_mix=bot_mix, seed=seed,
                          bot_think_time=bot_think_time, visibility=visibility,
                          turn_time_limit=turn_time_limit, reveal_cards=reveal_cards,
-                         show_logs=show_logs, host_username=host_username)
+                         show_logs=show_logs, host_username=host_username, is_tutorial=is_tutorial)
         _rooms[code] = room
         return room
 
@@ -1019,6 +1054,23 @@ def api_config():
 def api_create_game():
     body = request.get_json(silent=True) or {}
 
+    if body.get("tutorial"):
+        # The guided first-game tutorial: every field below is decided by
+        # the server, not the client -- a modified client can't turn
+        # "tutorial" into a backdoor for an otherwise-invalid room (a
+        # different bot type, an arbitrary seed, a public room, ...). See
+        # _TUTORIAL_SEED's own comment for why these exact values matter.
+        host_username = body.get("host_username")
+        if host_username is not None and not isinstance(host_username, str):
+            return jsonify({"error": "host_username must be a string"}), 400
+        room = _create_room(
+            seats=_TUTORIAL_SEATS, bot_mix=[], seed=_TUTORIAL_SEED,
+            bot_think_time=_TUTORIAL_BOT_THINK_TIME, visibility="private",
+            turn_time_limit=None, reveal_cards=True, show_logs=True,
+            host_username=host_username, is_tutorial=True,
+        )
+        return jsonify(_status_payload(room))
+
     try:
         seats = int(body.get("seats"))
     except (TypeError, ValueError):
@@ -1098,6 +1150,7 @@ def _status_payload(room: Optional[GameRoom]) -> dict:
         "turn_time_limit": room.turn_time_limit,
         "reveal_cards": room.reveal_cards,
         "show_logs": room.show_logs,
+        "is_tutorial": room.is_tutorial,
         "joined": room.joined_summary(),
     }
     if room.state == "finished" and room.game is not None:

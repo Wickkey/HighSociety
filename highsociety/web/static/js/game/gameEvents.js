@@ -12,6 +12,7 @@ import {
 import { setSelectedDiscardValue, disarmActionWatchdog } from './gameActions.js';
 import {
   enqueueEvent, showFinalGreenOverlay, showCountdownOverlay, hideCountdownOverlay, logLine,
+  enqueueTutorialCoach,
 } from '../ui/notifications.js';
 import { appendChatLine } from '../ui/chat.js';
 import { refreshStatus } from '../lobby/lobby.js';
@@ -237,6 +238,41 @@ function showError_moveError(text) {
   el.classList.remove('hidden');
 }
 
+// One-time coaching for the guided first-game tutorial (see game.isTutorial's
+// own comment) -- a no-op for every real game. Each of the three moments
+// below fires at most once per game (game.tutorialCoachShown), the first
+// time its condition is true, regardless of how many auctions of that kind
+// follow; both can fire off the very same auction_start (e.g. a Scandale is
+// both green and a disgrace card) -- enqueueTutorialCoach's own queue shows
+// them one after another rather than one clobbering the other.
+function maybeShowTutorialCoach(d) {
+  if (!game.isTutorial) return;
+  const seen = game.tutorialCoachShown;
+  if (d.auction_type === 'normal' && !seen.normal) {
+    seen.normal = true;
+    enqueueTutorialCoach(
+      "In a normal auction, whoever bids highest wins the card and pays what they bid. "
+      + 'But watch your spending: whoever ends the game with the least money is eliminated '
+      + 'from winning entirely, no matter how many points they have.',
+    );
+  }
+  if (d.auction_type === 'disgrace' && !seen.disgrace) {
+    seen.disgrace = true;
+    enqueueTutorialCoach(
+      'This is a disgrace auction: bidding works the same, but backfires. The first player to '
+      + `pass loses the standoff and gets stuck with the card, while everyone else keeps their `
+      + `money back. This card: ${d.card.description}`,
+    );
+  }
+  if (d.card.is_green && !seen.green) {
+    seen.green = true;
+    enqueueTutorialCoach(
+      'Green cards can end the game early: the instant the 4th green card (Prestige or Scandale) '
+      + 'is revealed, the game stops right there — even mid-round.',
+    );
+  }
+}
+
 function applyAuctionUpdate(msg, isSpectator) {
   const d = msg.data;
   // Turns are strictly sequential (the game engine blocks on exactly one
@@ -290,6 +326,7 @@ function applyAuctionUpdate(msg, isSpectator) {
     Object.values(game.opponents).forEach((o) => { o.outOfAuction = false; o.lastBid = null; });
     enqueueEvent(isSpectator, `New auction: ${describeCard(d.card)}`, 'start');
     logLine(`🃏 Auction #${d.round_number}: ${describeCard(d.card)}`, isSpectator);
+    maybeShowTutorialCoach(d);
   } else if (d.kind === 'turn_start') {
     game.turnPlayer = d.player;
     game.turnStartedAt = Date.now();

@@ -22,6 +22,7 @@ import {
   onCopyRoomLink, onJoin, onSpectateJoin, onChangeJoinIdentity, onChangeSpectateIdentity,
   startRoomsPolling, currentRoomCode, isActivelyPlayingLiveGame,
   applySpectateIdentityDefaults, refreshStatus, leaveToHome, setCurrentRoomCode,
+  onStartTutorial, markTutorialOffered,
 } from './lobby/lobby.js';
 import { initLobbySeatGrid } from './lobby/playerList.js';
 import {
@@ -41,6 +42,7 @@ import {
   onStandingsTableClick,
 } from './lobby/rematch.js';
 import { onPlaceBid, onPass, onResign, onDiscardPainting, onQuickReactionClick } from './game/gameActions.js';
+import { hideTutorialCoach } from './ui/notifications.js';
 
 // Debug-only bridge, not part of the app's real API surface: lets a
 // browser console (or a Playwright page.evaluate, as used throughout this
@@ -116,6 +118,11 @@ function wireStaticHandlers() {
   });
   $('btn-spectate-join').addEventListener('click', onSpectateJoin);
   $('btn-new-game').addEventListener('click', () => leaveToHome());
+  $('btn-start-tutorial').addEventListener('click', onStartTutorial);
+  $('btn-dismiss-tutorial-cta').addEventListener('click', markTutorialOffered);
+  $('btn-play-tutorial').addEventListener('click', onStartTutorial);
+  $('btn-replay-tutorial').addEventListener('click', onStartTutorial);
+  $('btn-dismiss-tutorial-coach').addEventListener('click', hideTutorialCoach);
   $('connection-badge').addEventListener('click', onProfileChipClick);
   $('btn-open-account').addEventListener('click', () => { closeProfilePopover(); showAccountScreen(); });
   // navigateFromSidebar itself no longer renders anything on its own (see

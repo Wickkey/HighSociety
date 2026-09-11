@@ -113,6 +113,49 @@ export function hideCountdownOverlay(isSpectator) {
   }, wait);
 }
 
+// ---------------------------------------------- tutorial coaching card --
+//
+// One-time teaching callouts for the guided first-game tutorial (see
+// gameEvents.js's maybeShowTutorialCoach) -- a separate queue from the
+// transient event toast above, since a coaching card needs to stay up long
+// enough to actually read (TUTORIAL_COACH_DURATION_MS) and can be dismissed
+// early by the player, neither of which the event toast's fixed, brief,
+// dismiss-proof timing supports.
+const TUTORIAL_COACH_DURATION_MS = 9000;
+const tutorialCoachQueue = [];
+let tutorialCoachBusy = false;
+let tutorialCoachHideTimer = null;
+
+export function enqueueTutorialCoach(text) {
+  tutorialCoachQueue.push(text);
+  pumpTutorialCoachQueue();
+}
+
+function pumpTutorialCoachQueue() {
+  if (tutorialCoachBusy || tutorialCoachQueue.length === 0) return;
+  tutorialCoachBusy = true;
+  const text = tutorialCoachQueue.shift();
+  const card = $('tutorial-coach-card');
+  $('tutorial-coach-card-text').textContent = text;
+  show(card);
+  requestAnimationFrame(() => card.classList.add('show'));
+  tutorialCoachHideTimer = setTimeout(hideTutorialCoach, TUTORIAL_COACH_DURATION_MS);
+}
+
+// Shared by the auto-timeout above and the card's own dismiss button
+// (app.js) -- either way the card fades out, the slot frees up, and
+// whatever's next in the queue (if anything) takes its place.
+export function hideTutorialCoach() {
+  clearTimeout(tutorialCoachHideTimer);
+  const card = $('tutorial-coach-card');
+  card.classList.remove('show');
+  setTimeout(() => {
+    hide(card);
+    tutorialCoachBusy = false;
+    pumpTutorialCoachQueue();
+  }, 250); // let the fade-out clear before the next card (if any) claims the slot
+}
+
 export function logLine(text, isSpectator) {
   if (!text) return;
   const el = $(isSpectator ? 'spec-game-log' : 'game-log');

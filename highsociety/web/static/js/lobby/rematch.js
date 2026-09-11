@@ -238,6 +238,15 @@ function animateEloNumber(el, from, to, durationMs = 1100) {
 // anything.
 export function renderRematchPanel() {
   const panel = $('rematch-panel');
+  // A rematch vote makes no sense for the fixed-seed, bots-only-vs-you
+  // tutorial -- "play again" here always means a *fresh* tutorial room
+  // (see onStartTutorial), not reusing this one's votes/bot-mix flow.
+  if (game.isTutorial) {
+    hide(panel);
+    show($('tutorial-finished-actions'));
+    return;
+  }
+  hide($('tutorial-finished-actions'));
   if (!ws || ws.readyState !== WebSocket.OPEN || !game.myUsername) {
     hide(panel);
     return;

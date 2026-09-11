@@ -162,6 +162,7 @@ export function showHomeTiles() {
   setScreenPath('/');
   loadHomeGlobalStats();
   loadHomeRecentGames();
+  refreshTutorialCta();
 }
 
 // "Less accurate is fine" per the request -- plain site-wide counts, not
@@ -705,6 +706,59 @@ export async function onCreateGame() {
   } catch (e) {
     showError($('host-error'), e.message);
   }
+}
+
+// Guided first-game tutorial: a real 3-seat game (you + 2 TutorialBots)
+// played through this exact same create -> auto-join pipeline, just with
+// the server deciding every field itself (see api_create_game's "tutorial"
+// branch) instead of reading a form. Callable from the Home CTA, the How to
+// Play screen's permanent link, or the finished screen's "play again"
+// button -- all three just call this with no extra state to thread through.
+export async function onStartTutorial() {
+  if (ensureProfileSet()) return;
+  markTutorialOffered(); // starting it counts as "seen", same as dismissing
+  const profile = loadProfile();
+  try {
+    const status = await fetchJSON('/api/create_game', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tutorial: true, host_username: profile ? profile.username : null }),
+    });
+    stopRoomsPolling();
+    joinIdentityOverridden = false;
+    currentRoomCodeValue = status.room_code;
+    history.replaceState(null, '', `?room=${encodeURIComponent(status.room_code)}`);
+    lastStatusValue = status;
+    renderLobby(status);
+    startPolling();
+    onJoin(); // see onCreateGame's identical trailing call for why this is safe/synchronous
+  } catch (e) {
+    showError($('host-error'), e.message);
+  }
+}
+
+// "Suggested, not forced": the Home screen's tutorial CTA (see index.html's
+// #home-tutorial-cta) shows exactly once per browser, for a brand-new
+// account only -- same client-side-truth localStorage pattern as
+// hs_rejoin_<room> above, not a server-tracked "seen" flag, since nobody
+// else needs to know a player skipped it. Retired the instant the player
+// either starts the tutorial or explicitly dismisses the card; "Play the
+// tutorial again" (How to Play screen, finished screen) stays available
+// forever regardless, since that's a deliberate replay, not the first-run nudge.
+const TUTORIAL_OFFERED_KEY = 'hs_tutorial_offered';
+export function markTutorialOffered() {
+  localStorage.setItem(TUTORIAL_OFFERED_KEY, '1');
+  hide($('home-tutorial-cta'));
+}
+// Called every time the home tile picker is (re-)shown (see showHomeTiles) --
+// a brand-new profile (no prior games, i.e. never touched loadProfile before
+// this session's own login) is the only audience for this, so the CTA never
+// nags a returning player back on the home screen after every navigation.
+export function refreshTutorialCta() {
+  const alreadyOffered = localStorage.getItem(TUTORIAL_OFFERED_KEY) === '1';
+  const cta = $('home-tutorial-cta');
+  if (alreadyOffered) { hide(cta); return; }
+  show(cta);
 }
 
 export function onJoinByCode(event) {

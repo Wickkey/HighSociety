@@ -2,6 +2,7 @@ from highsociety.code.ai.capped_greedy_bot import CappedGreedyBot
 from highsociety.code.ai.greedy_bot import GreedyBot
 from highsociety.code.ai.pass_bot import PassBot
 from highsociety.code.ai.mcts_bot import EasyMCTSBot, HardMCTSBot, MediumMCTSBot
+from highsociety.code.ai.tutorial_bot import TutorialBot
 from highsociety.code.ai.bot_names import assign_bot_names
 
 # Shared name -> bot class registry, so anything that lets a user pick bots
@@ -39,3 +40,15 @@ def create_bot_players(bot_mix: list[str], think_time: float = 1.5, taken_userna
         BOT_TYPES[bot_type](name=name, username=name.lower(), think_time=think_time)
         for bot_type, name in zip(bot_mix, names)
     ]
+
+
+def create_tutorial_bots(think_time: float = 1.5) -> list:
+    """
+    Builds the two scripted TutorialBot opponents for the guided first-game
+    tutorial (see web_server.py's /api/create_game "tutorial" branch) --
+    deliberately separate from create_bot_players/BOT_TYPES above: TutorialBot
+    must never be selectable by a real host, the CLI, or the bot evaluator,
+    only ever used for this one purpose.
+    """
+    names = assign_bot_names(2)
+    return [TutorialBot(name=name, username=name.lower(), think_time=think_time) for name in names]

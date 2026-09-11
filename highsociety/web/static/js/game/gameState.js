@@ -74,6 +74,17 @@ export function resetGameState(myUsername, status) {
     // isn't a useful number to show, just noise.
     seed: status ? status.seed : null,
     manualSeed: status ? !!status.manual_seed : false,
+    // Gates the guided first-game coaching callouts (see gameEvents.js's
+    // maybeShowTutorialCoach) and swaps the finished screen's rematch panel
+    // for a "play again" button (see rematch.js's renderRematchPanel) --
+    // true only for a room created via onStartTutorial's tutorial:true
+    // request, never for a real game.
+    isTutorial: status ? !!status.is_tutorial : false,
+    // Which one-time coaching callouts have already been shown this game
+    // (see maybeShowTutorialCoach) -- plain object, not a module-level Set,
+    // so it resets for free every time `game` itself is replaced, same as
+    // every other per-game concern on this object.
+    tutorialCoachShown: {},
   };
   // Every other piece of state whose lifetime is "this one active game" --
   // not already inside the `game` object above -- must be reset here too.

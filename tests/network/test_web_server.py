@@ -1,3 +1,4 @@
+import datetime
 import itertools
 import json
 import threading
@@ -6,6 +7,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from highsociety.code.ai.tutorial_bot import TutorialBot
 from highsociety.code.common import matchmaking
 from highsociety.code.common.db import game_history
 from highsociety.code.gamecore.card_manager.money_card_manager import MoneyCardManager
@@ -226,6 +228,92 @@ def test_create_game_stores_host_username_for_game_history(running_web_server):
         "/api/create_game", json={"seats": 2, "bot_mix": ["pass"], "host_username": 123}
     )
     assert bad_type.status_code == 400
+
+
+def test_create_game_tutorial_branch_ignores_client_fields_and_builds_a_fixed_room(running_web_server):
+    """The tutorial branch decides every field itself -- a modified client
+    sending a different bot_mix/seed/seats/visibility must not change the
+    room it gets back, only host_username passes through (see
+    api_create_game's own comment on why)."""
+    client = web_server.app.test_client()
+
+    resp = client.post("/api/create_game", json={
+        "tutorial": True,
+        "host_username": "alice",
+        # All of these should be silently ignored, not honored or rejected.
+        "seats": 5,
+        "bot_mix": ["hard", "hard", "hard", "hard"],
+        "seed": 999,
+        "visibility": "public",
+    })
+    assert resp.status_code == 200
+    body = resp.get_json()
+    assert body["seats"] == web_server._TUTORIAL_SEATS == 3
+    assert body["seed"] == web_server._TUTORIAL_SEED
+    assert body["visibility"] == "private"
+    assert body["is_tutorial"] is True
+    assert body["human_seats"] == 1
+    assert len(body["joined"]) == 2
+    assert all(p["is_bot"] for p in body["joined"])
+
+    room = web_server._rooms[body["room_code"]]
+    assert room.host_username == "alice"
+    assert room.bot_mix == []  # TutorialBot is never named in bot_mix -- see GameRoom's own comment
+    assert all(isinstance(p, TutorialBot) for p in room.players)
+
+    bad_host = client.post("/api/create_game", json={"tutorial": True, "host_username": 123})
+    assert bad_host.status_code == 400
+
+
+def test_record_game_history_skips_the_database_write_for_a_tutorial_room(running_web_server, monkeypatch):
+    """The success-path guard (_record_game_history itself) -- see the
+    crash-path's own equivalent test below for the other call site."""
+    monkeypatch.setattr(game_history, "is_configured", lambda: True)
+    spy = MagicMock()
+    monkeypatch.setattr(game_history, "record_finished_game_async", spy)
+
+    room_code = web_server.app.test_client().post(
+        "/api/create_game", json={"tutorial": True}
+    ).get_json()["room_code"]
+    room = web_server._rooms[room_code]
+    assert room.is_tutorial is True
+
+    fake_game = MagicMock()
+    fake_game.winners = []
+    fake_game.final_standings = []
+    fake_game.get_auction_history.return_value = []
+    web_server._record_game_history(room, fake_game, datetime.datetime.now(datetime.timezone.utc))
+
+    spy.assert_not_called()
+    assert room.elo_changes == {}
+
+
+def test_game_thread_crash_skips_the_database_write_for_a_tutorial_room(running_web_server, monkeypatch):
+    """The crash-path's own game_history call (a separate code path from
+    _record_game_history's success-path guard above) must also never write
+    a tutorial game to history."""
+    monkeypatch.setattr(game_history, "is_configured", lambda: True)
+    spy = MagicMock()
+    monkeypatch.setattr(game_history, "record_finished_game_async", spy)
+    monkeypatch.setattr(web_server.PlayGame, "play_game",
+                         lambda self: (_ for _ in ()).throw(RuntimeError("simulated game-thread crash")))
+
+    port = running_web_server
+    client = web_server.app.test_client()
+    room_code = client.post("/api/create_game", json={"tutorial": True}).get_json()["room_code"]
+
+    player = ScriptedWSClient(_ws_url(port, f"/ws?room={room_code}"), "alice")
+    player.handshake()
+    player.start()
+
+    room = web_server._rooms[room_code]
+    deadline = time.time() + 10
+    while time.time() < deadline and room.state != "finished":
+        threading.Event().wait(0.1)
+    assert room.state == "finished"
+
+    spy.assert_not_called()
+    player.close()
 
 
 def test_rooms_listing_shows_only_open_public_rooms(running_web_server):
