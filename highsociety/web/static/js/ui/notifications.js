@@ -113,80 +113,79 @@ export function hideCountdownOverlay(isSpectator) {
   }, wait);
 }
 
-// ---------------------------------------------- tutorial coaching card --
+// ---------------------------------------------- tutorial coaching modal --
 //
 // One-time teaching callouts for the guided first-game tutorial (see
-// gameEvents.js's maybeShowTutorialCoach) -- a separate queue from the
-// transient event toast above, since a coaching card needs to stay up long
-// enough to actually read (TUTORIAL_COACH_DURATION_MS) and can be dismissed
-// early by the player, neither of which the event toast's fixed, brief,
-// dismiss-proof timing supports.
-const TUTORIAL_COACH_DURATION_MS = 9000;
+// gameEvents.js's maybeShowTutorialCoach) -- a blocking modal (see
+// index.html's #tutorial-coach-overlay, a real .modal-overlay), not a
+// timed toast: per explicit feedback, there's no auto-dismiss and nothing
+// else on screen is clickable while one is up, so the player is guaranteed
+// to actually read it before play continues. A "Next" button (label
+// becomes "Got it" for the last queued tip) is the only way past it --
+// see onTutorialCoachNextClick, wired in app.js.
 const tutorialCoachQueue = [];
-let tutorialCoachBusy = false;
-let tutorialCoachHideTimer = null;
+let tutorialCoachShowing = false;
 
 // Same icon + color coding as the three cue cards on the How to Play screen
 // (_how_to_play_rich.html) -- 'normal' is the plain amber warning triangle
-// (the "don't spend everything" card), 'disgrace' is the green-tinted
-// .rules-cue-card-flip swap-arrows icon (the trade-off card), 'green' is the
-// plain circle with .rules-cue-card-icon-green (the "4th green card" card).
-// A tutorial player who's just read one of these on How to Play sees the
-// exact same icon/color mean the exact same thing in the live game.
+// (the "don't spend everything" card), 'disgrace' is the money-green swap-
+// arrows icon (the trade-off card), 'green' is the plain circle in the
+// green-card color (the "4th green card" card). A tutorial player who's
+// just read one of these on How to Play sees the exact same icon/color
+// mean the exact same thing in the live game. Only the icon's color is
+// reused here (see .tutorial-coach-icon-money/-green in game.css) --
+// unlike How to Play's inline cue cards, this modal's box never carries
+// .rules-cue-card itself (see that CSS's own comment for why).
 const TUTORIAL_COACH_KINDS = {
   normal: {
-    cardClass: '',
     iconClass: '',
     iconSvg: '<path d="M12 9v4"/><path d="M12 16.5h.01"/>'
       + '<path d="M10.3 3.9 2.6 17.5a1.8 1.8 0 0 0 1.56 2.7h15.68a1.8 1.8 0 0 0 1.56-2.7L13.7 3.9a1.8 1.8 0 0 0-3.4 0Z"/>',
   },
   disgrace: {
-    cardClass: 'rules-cue-card-flip',
-    iconClass: '',
+    iconClass: 'tutorial-coach-icon-money',
     iconSvg: '<path d="M17 2.1l4 4-4 4"/><path d="M3 12.1v-2a4 4 0 0 1 4-4h14"/>'
       + '<path d="M7 21.9l-4-4 4-4"/><path d="M21 11.9v2a4 4 0 0 1-4 4H3"/>',
   },
   green: {
-    cardClass: '',
-    iconClass: 'rules-cue-card-icon-green',
+    iconClass: 'tutorial-coach-icon-green',
     iconSvg: '<circle cx="12" cy="12" r="8.5"/>',
   },
 };
 
 export function enqueueTutorialCoach(text, kind) {
   tutorialCoachQueue.push({ text, kind });
-  pumpTutorialCoachQueue();
+  if (!tutorialCoachShowing) advanceTutorialCoach();
 }
 
-function pumpTutorialCoachQueue() {
-  if (tutorialCoachBusy || tutorialCoachQueue.length === 0) return;
-  tutorialCoachBusy = true;
+// Renders whatever's next in the queue, or closes the modal once it's
+// empty -- the one place that decides what's currently on screen for this
+// modal. Called both to show the very first tip and (via
+// onTutorialCoachNextClick) every time the player clicks past one.
+function advanceTutorialCoach() {
+  const overlay = $('tutorial-coach-overlay');
+  if (tutorialCoachQueue.length === 0) {
+    tutorialCoachShowing = false;
+    hide(overlay);
+    return;
+  }
+  tutorialCoachShowing = true;
   const { text, kind } = tutorialCoachQueue.shift();
   const spec = TUTORIAL_COACH_KINDS[kind] || TUTORIAL_COACH_KINDS.normal;
-  const card = $('tutorial-coach-card');
-  card.classList.remove('rules-cue-card-flip');
-  if (spec.cardClass) card.classList.add(spec.cardClass);
   const icon = $('tutorial-coach-card-icon');
-  icon.className = `rules-cue-card-icon${spec.iconClass ? ` ${spec.iconClass}` : ''}`;
+  icon.className = `tutorial-coach-icon${spec.iconClass ? ` ${spec.iconClass}` : ''}`;
   icon.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${spec.iconSvg}</svg>`;
   $('tutorial-coach-card-text').textContent = text;
-  show(card);
-  requestAnimationFrame(() => card.classList.add('show'));
-  tutorialCoachHideTimer = setTimeout(hideTutorialCoach, TUTORIAL_COACH_DURATION_MS);
+  // "Got it" on the last one reads as closing this out, not "there's more
+  // to see" -- a small honesty touch matching what actually happens next.
+  $('btn-tutorial-coach-next').textContent = tutorialCoachQueue.length > 0 ? 'Next' : 'Got it';
+  show(overlay);
 }
 
-// Shared by the auto-timeout above and the card's own dismiss button
-// (app.js) -- either way the card fades out, the slot frees up, and
-// whatever's next in the queue (if anything) takes its place.
-export function hideTutorialCoach() {
-  clearTimeout(tutorialCoachHideTimer);
-  const card = $('tutorial-coach-card');
-  card.classList.remove('show');
-  setTimeout(() => {
-    hide(card);
-    tutorialCoachBusy = false;
-    pumpTutorialCoachQueue();
-  }, 250); // let the fade-out clear before the next card (if any) claims the slot
+// The modal's only way out -- wired in app.js. Advances to the next queued
+// tip if there is one, or closes the modal (and un-blocks play) if not.
+export function onTutorialCoachNextClick() {
+  advanceTutorialCoach();
 }
 
 export function logLine(text, isSpectator) {

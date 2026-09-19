@@ -122,7 +122,12 @@ export function resetSelectedDiscard() { selectedDiscardValue = null; }
 export function onDiscardPainting() {
   if (!game.myPrompt || game.myPrompt.answered) return;
   if (selectedDiscardValue === null) return;
-  if (!sendPlayerAction({ message_type: 'RESPONSE', prompt: String(selectedDiscardValue) })) return;
+  // move_seq: tags this RESPONSE with the exact decision it's answering,
+  // read here (not later) so a click that's already mid-flight when the
+  // panel gets marked answered by something else still stamps whatever
+  // decision was actually live the moment the click happened -- see
+  // networkplayer.py's _belongs_to_this_move for why the server needs this.
+  if (!sendPlayerAction({ message_type: 'RESPONSE', prompt: String(selectedDiscardValue), move_seq: game.myPrompt.moveSeq })) return;
   answerMyPrompt();
 }
 
@@ -136,7 +141,11 @@ export function onPlaceBid() {
   hide($('move-error'));
   const values = [...game.selectedBid];
   if (values.length === 0) { showError($('move-error'), 'Select at least one money card.'); return; }
-  if (!sendPlayerAction({ message_type: 'RESPONSE', prompt: JSON.stringify(values) })) return;
+  // move_seq: see onDiscardPainting's identical comment -- this is the fix
+  // for a real, previously-recurring bug where a bid sent right as this
+  // player's own timer expired got silently applied to the *next* round's
+  // decision instead of being discarded as stale.
+  if (!sendPlayerAction({ message_type: 'RESPONSE', prompt: JSON.stringify(values), move_seq: game.myPrompt.moveSeq })) return;
   // Once sent, these chips are no longer "being added on top" — they're
   // already part of the committed bid. Without clearing this, the server's
   // own echo of this same bid (gameEvents.js's applyAuctionUpdate "bid"
@@ -152,7 +161,8 @@ export function onPlaceBid() {
 export function onPass() {
   if (!game.myPrompt || game.myPrompt.answered) return;
   hide($('move-error'));
-  if (!sendPlayerAction({ message_type: 'RESPONSE', prompt: 'pass' })) return;
+  // move_seq: see onDiscardPainting's identical comment.
+  if (!sendPlayerAction({ message_type: 'RESPONSE', prompt: 'pass', move_seq: game.myPrompt.moveSeq })) return;
   answerMyPrompt();
 }
 

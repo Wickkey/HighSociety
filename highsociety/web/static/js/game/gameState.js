@@ -10,7 +10,10 @@
 // function body (never at this module's own top-level evaluation), by which
 // point all four modules have finished loading.
 import { $ } from '../utils/dom.js';
-import { clearMoveTimer, renderAuctionPanel, renderMyPanel, renderMoneyChips, renderMovePanel } from './gameRenderer.js';
+import {
+  clearMoveTimer, renderAuctionPanel, renderMyPanel, renderMoneyChips, renderMovePanel,
+  clearSelectedBidVisual, updateSelectedBidTotal,
+} from './gameRenderer.js';
 import { setHasResigned, setGameFinished } from '../lobby/lobby.js';
 import { resetSelectedDiscard } from './gameActions.js';
 
@@ -201,6 +204,18 @@ export function openMyPrompt(moveSeq) {
     return false;
   }
   game.myPrompt = { moveSeq, answered: false };
+  // Defense-in-depth alongside networkplayer.py's own move_seq validation
+  // (see its _belongs_to_this_move): a genuinely new decision must never
+  // start from money chips or a discard choice left selected-but-unsent
+  // from an earlier prompt this player never actually submitted (e.g. one
+  // that auto-passed out from under them). Deliberately NOT called from
+  // the separate INPUT_ERROR-reopen path (gameEvents.js) -- that's the
+  // *same* decision being retried, and must keep whatever the player just
+  // picked so they can fix and resubmit it.
+  game.selectedBid.clear();
+  clearSelectedBidVisual();
+  updateSelectedBidTotal();
+  resetSelectedDiscard();
   // Self-healing guarantee, independent of any other message: receiving a
   // PLAYER_MOVE is unambiguous proof it's this player's own turn right now.
   // Closes a real, live-reproduced bug where the bid panel opened correctly

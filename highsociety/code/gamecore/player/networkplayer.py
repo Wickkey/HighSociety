@@ -198,6 +198,41 @@ class NetworkPlayer(BasePlayer):
             return False
         return True
 
+    def _belongs_to_this_move(self, msg: dict, move_seq) -> bool:
+        """
+        Same shape and reasoning as _belongs_to_this_game, for the *decision*
+        this message claims to answer rather than the game as a whole.
+
+        This is the fix for a real, previously-recurring production bug: a
+        player's browser can still send a RESPONSE in the sub-250ms window
+        right as their own move timer visually expires (see gameActions.js's
+        onPlaceBid/onPass/onDiscardPainting -- the click already passed the
+        "not yet answered" guard before the timer's own 250ms tick marks the
+        panel answered). WebSocketTransport's reader thread queues that
+        message the instant it arrives (transport.py's _reader_loop),
+        regardless of whether this game thread is still waiting on it. If the
+        real server-side TurnClock also expires around the same moment,
+        _handle_player_turn (gameplay.py) auto-passes that decision -- but the
+        already-queued stale message doesn't go anywhere. Without this check,
+        the *next* time this player is prompted, get_bid()/
+        choose_painting_to_discard() would pop that stale message first and
+        apply it as the answer to a completely different decision.
+
+        Permissive when the field is absent (bots, tests, and any other
+        caller that doesn't tag move_seq at all) -- same convention as
+        _belongs_to_this_game, so nothing that doesn't opt in loses coverage
+        it never had.
+        """
+        incoming_move_seq = msg.get("move_seq")
+        if incoming_move_seq is not None and incoming_move_seq != move_seq:
+            LoggingManager.warning(
+                f"Ignoring stale response for {self.username} meant for a "
+                f"different move (expected move_seq {move_seq!r}, got {incoming_move_seq!r})",
+                log_type=LogType.SECURITY,
+            )
+            return False
+        return True
+
     # How often, while waiting on a timed move, to re-send the client a
     # fresh PLAYER_MOVE_TIMER carrying the *actual* remaining time. The
     # client only ever gets a starting point once and counts down locally
@@ -280,6 +315,9 @@ class NetworkPlayer(BasePlayer):
 
         if not self._belongs_to_this_game(bid):
             return None  # discard silently; caller will re-poll for the real input
+
+        if not self._belongs_to_this_move(bid, move_seq):
+            return None  # stale answer to an earlier decision; caller will re-poll for the real input
 
         # A bid response is user-supplied text from a remote client (a browser
         # tab, another socket client, a bot). It must be a string — a client
@@ -380,6 +418,9 @@ class NetworkPlayer(BasePlayer):
 
                 if not self._belongs_to_this_game(choice):
                     continue  # discard silently; keep waiting for the real input
+
+                if not self._belongs_to_this_move(choice, move_seq):
+                    continue  # stale answer to an earlier decision; keep waiting for the real input
 
                 choice_text = choice.get("prompt", "")
                 if not isinstance(choice_text, str):

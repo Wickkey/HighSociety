@@ -475,7 +475,14 @@ h3:has(.section-icon) { display: flex; align-items: center; gap: 0.5rem; }
 
 /* Locked tiles are fully desaturated (grayscale + faded) so an unlock reads
    as a real color reveal, not just a border/shadow change. Icon badge
-   mirrors .home-tile-icon's "colored circle behind a line icon" language. */
+   mirrors .home-tile-icon's "colored circle behind a line icon" language.
+
+   Click-to-flip (not hover) reveals the description on a back face --
+   .achievement-tile is the fixed-size 3D scene (perspective), .achievement-
+   tile-inner is what actually rotates, and the two .achievement-tile-face
+   children are absolutely positioned so both faces stack in the same spot
+   with backface-visibility hiding whichever one is currently turned away.
+   A fixed height is required for that absolute stacking to work. */
 .achievements-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
@@ -483,16 +490,35 @@ h3:has(.section-icon) { display: flex; align-items: center; gap: 0.5rem; }
 }
 .achievement-tile {
   position: relative;
+  height: 148px;
+  perspective: 1000px;
+  cursor: pointer;
+}
+.achievement-tile-inner {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  transition: transform 0.6s var(--ease-out);
+  transform-style: preserve-3d;
+}
+.achievement-tile.flipped .achievement-tile-inner { transform: rotateY(180deg); }
+.achievement-tile-face {
+  position: absolute;
+  inset: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
+  justify-content: center;
   text-align: center;
   gap: 0.4rem;
   padding: 0.9rem 0.6rem;
+  border-radius: var(--radius-sm);
+  backface-visibility: hidden;
+}
+.achievement-tile-front {
   background: var(--panel-bg);
   border: 1px solid var(--panel-border);
-  border-radius: var(--radius-sm);
-  transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+  transition: box-shadow 0.15s ease, border-color 0.15s ease;
 }
 .achievement-icon {
   position: relative;
@@ -508,16 +534,16 @@ h3:has(.section-icon) { display: flex; align-items: center; gap: 0.5rem; }
 }
 .achievement-icon svg { width: 24px; height: 24px; }
 .achievement-name { font-weight: 700; font-size: 0.82rem; line-height: 1.2; }
-.achievement-tile.locked {
+.achievement-tile.locked .achievement-tile-front {
   filter: grayscale(1);
   opacity: 0.45;
 }
 .achievement-tile.locked .achievement-icon { background: rgba(0, 0, 0, 0.05); border-color: var(--panel-border); color: var(--muted); }
-.achievement-tile.unlocked {
+.achievement-tile.unlocked .achievement-tile-front {
   border-color: var(--accent-light);
   box-shadow: var(--shadow-sm);
 }
-.achievement-tile.unlocked:hover { transform: translateY(-2px); box-shadow: var(--shadow); }
+.achievement-tile.unlocked:not(.flipped):hover .achievement-tile-front { transform: translateY(-2px); box-shadow: var(--shadow); }
 /* A small pin on the icon badge itself, not just the tile's overall
    grayscale/faded treatment -- "why is this one different" reads at a
    glance instead of needing the fade to be noticed and interpreted. */
@@ -536,35 +562,27 @@ h3:has(.section-icon) { display: flex; align-items: center; gap: 0.5rem; }
   border: 2px solid var(--panel-bg);
 }
 .achievement-lock svg { width: 9px; height: 9px; }
-/* Instant, styled tooltip replacing a native title="..." -- shows exactly
-   how to unlock a locked achievement (or just confirms what an unlocked
-   one was for) on hover *or* focus, so a keyboard user (see the tile's
-   own tabindex) gets the same info a mouse hover does. */
-.achievement-tile { cursor: default; }
-/* Below the tile, not above -- a first-row tile's tooltip opening upward
-   collided with the floating session-status toast that sits just above
-   this whole panel (confirmed live); the panel has much more headroom
-   below any row than the viewport has above the topmost one. */
-.achievement-tooltip {
-  display: none;
-  position: absolute;
-  top: calc(100% + 0.5rem);
-  left: 50%;
-  transform: translateX(-50%);
-  width: 170px;
+/* Back face: same dark "reveal" surface the old hover tooltip used, now the
+   full flip-to result rather than a floating popover -- reads as "here's
+   the secret info" regardless of locked/unlocked, with a small status tag
+   so the back face alone still signals which one this is. */
+.achievement-tile-back {
   background: var(--felt-2);
   color: #f5f1e6;
-  font-size: 0.74rem;
-  font-weight: 500;
-  line-height: 1.4;
-  padding: 0.55rem 0.7rem;
-  border-radius: var(--radius-sm);
-  box-shadow: var(--shadow);
-  z-index: 5;
-  pointer-events: none;
+  transform: rotateY(180deg);
 }
-.achievement-tile:hover .achievement-tooltip,
-.achievement-tile:focus-visible .achievement-tooltip { display: block; }
+.achievement-tile-back strong { font-size: 0.85rem; }
+.achievement-tile-status {
+  font-size: 0.65rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 0.1rem 0.5rem;
+  border-radius: 999px;
+}
+.achievement-tile.locked .achievement-tile-status { background: rgba(255, 255, 255, 0.12); color: #cfc8bb; }
+.achievement-tile.unlocked .achievement-tile-status { background: var(--accent-light); color: #2a2011; }
+.achievement-tile-back p { margin: 0; font-size: 0.74rem; font-weight: 500; line-height: 1.4; }
 
 /* Actions (left) + Recent Games (right), side by side -- replaces a
    3-tile grid that left most of the screen's width empty once the tiles'

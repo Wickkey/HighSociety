@@ -21,6 +21,11 @@ import { setPendingJoin, setPendingSpectate } from '../network/messages.js';
 import { confirmDialog } from '../ui/modals.js';
 import { renderFinished } from './rematch.js';
 import { renderLobby, showSpectateForStatus } from './playerList.js';
+// Circular with account.js (which imports fetchJSON from here) -- safe by
+// this project's established convention (see gameState.js's identical
+// note): only ever used inside a function body below (refreshTutorialCta),
+// never at this module's own top-level evaluation.
+import { getPrefetchedStats } from '../account/account.js';
 import { loadHomeRecentGames } from './gameHistory.js';
 
 export async function fetchJSON(url, opts) {
@@ -750,15 +755,31 @@ export function markTutorialOffered() {
   localStorage.setItem(TUTORIAL_OFFERED_KEY, '1');
   hide($('home-tutorial-cta'));
 }
-// Called every time the home tile picker is (re-)shown (see showHomeTiles) --
-// a brand-new profile (no prior games, i.e. never touched loadProfile before
-// this session's own login) is the only audience for this, so the CTA never
-// nags a returning player back on the home screen after every navigation.
-export function refreshTutorialCta() {
+// Called every time the home tile picker is (re-)shown (see showHomeTiles).
+// The localStorage check alone is instant and flicker-free, but it's only
+// "has this browser seen the offer," not "is this actually someone new" --
+// a real player who signs into a second/reset browser would otherwise see
+// it again despite having real game history. Shows optimistically first
+// (so the common case -- a genuinely new account -- has zero flicker), then
+// corrects by *hiding* it if the account turns out to have real games
+// played, using account.js's own getPrefetchedStats (reuses whatever
+// prefetch/cache gameHistory.js's Home widget already triggered, no
+// duplicate network call). Deliberately never the other direction (never
+// making it *appear* late) -- see this project's own CLAUDE.md on why an
+// async reveal that shoves the tile picker down after the fact is worse
+// than an optional banner occasionally correcting itself away.
+export async function refreshTutorialCta() {
   const alreadyOffered = localStorage.getItem(TUTORIAL_OFFERED_KEY) === '1';
   const cta = $('home-tutorial-cta');
   if (alreadyOffered) { hide(cta); return; }
   show(cta);
+  const profile = loadProfile();
+  if (!profile) return; // no account yet to check games_played against -- keep showing
+  const stats = await getPrefetchedStats(profile.username);
+  if (stats && (stats.games_played || 0) > 0) {
+    hide(cta);
+    markTutorialOffered(); // real history -- never worth asking again
+  }
 }
 
 export function onJoinByCode(event) {

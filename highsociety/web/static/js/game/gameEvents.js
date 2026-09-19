@@ -238,35 +238,50 @@ function showError_moveError(text) {
   el.classList.remove('hidden');
 }
 
-// One-time coaching for the guided first-game tutorial (see game.isTutorial's
-// own comment) -- a no-op for every real game. Each of the three moments
-// below fires at most once per game (game.tutorialCoachShown), the first
-// time its condition is true, regardless of how many auctions of that kind
-// follow; both can fire off the very same auction_start (e.g. a Scandale is
-// both green and a disgrace card) -- enqueueTutorialCoach's own queue shows
-// them one after another rather than one clobbering the other.
+// Guided first-game tutorial tips, in the order they're allowed to appear.
+// Plain config, not scattered logic -- adding, removing, or reordering a
+// tip in the future (per the user's own "I may give feedback on this
+// later" note) is a one-entry edit here, nothing else to touch. `kind`
+// picks the icon/color coding from TUTORIAL_COACH_KINDS above (matching
+// How to Play's own cue cards); `matches` decides whether this
+// auction_start is this tip's moment; each fires at most once per game
+// (game.tutorialCoachShown), the first time its condition is true. More
+// than one can match the same auction_start (e.g. a Scandale is both
+// green and a disgrace card) -- enqueueTutorialCoach's own queue shows
+// them one after another via the modal's "Next" button, never both at once.
+const TUTORIAL_TIPS = [
+  {
+    id: 'normal',
+    kind: 'normal',
+    matches: (d) => d.auction_type === 'normal',
+    text: 'Highest bidder wins and pays. Finish with the least money, though, and you\'re '
+      + 'eliminated — no matter your score.',
+  },
+  {
+    id: 'disgrace',
+    kind: 'disgrace',
+    matches: (d) => d.auction_type === 'disgrace',
+    text: 'Disgrace auction: first to pass gets stuck with the card but keeps their money. '
+      + 'Everyone else loses what they bid. Overspending to dodge it can cost you the game.',
+  },
+  {
+    id: 'green',
+    kind: 'green',
+    matches: (d) => d.card.is_green,
+    text: 'The 4th green card ends the game instantly — even mid-round.',
+  },
+];
+
+// A no-op for every real game (game.isTutorial is only ever true for the
+// guided first-game room).
 function maybeShowTutorialCoach(d) {
   if (!game.isTutorial) return;
   const seen = game.tutorialCoachShown;
-  if (d.auction_type === 'normal' && !seen.normal) {
-    seen.normal = true;
-    enqueueTutorialCoach(
-      'Highest bidder wins and pays. Finish with the least money, though, and you\'re '
-      + 'eliminated — no matter your score.',
-      'normal',
-    );
-  }
-  if (d.auction_type === 'disgrace' && !seen.disgrace) {
-    seen.disgrace = true;
-    enqueueTutorialCoach(
-      'Disgrace auction: first to pass gets stuck with the card but keeps their money. '
-      + 'Everyone else loses what they bid. Overspending to dodge it can cost you the game.',
-      'disgrace',
-    );
-  }
-  if (d.card.is_green && !seen.green) {
-    seen.green = true;
-    enqueueTutorialCoach('The 4th green card ends the game instantly — even mid-round.', 'green');
+  for (const tip of TUTORIAL_TIPS) {
+    if (!seen[tip.id] && tip.matches(d)) {
+      seen[tip.id] = true;
+      enqueueTutorialCoach(tip.text, tip.kind);
+    }
   }
 }
 

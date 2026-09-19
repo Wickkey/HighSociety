@@ -15,6 +15,7 @@ import {
 import {
   showAccountScreen, onAccountSaveClick, showAchievementsScreen,
   onAccountEditUsernameClick, onAccountCancelEditClick, onEloChartRangeClick,
+  onAchievementTileClick, onAchievementTileKeydown,
 } from './account/account.js';
 import {
   showHomeTile, showHomeTiles, onHomeLinkClick, navigateFromSidebar, onCreateGame, onJoinByCode, onJoinRoomCodeInput,
@@ -42,7 +43,7 @@ import {
   onStandingsTableClick,
 } from './lobby/rematch.js';
 import { onPlaceBid, onPass, onResign, onDiscardPainting, onQuickReactionClick } from './game/gameActions.js';
-import { hideTutorialCoach } from './ui/notifications.js';
+import { onTutorialCoachNextClick } from './ui/notifications.js';
 
 // Debug-only bridge, not part of the app's real API surface: lets a
 // browser console (or a Playwright page.evaluate, as used throughout this
@@ -122,7 +123,7 @@ function wireStaticHandlers() {
   $('btn-dismiss-tutorial-cta').addEventListener('click', markTutorialOffered);
   $('btn-play-tutorial').addEventListener('click', onStartTutorial);
   $('btn-replay-tutorial').addEventListener('click', onStartTutorial);
-  $('btn-dismiss-tutorial-coach').addEventListener('click', hideTutorialCoach);
+  $('btn-tutorial-coach-next').addEventListener('click', onTutorialCoachNextClick);
   $('connection-badge').addEventListener('click', onProfileChipClick);
   $('btn-open-account').addEventListener('click', () => { closeProfilePopover(); showAccountScreen(); });
   // navigateFromSidebar itself no longer renders anything on its own (see
@@ -167,6 +168,8 @@ function wireStaticHandlers() {
   $('btn-leaderboard-prev').addEventListener('click', onLeaderboardPrevClick);
   $('btn-leaderboard-next').addEventListener('click', onLeaderboardNextClick);
   $('leaderboard-body').addEventListener('click', onLeaderboardTableClick);
+  $('achievements-grid').addEventListener('click', onAchievementTileClick);
+  $('achievements-grid').addEventListener('keydown', onAchievementTileKeydown);
   $('game-detail-body').addEventListener('click', onGameDetailTableClick);
   // Reached from a name click (Leaderboard, or the game detail modal
   // opened from Home/My Games/Account/another profile) -- Back has to
