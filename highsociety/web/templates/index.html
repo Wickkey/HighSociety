@@ -792,7 +792,6 @@
             <svg class="home-tile-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18l6-6-6-6"/></svg>
           </button>
           <button type="button" class="home-tile home-tile-primary" data-home-target="host">
-            <span class="home-tile-badge">Most popular</span>
             <span class="home-tile-icon">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                 <path d="M4 18 L5 10 L8.5 13.5 L12 6.5 L15.5 13.5 L19 10 L20 18 Z"/>
@@ -1424,11 +1423,7 @@
                screen's own callouts, plus a show/hide transition like the
                other in-game overlays (see notifications.js). -->
           <div id="tutorial-coach-card" class="rules-cue-card tutorial-coach-card hidden">
-            <span class="rules-cue-card-icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M12 9v4"/><path d="M12 16.5h.01"/><circle cx="12" cy="12" r="9"/>
-              </svg>
-            </span>
+            <span id="tutorial-coach-card-icon" class="rules-cue-card-icon" aria-hidden="true"></span>
             <p id="tutorial-coach-card-text"></p>
             <button type="button" id="btn-dismiss-tutorial-coach" class="tutorial-coach-card-dismiss" aria-label="Dismiss tip">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>

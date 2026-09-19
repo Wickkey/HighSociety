@@ -185,6 +185,18 @@
   padding-right: 2.4rem;
 }
 .tutorial-coach-card.show { opacity: 1; transform: translateY(0); }
+/* .rules-cue-card/.rules-cue-card-flip's own `background` is a semi-transparent
+   tint (rgba, no opaque base) meant to sit on the cream .card.panel surface
+   the How to Play screen always puts it on -- here it sits directly on the
+   dark green page background between two cream panels instead, so that same
+   tint composited to a muddy, low-contrast card. An #id selector always
+   outranks those plain-class rules regardless of stylesheet order, so this
+   reliably gives both variants an opaque cream base under whichever tint is
+   currently active, matching every other panel on this screen. */
+#tutorial-coach-card {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.6), rgba(255, 255, 255, 0) 40%), var(--panel-bg);
+  box-shadow: var(--shadow-sm);
+}
 .tutorial-coach-card-dismiss {
   position: absolute;
   top: 0.6rem;

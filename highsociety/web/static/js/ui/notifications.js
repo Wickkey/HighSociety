@@ -126,16 +126,49 @@ const tutorialCoachQueue = [];
 let tutorialCoachBusy = false;
 let tutorialCoachHideTimer = null;
 
-export function enqueueTutorialCoach(text) {
-  tutorialCoachQueue.push(text);
+// Same icon + color coding as the three cue cards on the How to Play screen
+// (_how_to_play_rich.html) -- 'normal' is the plain amber warning triangle
+// (the "don't spend everything" card), 'disgrace' is the green-tinted
+// .rules-cue-card-flip swap-arrows icon (the trade-off card), 'green' is the
+// plain circle with .rules-cue-card-icon-green (the "4th green card" card).
+// A tutorial player who's just read one of these on How to Play sees the
+// exact same icon/color mean the exact same thing in the live game.
+const TUTORIAL_COACH_KINDS = {
+  normal: {
+    cardClass: '',
+    iconClass: '',
+    iconSvg: '<path d="M12 9v4"/><path d="M12 16.5h.01"/>'
+      + '<path d="M10.3 3.9 2.6 17.5a1.8 1.8 0 0 0 1.56 2.7h15.68a1.8 1.8 0 0 0 1.56-2.7L13.7 3.9a1.8 1.8 0 0 0-3.4 0Z"/>',
+  },
+  disgrace: {
+    cardClass: 'rules-cue-card-flip',
+    iconClass: '',
+    iconSvg: '<path d="M17 2.1l4 4-4 4"/><path d="M3 12.1v-2a4 4 0 0 1 4-4h14"/>'
+      + '<path d="M7 21.9l-4-4 4-4"/><path d="M21 11.9v2a4 4 0 0 1-4 4H3"/>',
+  },
+  green: {
+    cardClass: '',
+    iconClass: 'rules-cue-card-icon-green',
+    iconSvg: '<circle cx="12" cy="12" r="8.5"/>',
+  },
+};
+
+export function enqueueTutorialCoach(text, kind) {
+  tutorialCoachQueue.push({ text, kind });
   pumpTutorialCoachQueue();
 }
 
 function pumpTutorialCoachQueue() {
   if (tutorialCoachBusy || tutorialCoachQueue.length === 0) return;
   tutorialCoachBusy = true;
-  const text = tutorialCoachQueue.shift();
+  const { text, kind } = tutorialCoachQueue.shift();
+  const spec = TUTORIAL_COACH_KINDS[kind] || TUTORIAL_COACH_KINDS.normal;
   const card = $('tutorial-coach-card');
+  card.classList.remove('rules-cue-card-flip');
+  if (spec.cardClass) card.classList.add(spec.cardClass);
+  const icon = $('tutorial-coach-card-icon');
+  icon.className = `rules-cue-card-icon${spec.iconClass ? ` ${spec.iconClass}` : ''}`;
+  icon.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${spec.iconSvg}</svg>`;
   $('tutorial-coach-card-text').textContent = text;
   show(card);
   requestAnimationFrame(() => card.classList.add('show'));

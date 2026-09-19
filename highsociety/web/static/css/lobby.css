@@ -742,24 +742,6 @@ h3:has(.section-icon) { display: flex; align-items: center; gap: 0.5rem; }
   outline: none;
 }
 .home-tile:hover .home-tile-arrow, .home-tile:focus-visible .home-tile-arrow { transform: translateX(3px); color: var(--accent-strong); }
-/* Same cream background as every other tile, per explicit feedback (the
-   gold fill made Host look like a different kind of control rather than
-   one of three equal options) -- "start here if you're not sure" is now
-   carried by the "Most popular" badge alone, not a whole-tile color
-   change. */
-.home-tile-badge {
-  position: absolute;
-  top: 0.7rem;
-  right: 1rem;
-  font-size: 0.65rem;
-  font-weight: 800;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--accent-strong);
-  background: var(--accent-soft);
-  padding: 0.2rem 0.55rem;
-  border-radius: 999px;
-}
 /* A colored badge behind the line icon rather than a bare glyph -- gives
    the tile a focal point and ties the icon to the app's own gold accent
    instead of it just floating there at whatever color an emoji happened
