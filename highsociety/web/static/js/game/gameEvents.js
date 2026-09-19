@@ -6,7 +6,7 @@ import { escapeHtml } from '../utils/formatting.js';
 import { game, ensureOpponent, openMyPrompt } from './gameState.js';
 import {
   renderAuctionPanel, renderOpponents, renderMyPanel, renderMoneyChips,
-  renderPaintingChoices, updateBidStatus, actorLabel, describeCard,
+  renderPaintingChoices, updateBidStatus, actorLabel, describeCard, cardTypeName,
   clearMoveTimer, startMoveTimer, renderMovePanel,
 } from './gameRenderer.js';
 import { setSelectedDiscardValue, disarmActionWatchdog } from './gameActions.js';
@@ -244,25 +244,45 @@ function showError_moveError(text) {
 // later" note) is a one-entry edit here, nothing else to touch. `kind`
 // picks the icon/color coding from TUTORIAL_COACH_KINDS above (matching
 // How to Play's own cue cards); `matches` decides whether this
-// auction_start is this tip's moment; each fires at most once per game
+// auction_start is this tip's moment. `id`/`text` are either a literal
+// value or a function of `d`, for the one tip (disgrace-card-effect) whose
+// wording and dedup key both depend on which specific card came up.
+// Everything else about a tip fires at most once per game
 // (game.tutorialCoachShown), the first time its condition is true. More
-// than one can match the same auction_start (e.g. a Scandale is both
-// green and a disgrace card) -- enqueueTutorialCoach's own queue shows
-// them one after another via the modal's "Next" button, never both at once.
+// than one can match the same auction_start (e.g. a first-ever Scandale is
+// simultaneously the disgrace mechanic, that card's own effect, AND the
+// green-card rule) -- enqueueTutorialCoach's own queue shows them one
+// after another via the modal's "Next" button, never several at once.
 const TUTORIAL_TIPS = [
   {
     id: 'normal',
     kind: 'normal',
     matches: (d) => d.auction_type === 'normal',
-    text: 'Highest bidder wins and pays. Finish with the least money, though, and you\'re '
-      + 'eliminated — no matter your score.',
+    text: 'For Paintings and Prestige cards, highest bidder wins and pays. Finish with the '
+      + 'least money, though, and you\'re eliminated — no matter your score.',
   },
   {
-    id: 'disgrace',
+    // The general mechanic, shown once regardless of which disgrace card
+    // triggered it -- kept deliberately separate from the per-card effect
+    // tip below, which repeats (once each) for every distinct card type,
+    // since re-explaining "passing = stuck with the card, keep your money"
+    // every time would be exactly the repetition explicitly flagged as
+    // unwanted.
+    id: 'disgrace_mechanic',
     kind: 'disgrace',
     matches: (d) => d.auction_type === 'disgrace',
     text: 'Disgrace auction: first to pass gets stuck with the card but keeps their money. '
-      + 'Everyone else loses what they bid. Overspending to dodge it can cost you the game.',
+      + 'Everyone else loses what they bid.',
+  },
+  {
+    // What THIS specific disgrace card actually does -- especially
+    // important for Faux Pas (the only one with a real follow-up action:
+    // discarding a painting), so it repeats once per distinct card type
+    // rather than only on the very first disgrace auction.
+    id: (d) => `disgrace_effect_${d.card.type}`,
+    kind: 'disgrace',
+    matches: (d) => d.auction_type === 'disgrace',
+    text: (d) => `${cardTypeName(d.card)}: ${d.card.description}`,
   },
   {
     id: 'green',
@@ -278,9 +298,11 @@ function maybeShowTutorialCoach(d) {
   if (!game.isTutorial) return;
   const seen = game.tutorialCoachShown;
   for (const tip of TUTORIAL_TIPS) {
-    if (!seen[tip.id] && tip.matches(d)) {
-      seen[tip.id] = true;
-      enqueueTutorialCoach(tip.text, tip.kind);
+    const id = typeof tip.id === 'function' ? tip.id(d) : tip.id;
+    if (!seen[id] && tip.matches(d)) {
+      seen[id] = true;
+      const text = typeof tip.text === 'function' ? tip.text(d) : tip.text;
+      enqueueTutorialCoach(text, tip.kind);
     }
   }
 }

@@ -562,27 +562,34 @@ h3:has(.section-icon) { display: flex; align-items: center; gap: 0.5rem; }
   border: 2px solid var(--panel-bg);
 }
 .achievement-lock svg { width: 9px; height: 9px; }
-/* Back face: same dark "reveal" surface the old hover tooltip used, now the
-   full flip-to result rather than a floating popover -- reads as "here's
-   the secret info" regardless of locked/unlocked, with a small status tag
-   so the back face alone still signals which one this is. */
+/* Back face: the exact same surface and locked/unlocked treatment as the
+   front (cream background, grayscale+faded when locked, full color/border/
+   shadow when unlocked) -- per explicit feedback, a separately-colored
+   dark "reveal" surface read as an unrelated, off-palette scheme instead
+   of "the same tile, turned around". The lock badge (same icon used on
+   the front) stands in for a locked back face's status, rather than a
+   text label -- also per feedback ("you used a lock symbol before, use
+   that here also; don't say lock/unlock"). */
 .achievement-tile-back {
-  background: var(--felt-2);
-  color: #f5f1e6;
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
   transform: rotateY(180deg);
 }
+.achievement-tile.locked .achievement-tile-back { filter: grayscale(1); opacity: 0.45; }
+.achievement-tile.unlocked .achievement-tile-back { border-color: var(--accent-light); box-shadow: var(--shadow-sm); }
 .achievement-tile-back strong { font-size: 0.85rem; }
-.achievement-tile-status {
-  font-size: 0.65rem;
-  font-weight: 800;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  padding: 0.1rem 0.5rem;
-  border-radius: 999px;
+.achievement-tile-back-lock {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: var(--muted);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
-.achievement-tile.locked .achievement-tile-status { background: rgba(255, 255, 255, 0.12); color: #cfc8bb; }
-.achievement-tile.unlocked .achievement-tile-status { background: var(--accent-light); color: #2a2011; }
-.achievement-tile-back p { margin: 0; font-size: 0.74rem; font-weight: 500; line-height: 1.4; }
+.achievement-tile-back-lock svg { width: 13px; height: 13px; }
+.achievement-tile-back p { margin: 0; font-size: 0.74rem; font-weight: 500; line-height: 1.4; color: var(--text); }
 
 /* Actions (left) + Recent Games (right), side by side -- replaces a
    3-tile grid that left most of the screen's width empty once the tiles'

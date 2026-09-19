@@ -57,6 +57,13 @@ const ACHIEVEMENTS = [
         + '<path d="M9 16c1.5-1.3 4.5-1.3 6 0"/>' },
 ];
 
+// Same lock glyph used both as the front's small icon-badge pin and (per
+// feedback) as the back face's own locked indicator, instead of a text
+// "Locked" label -- one glyph, one meaning, wherever it shows up.
+const LOCK_ICON_SVG = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <rect x="5.5" y="10.5" width="13" height="9.5" rx="2"/><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3"/>
+    </svg>`;
+
 // A locked tile's own icon badge gets a small lock pin (rather than
 // leaving "why is this grayed out" to be inferred from opacity alone).
 // Clicking (or Enter/Space while focused -- see onAchievementTileClick/
@@ -66,12 +73,15 @@ const ACHIEVEMENTS = [
 // before it could reliably be read. tabindex so a keyboard user can reach
 // the same flip via focus+Enter/Space; aria-label still carries the same
 // name+description for screen readers regardless of flip state.
+//
+// The back face deliberately mirrors the front's own locked/unlocked
+// treatment (same cream surface, same grayscale+faded-vs-full-color split,
+// same lock glyph) rather than a separately-colored "reveal" surface --
+// per explicit feedback, a different color scheme on the back read as
+// off-palette rather than "the same tile, turned around".
 function renderAchievementTile(a, unlocked) {
-  const lockBadge = unlocked ? '' : `<span class="achievement-lock">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-      <rect x="5.5" y="10.5" width="13" height="9.5" rx="2"/><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3"/>
-    </svg>
-  </span>`;
+  const lockBadge = unlocked ? '' : `<span class="achievement-lock">${LOCK_ICON_SVG}</span>`;
+  const backLock = unlocked ? '' : `<span class="achievement-tile-back-lock">${LOCK_ICON_SVG}</span>`;
   return `<div class="achievement-tile ${unlocked ? 'unlocked' : 'locked'}" tabindex="0" aria-label="${escapeHtml(a.name)}: ${escapeHtml(a.description)}">`
     + `<div class="achievement-tile-inner">`
     + `<div class="achievement-tile-face achievement-tile-front">`
@@ -80,8 +90,8 @@ function renderAchievementTile(a, unlocked) {
     + `<span class="achievement-name">${escapeHtml(a.name)}</span>`
     + `</div>`
     + `<div class="achievement-tile-face achievement-tile-back" aria-hidden="true">`
+    + backLock
     + `<strong>${escapeHtml(a.name)}</strong>`
-    + `<span class="achievement-tile-status">${unlocked ? 'Unlocked' : 'Locked'}</span>`
     + `<p>${escapeHtml(a.description)}</p>`
     + `</div>`
     + `</div></div>`;
