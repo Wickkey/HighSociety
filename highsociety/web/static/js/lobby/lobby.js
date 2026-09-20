@@ -743,21 +743,29 @@ export async function onStartTutorial() {
 }
 
 // "Suggested, not forced": the Home screen's tutorial CTA (see index.html's
-// #home-tutorial-cta) shows exactly once per browser, for a brand-new
+// #home-tutorial-cta) shows exactly once per *account*, for a brand-new
 // account only -- same client-side-truth localStorage pattern as
 // hs_rejoin_<room> above, not a server-tracked "seen" flag, since nobody
-// else needs to know a player skipped it. Retired the instant the player
+// else needs to know a player skipped it. Keyed by username (not one
+// global flag) -- a real, reported gap: a single shared browser flag meant
+// that testing/dismissing the tutorial once under any account (e.g. your
+// own long-running profile) permanently hid the CTA for every *other*
+// account created on that same browser afterward, even a genuinely
+// brand-new guest. Retired for that one account the instant the player
 // either starts the tutorial or explicitly dismisses the card; "Play the
 // tutorial again" (How to Play screen, finished screen) stays available
 // forever regardless, since that's a deliberate replay, not the first-run nudge.
-const TUTORIAL_OFFERED_KEY = 'hs_tutorial_offered';
+function tutorialOfferedKey(username) {
+  return `hs_tutorial_offered_${username}`;
+}
 export function markTutorialOffered() {
-  localStorage.setItem(TUTORIAL_OFFERED_KEY, '1');
+  const profile = loadProfile();
+  if (profile) localStorage.setItem(tutorialOfferedKey(profile.username), '1');
   hide($('home-tutorial-cta'));
 }
 // Called every time the home tile picker is (re-)shown (see showHomeTiles).
 // The localStorage check alone is instant and flicker-free, but it's only
-// "has this browser seen the offer," not "is this actually someone new" --
+// "has this account seen the offer," not "is this actually someone new" --
 // a real player who signs into a second/reset browser would otherwise see
 // it again despite having real game history. Shows optimistically first
 // (so the common case -- a genuinely new account -- has zero flicker), then
@@ -769,12 +777,12 @@ export function markTutorialOffered() {
 // async reveal that shoves the tile picker down after the fact is worse
 // than an optional banner occasionally correcting itself away.
 export async function refreshTutorialCta() {
-  const alreadyOffered = localStorage.getItem(TUTORIAL_OFFERED_KEY) === '1';
   const cta = $('home-tutorial-cta');
+  const profile = loadProfile();
+  if (!profile) { hide(cta); return; } // no account yet to key the flag or the games_played check off of
+  const alreadyOffered = localStorage.getItem(tutorialOfferedKey(profile.username)) === '1';
   if (alreadyOffered) { hide(cta); return; }
   show(cta);
-  const profile = loadProfile();
-  if (!profile) return; // no account yet to check games_played against -- keep showing
   const stats = await getPrefetchedStats(profile.username);
   if (stats && (stats.games_played || 0) > 0) {
     hide(cta);
