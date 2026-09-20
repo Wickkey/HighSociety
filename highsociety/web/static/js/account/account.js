@@ -57,25 +57,62 @@ const ACHIEVEMENTS = [
         + '<path d="M9 16c1.5-1.3 4.5-1.3 6 0"/>' },
 ];
 
-// A locked tile's own icon badge gets a small lock pin (rather than
-// leaving "why is this grayed out" to be inferred from opacity alone),
-// and every tile gets a styled, instant hover/focus tooltip with exactly
-// how to unlock it -- replaces the old plain title="..." (a native
-// tooltip's ~1s hover delay and inconsistent cross-browser look, on
-// content worth reading immediately). tabindex so a keyboard user can
-// reach the same tooltip via focus, not just a mouse hover; aria-label
-// carries the same text for screen readers regardless of either.
-function renderAchievementTile(a, unlocked) {
-  const lockBadge = unlocked ? '' : `<span class="achievement-lock">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+// Same lock glyph used both as the front's small icon-badge pin and (per
+// feedback) as the back face's own locked indicator, instead of a text
+// "Locked" label -- one glyph, one meaning, wherever it shows up.
+const LOCK_ICON_SVG = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
       <rect x="5.5" y="10.5" width="13" height="9.5" rx="2"/><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3"/>
-    </svg>
-  </span>`;
+    </svg>`;
+
+// A locked tile's own icon badge gets a small lock pin (rather than
+// leaving "why is this grayed out" to be inferred from opacity alone).
+// Clicking (or Enter/Space while focused -- see onAchievementTileClick/
+// onAchievementTileKeydown in app.js) flips the tile to a back face with
+// the full description -- replaces the old hover/focus tooltip, which
+// never worked on a touch device at all and, per feedback, disappeared
+// before it could reliably be read. tabindex so a keyboard user can reach
+// the same flip via focus+Enter/Space; aria-label still carries the same
+// name+description for screen readers regardless of flip state.
+//
+// The back face deliberately mirrors the front's own locked/unlocked
+// treatment (same cream surface, same grayscale+faded-vs-full-color split,
+// same lock glyph) rather than a separately-colored "reveal" surface --
+// per explicit feedback, a different color scheme on the back read as
+// off-palette rather than "the same tile, turned around".
+function renderAchievementTile(a, unlocked) {
+  const lockBadge = unlocked ? '' : `<span class="achievement-lock">${LOCK_ICON_SVG}</span>`;
+  const backLock = unlocked ? '' : `<span class="achievement-tile-back-lock">${LOCK_ICON_SVG}</span>`;
   return `<div class="achievement-tile ${unlocked ? 'unlocked' : 'locked'}" tabindex="0" aria-label="${escapeHtml(a.name)}: ${escapeHtml(a.description)}">`
+    + `<div class="achievement-tile-inner">`
+    + `<div class="achievement-tile-face achievement-tile-front">`
     + `<span class="achievement-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" `
     + `stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${a.icon}</svg>${lockBadge}</span>`
     + `<span class="achievement-name">${escapeHtml(a.name)}</span>`
-    + `<span class="achievement-tooltip" aria-hidden="true">${escapeHtml(a.description)}</span></div>`;
+    + `</div>`
+    + `<div class="achievement-tile-face achievement-tile-back" aria-hidden="true">`
+    + backLock
+    + `<strong>${escapeHtml(a.name)}</strong>`
+    + `<p>${escapeHtml(a.description)}</p>`
+    + `</div>`
+    + `</div></div>`;
+}
+
+// Delegated on #achievements-grid (app.js) -- toggling .flipped rather than
+// tracking open state anywhere in JS keeps this a pure, stateless view of
+// whatever's currently in the DOM; a full re-render (a live unlock landing
+// while this screen happens to be open) just resets any flipped tiles back
+// to their front face, an acceptable rare-case trade-off.
+export function onAchievementTileClick(e) {
+  const tile = e.target.closest('.achievement-tile');
+  if (tile) tile.classList.toggle('flipped');
+}
+
+export function onAchievementTileKeydown(e) {
+  if (e.key !== 'Enter' && e.key !== ' ') return;
+  const tile = e.target.closest('.achievement-tile');
+  if (!tile) return;
+  e.preventDefault(); // Space must not also scroll the page
+  tile.classList.toggle('flipped');
 }
 
 // Fired once as soon as boot knows who's signed in (see login.js's

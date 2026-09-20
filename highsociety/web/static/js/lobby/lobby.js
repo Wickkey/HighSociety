@@ -20,7 +20,12 @@ import { ws, closeSocket, attemptReconnect, connectPlayerSocket, connectSpectato
 import { setPendingJoin, setPendingSpectate } from '../network/messages.js';
 import { confirmDialog } from '../ui/modals.js';
 import { renderFinished } from './rematch.js';
-import { renderLobby } from './playerList.js';
+import { renderLobby, showSpectateForStatus } from './playerList.js';
+// Circular with account.js (which imports fetchJSON from here) -- safe by
+// this project's established convention (see gameState.js's identical
+// note): only ever used inside a function body below (refreshTutorialCta),
+// never at this module's own top-level evaluation.
+import { getPrefetchedStats } from '../account/account.js';
 import { loadHomeRecentGames } from './gameHistory.js';
 
 export async function fetchJSON(url, opts) {
@@ -162,6 +167,7 @@ export function showHomeTiles() {
   setScreenPath('/');
   loadHomeGlobalStats();
   loadHomeRecentGames();
+  refreshTutorialCta();
 }
 
 // "Less accurate is fine" per the request -- plain site-wide counts, not
@@ -686,8 +692,101 @@ export async function onCreateGame() {
     lastStatusValue = status;
     renderLobby(status);
     startPolling();
+    // Hosting used to leave the host sitting on the exact same join-form
+    // every other joiner sees, requiring a separate, redundant "Join
+    // Game" click on their own room -- a real reported point of
+    // confusion. renderLobby() above already pre-filled #join-username
+    // from the host's own saved profile (applyJoinIdentityDefaults), so
+    // onJoin() below just reuses that -- same identity handling/
+    // resetGameState/seedOpponents/connectPlayerSocket() path a manual
+    // click would take, no duplicated logic. Both calls are synchronous
+    // (nothing here awaits until connectPlayerSocket's own WebSocket
+    // opens), so the browser never actually paints the intermediate
+    // join-form state -- no visible flash before landing on "You're in!".
+    // If the auto-join's socket fails to open, connectPlayerSocket's own
+    // onclose -> refreshStatus() -> renderLobby() fallback already lands
+    // back on a normal, manually-clickable join-form -- an existing
+    // safety net, not new failure-handling.
+    onJoin();
   } catch (e) {
     showError($('host-error'), e.message);
+  }
+}
+
+// Guided first-game tutorial: a real 3-seat game (you + 2 TutorialBots)
+// played through this exact same create -> auto-join pipeline, just with
+// the server deciding every field itself (see api_create_game's "tutorial"
+// branch) instead of reading a form. Callable from the Home CTA, the How to
+// Play screen's permanent link, or the finished screen's "play again"
+// button -- all three just call this with no extra state to thread through.
+export async function onStartTutorial() {
+  if (ensureProfileSet()) return;
+  markTutorialOffered(); // starting it counts as "seen", same as dismissing
+  const profile = loadProfile();
+  try {
+    const status = await fetchJSON('/api/create_game', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tutorial: true, host_username: profile ? profile.username : null }),
+    });
+    stopRoomsPolling();
+    joinIdentityOverridden = false;
+    currentRoomCodeValue = status.room_code;
+    history.replaceState(null, '', `?room=${encodeURIComponent(status.room_code)}`);
+    lastStatusValue = status;
+    renderLobby(status);
+    startPolling();
+    onJoin(); // see onCreateGame's identical trailing call for why this is safe/synchronous
+  } catch (e) {
+    showError($('host-error'), e.message);
+  }
+}
+
+// "Suggested, not forced": the Home screen's tutorial CTA (see index.html's
+// #home-tutorial-cta) shows exactly once per *account*, for a brand-new
+// account only -- same client-side-truth localStorage pattern as
+// hs_rejoin_<room> above, not a server-tracked "seen" flag, since nobody
+// else needs to know a player skipped it. Keyed by username (not one
+// global flag) -- a real, reported gap: a single shared browser flag meant
+// that testing/dismissing the tutorial once under any account (e.g. your
+// own long-running profile) permanently hid the CTA for every *other*
+// account created on that same browser afterward, even a genuinely
+// brand-new guest. Retired for that one account the instant the player
+// either starts the tutorial or explicitly dismisses the card; "Play the
+// tutorial again" (How to Play screen, finished screen) stays available
+// forever regardless, since that's a deliberate replay, not the first-run nudge.
+function tutorialOfferedKey(username) {
+  return `hs_tutorial_offered_${username}`;
+}
+export function markTutorialOffered() {
+  const profile = loadProfile();
+  if (profile) localStorage.setItem(tutorialOfferedKey(profile.username), '1');
+  hide($('home-tutorial-cta'));
+}
+// Called every time the home tile picker is (re-)shown (see showHomeTiles).
+// The localStorage check alone is instant and flicker-free, but it's only
+// "has this account seen the offer," not "is this actually someone new" --
+// a real player who signs into a second/reset browser would otherwise see
+// it again despite having real game history. Shows optimistically first
+// (so the common case -- a genuinely new account -- has zero flicker), then
+// corrects by *hiding* it if the account turns out to have real games
+// played, using account.js's own getPrefetchedStats (reuses whatever
+// prefetch/cache gameHistory.js's Home widget already triggered, no
+// duplicate network call). Deliberately never the other direction (never
+// making it *appear* late) -- see this project's own CLAUDE.md on why an
+// async reveal that shoves the tile picker down after the fact is worse
+// than an optional banner occasionally correcting itself away.
+export async function refreshTutorialCta() {
+  const cta = $('home-tutorial-cta');
+  const profile = loadProfile();
+  if (!profile) { hide(cta); return; } // no account yet to key the flag or the games_played check off of
+  const alreadyOffered = localStorage.getItem(tutorialOfferedKey(profile.username)) === '1';
+  if (alreadyOffered) { hide(cta); return; }
+  show(cta);
+  const stats = await getPrefetchedStats(profile.username);
+  if (stats && (stats.games_played || 0) > 0) {
+    hide(cta);
+    markTutorialOffered(); // real history -- never worth asking again
   }
 }
 
@@ -727,16 +826,23 @@ export async function onCopyRoomLink() {
   } catch (e) {
     return; // clipboard permission denied/unavailable -- silently no-op, nothing else useful to do
   }
+  // Stays "Copied!" rather than reverting after a beat -- the link doesn't
+  // change while you're in this room, so re-arming a "Copy" affordance
+  // just invites a pointless second copy of the identical string. Reset
+  // happens on the next fresh room instead (renderLobby).
   const btn = $('btn-copy-room-link');
   btn.classList.add('copied');
   btn.title = 'Copied!';
   btn.querySelector('span').textContent = 'Copied!';
-  clearTimeout(onCopyRoomLink._resetTimer);
-  onCopyRoomLink._resetTimer = setTimeout(() => {
-    btn.classList.remove('copied');
-    btn.title = 'Copy invite link';
-    btn.querySelector('span').textContent = 'Copy';
-  }, 1500);
+}
+
+// Called by renderLobby on a genuinely new room -- see onCopyRoomLink on
+// why the copied state otherwise sticks for the life of a room.
+export function resetCopyRoomLinkButton() {
+  const btn = $('btn-copy-room-link');
+  btn.classList.remove('copied');
+  btn.title = 'Copy invite link';
+  btn.querySelector('span').textContent = 'Copy';
 }
 
 export function onJoin() {
@@ -759,12 +865,23 @@ export function onSpectateJoin() {
   saveProfile(username, username); // this device's identity going forward — see loadProfile
   stopPolling();
   resetGameState(null, lastStatusValue);
+  // Seeds with whatever status this tab already knows (from the polling
+  // that was already running to reach this screen), not null -- a real
+  // reported bug: defaulting to "assume it's live" while the fresh fetch
+  // below is still in flight meant every spectate of a still-in-lobby
+  // room visibly flashed the live game layout for a moment before
+  // snapping back to the correct waiting view the instant that fetch
+  // resolved ("goes to game -> comes back", not smooth at all). Falls
+  // back to the live layout only if this tab genuinely has no status yet
+  // (e.g. a direct link with nothing polled first) -- same as before.
+  showSpectateForStatus(lastStatusValue);
   fetchJSON(`/api/status?room=${encodeURIComponent(currentRoomCodeValue)}`)
     .then((status) => {
       seedOpponents(status, null);
       game.revealCards = status.reveal_cards !== false;
       game.showLogs = status.show_logs !== false;
       applyRoomDisplaySettings();
+      showSpectateForStatus(status);
     }).catch(() => {});
   connectSpectatorSocket();
   showScreen('screen-spectate');

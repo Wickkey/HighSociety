@@ -6,19 +6,26 @@ import { escapeHtml } from '../utils/formatting.js';
 import { game, ensureOpponent, openMyPrompt } from './gameState.js';
 import {
   renderAuctionPanel, renderOpponents, renderMyPanel, renderMoneyChips,
-  renderPaintingChoices, updateBidStatus, actorLabel, describeCard,
+  renderPaintingChoices, updateBidStatus, actorLabel, describeCard, cardTypeName,
   clearMoveTimer, startMoveTimer, renderMovePanel,
 } from './gameRenderer.js';
 import { setSelectedDiscardValue, disarmActionWatchdog } from './gameActions.js';
 import {
   enqueueEvent, showFinalGreenOverlay, showCountdownOverlay, hideCountdownOverlay, logLine,
+  enqueueTutorialCoach,
 } from '../ui/notifications.js';
 import { appendChatLine } from '../ui/chat.js';
 import { refreshStatus } from '../lobby/lobby.js';
+import { revealSpectateLiveLayout } from '../lobby/playerList.js';
 
 export function ensureGameScreenVisible(isSpectator) {
   const id = isSpectator ? 'screen-spectate' : 'screen-game';
   if ($(id).classList.contains('hidden')) showScreen(id);
+  // A real game message is the same "this is actually live now" signal a
+  // player's own screen implicitly relies on -- see index.html's own
+  // comment on #spectate-lobby-wait for the bug this replaces. A no-op
+  // once already showing the live layout.
+  if (isSpectator) revealSpectateLiveLayout();
 }
 
 // gameplay.py broadcasts a plain-text GLOBAL_EVENT narration line right next
@@ -231,6 +238,75 @@ function showError_moveError(text) {
   el.classList.remove('hidden');
 }
 
+// Guided first-game tutorial tips, in the order they're allowed to appear.
+// Plain config, not scattered logic -- adding, removing, or reordering a
+// tip in the future (per the user's own "I may give feedback on this
+// later" note) is a one-entry edit here, nothing else to touch. `kind`
+// picks the icon/color coding from TUTORIAL_COACH_KINDS above (matching
+// How to Play's own cue cards); `matches` decides whether this
+// auction_start is this tip's moment. `id`/`text` are either a literal
+// value or a function of `d`, for the one tip (disgrace-card-effect) whose
+// wording and dedup key both depend on which specific card came up.
+// Everything else about a tip fires at most once per game
+// (game.tutorialCoachShown), the first time its condition is true. More
+// than one can match the same auction_start (e.g. a first-ever Scandale is
+// simultaneously the disgrace mechanic, that card's own effect, AND the
+// green-card rule) -- enqueueTutorialCoach's own queue shows them one
+// after another via the modal's "Next" button, never several at once.
+const TUTORIAL_TIPS = [
+  {
+    id: 'normal',
+    kind: 'normal',
+    matches: (d) => d.auction_type === 'normal',
+    text: 'For Paintings and Prestige cards, highest bidder wins and pays. Finish with the '
+      + 'least money, though, and you\'re eliminated — no matter your score.',
+  },
+  {
+    // The general mechanic, shown once regardless of which disgrace card
+    // triggered it -- kept deliberately separate from the per-card effect
+    // tip below, which repeats (once each) for every distinct card type,
+    // since re-explaining "passing = stuck with the card, keep your money"
+    // every time would be exactly the repetition explicitly flagged as
+    // unwanted.
+    id: 'disgrace_mechanic',
+    kind: 'disgrace',
+    matches: (d) => d.auction_type === 'disgrace',
+    text: 'Disgrace auction: first to pass gets stuck with the card but keeps their money. '
+      + 'Everyone else loses what they bid.',
+  },
+  {
+    // What THIS specific disgrace card actually does -- especially
+    // important for Faux Pas (the only one with a real follow-up action:
+    // discarding a painting), so it repeats once per distinct card type
+    // rather than only on the very first disgrace auction.
+    id: (d) => `disgrace_effect_${d.card.type}`,
+    kind: 'disgrace',
+    matches: (d) => d.auction_type === 'disgrace',
+    text: (d) => `${cardTypeName(d.card)}: ${d.card.description}`,
+  },
+  {
+    id: 'green',
+    kind: 'green',
+    matches: (d) => d.card.is_green,
+    text: 'The 4th green card ends the game instantly — even mid-round.',
+  },
+];
+
+// A no-op for every real game (game.isTutorial is only ever true for the
+// guided first-game room).
+function maybeShowTutorialCoach(d) {
+  if (!game.isTutorial) return;
+  const seen = game.tutorialCoachShown;
+  for (const tip of TUTORIAL_TIPS) {
+    const id = typeof tip.id === 'function' ? tip.id(d) : tip.id;
+    if (!seen[id] && tip.matches(d)) {
+      seen[id] = true;
+      const text = typeof tip.text === 'function' ? tip.text(d) : tip.text;
+      enqueueTutorialCoach(text, tip.kind);
+    }
+  }
+}
+
 function applyAuctionUpdate(msg, isSpectator) {
   const d = msg.data;
   // Turns are strictly sequential (the game engine blocks on exactly one
@@ -284,6 +360,7 @@ function applyAuctionUpdate(msg, isSpectator) {
     Object.values(game.opponents).forEach((o) => { o.outOfAuction = false; o.lastBid = null; });
     enqueueEvent(isSpectator, `New auction: ${describeCard(d.card)}`, 'start');
     logLine(`🃏 Auction #${d.round_number}: ${describeCard(d.card)}`, isSpectator);
+    maybeShowTutorialCoach(d);
   } else if (d.kind === 'turn_start') {
     game.turnPlayer = d.player;
     game.turnStartedAt = Date.now();

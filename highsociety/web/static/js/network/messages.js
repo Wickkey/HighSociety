@@ -11,7 +11,7 @@ import { game } from '../game/gameState.js';
 import { applyGameMessage, ensureGameScreenVisible } from '../game/gameEvents.js';
 import { ws } from './websocket.js';
 import { currentRoomCode, clearRejoinInfo, saveRejoinInfo, leaveToHome } from '../lobby/lobby.js';
-import { startWaitingRoomPolling } from '../lobby/playerList.js';
+import { startWaitingRoomPolling, setSpectateLinkLabel } from '../lobby/playerList.js';
 import { handleRematchMessage } from '../lobby/rematch.js';
 import { showToast } from '../ui/notifications.js';
 
@@ -82,6 +82,7 @@ export function handlePlayerMessage(msg) {
       } else {
         $('join-form').classList.add('hidden');
         $('join-waiting').classList.remove('hidden');
+        setSpectateLinkLabel(true); // now seated -- the link means giving that seat up, so it says so
         setSessionStatus('playing');
         startWaitingRoomPolling();
         if (msg.data && msg.data.rejoin_token) {

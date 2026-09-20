@@ -1,3 +1,4 @@
+import datetime
 import itertools
 import json
 import threading
@@ -6,6 +7,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from highsociety.code.ai.tutorial_bot import TutorialBot
 from highsociety.code.common import matchmaking
 from highsociety.code.common.db import game_history
 from highsociety.code.gamecore.card_manager.money_card_manager import MoneyCardManager
@@ -226,6 +228,92 @@ def test_create_game_stores_host_username_for_game_history(running_web_server):
         "/api/create_game", json={"seats": 2, "bot_mix": ["pass"], "host_username": 123}
     )
     assert bad_type.status_code == 400
+
+
+def test_create_game_tutorial_branch_ignores_client_fields_and_builds_a_fixed_room(running_web_server):
+    """The tutorial branch decides every field itself -- a modified client
+    sending a different bot_mix/seed/seats/visibility must not change the
+    room it gets back, only host_username passes through (see
+    api_create_game's own comment on why)."""
+    client = web_server.app.test_client()
+
+    resp = client.post("/api/create_game", json={
+        "tutorial": True,
+        "host_username": "alice",
+        # All of these should be silently ignored, not honored or rejected.
+        "seats": 5,
+        "bot_mix": ["hard", "hard", "hard", "hard"],
+        "seed": 999,
+        "visibility": "public",
+    })
+    assert resp.status_code == 200
+    body = resp.get_json()
+    assert body["seats"] == web_server._TUTORIAL_SEATS == 3
+    assert body["seed"] == web_server._TUTORIAL_SEED
+    assert body["visibility"] == "private"
+    assert body["is_tutorial"] is True
+    assert body["human_seats"] == 1
+    assert len(body["joined"]) == 2
+    assert all(p["is_bot"] for p in body["joined"])
+
+    room = web_server._rooms[body["room_code"]]
+    assert room.host_username == "alice"
+    assert room.bot_mix == []  # TutorialBot is never named in bot_mix -- see GameRoom's own comment
+    assert all(isinstance(p, TutorialBot) for p in room.players)
+
+    bad_host = client.post("/api/create_game", json={"tutorial": True, "host_username": 123})
+    assert bad_host.status_code == 400
+
+
+def test_record_game_history_skips_the_database_write_for_a_tutorial_room(running_web_server, monkeypatch):
+    """The success-path guard (_record_game_history itself) -- see the
+    crash-path's own equivalent test below for the other call site."""
+    monkeypatch.setattr(game_history, "is_configured", lambda: True)
+    spy = MagicMock()
+    monkeypatch.setattr(game_history, "record_finished_game_async", spy)
+
+    room_code = web_server.app.test_client().post(
+        "/api/create_game", json={"tutorial": True}
+    ).get_json()["room_code"]
+    room = web_server._rooms[room_code]
+    assert room.is_tutorial is True
+
+    fake_game = MagicMock()
+    fake_game.winners = []
+    fake_game.final_standings = []
+    fake_game.get_auction_history.return_value = []
+    web_server._record_game_history(room, fake_game, datetime.datetime.now(datetime.timezone.utc))
+
+    spy.assert_not_called()
+    assert room.elo_changes == {}
+
+
+def test_game_thread_crash_skips_the_database_write_for_a_tutorial_room(running_web_server, monkeypatch):
+    """The crash-path's own game_history call (a separate code path from
+    _record_game_history's success-path guard above) must also never write
+    a tutorial game to history."""
+    monkeypatch.setattr(game_history, "is_configured", lambda: True)
+    spy = MagicMock()
+    monkeypatch.setattr(game_history, "record_finished_game_async", spy)
+    monkeypatch.setattr(web_server.PlayGame, "play_game",
+                         lambda self: (_ for _ in ()).throw(RuntimeError("simulated game-thread crash")))
+
+    port = running_web_server
+    client = web_server.app.test_client()
+    room_code = client.post("/api/create_game", json={"tutorial": True}).get_json()["room_code"]
+
+    player = ScriptedWSClient(_ws_url(port, f"/ws?room={room_code}"), "alice")
+    player.handshake()
+    player.start()
+
+    room = web_server._rooms[room_code]
+    deadline = time.time() + 10
+    while time.time() < deadline and room.state != "finished":
+        threading.Event().wait(0.1)
+    assert room.state == "finished"
+
+    spy.assert_not_called()
+    player.close()
 
 
 def test_rooms_listing_shows_only_open_public_rooms(running_web_server):
@@ -729,6 +817,103 @@ def test_game_thread_crash_marks_the_room_finished_and_closes_connections(runnin
     assert alice.active is False
 
     player.close()
+
+
+def _spectate_handshake(spectator, name, username):
+    """Shared IDENTIFY handshake for a raw `Client` spectator connection --
+    name then username, per ws_spectate's own prompt order. Returns the
+    parsed IDENTIFY_SUCCESS payload."""
+    spectator.receive(timeout=5)  # "Enter your name"
+    spectator.send(json.dumps({"message_type": "IDENTIFY_ACK", "prompt": name}))
+    spectator.receive(timeout=5)  # "Enter your username"
+    spectator.send(json.dumps({"message_type": "IDENTIFY_ACK", "prompt": username}))
+    return json.loads(spectator.receive(timeout=5))
+
+
+def test_spectator_joining_a_lobby_gets_a_waiting_message_not_a_live_one(running_web_server):
+    """Regression coverage for the exact inconsistency reported: a spectator
+    connecting to a room that hasn't started yet used to get "You are now
+    watching the game live" -- flatly untrue, and (see gameEvents.js's own
+    fix) the frontend used to render the live game table's skeleton for it
+    too. The IDENTIFY_SUCCESS wording itself should reflect a lobby is
+    still just a lobby."""
+    port = running_web_server
+    room_code = web_server.app.test_client().post(
+        "/api/create_game", json={"seats": 3, "bot_mix": []}
+    ).get_json()["room_code"]
+
+    spectator = Client(_ws_url(port, f"/ws_spectate?room={room_code}"))
+    welcome = _spectate_handshake(spectator, "watcher", "watcher-user")
+    assert welcome["message_type"] == "IDENTIFY_SUCCESS"
+    assert "live" not in welcome["prompt"].lower()
+    assert "waiting" in welcome["prompt"].lower()
+    spectator.close()
+
+
+def test_spectator_joining_mid_game_gets_a_catchup_not_a_blank_table(running_web_server):
+    """Regression coverage: ws_spectate never sent a fresh spectator anything
+    about the game already in progress -- no roster, no current auction, no
+    turn order -- unlike a reconnecting player (_send_reconnect_catchup).
+    A spectator joining anything already underway saw a completely blank
+    table until the next live event happened to arrive."""
+    port = running_web_server
+    room_code = web_server.app.test_client().post(
+        "/api/create_game", json={"seats": 2, "bot_mix": ["pass"], "seed": 5, "bot_think_time": 0}
+    ).get_json()["room_code"]
+
+    alice = ScriptedWSClient(_ws_url(port, f"/ws?room={room_code}"), "alice")
+    alice.handshake()
+    alice.start()
+
+    room = web_server._rooms[room_code]
+    deadline = time.time() + 10
+    while time.time() < deadline and room.game is None:
+        threading.Event().wait(0.1)
+    assert room.game is not None, "game never actually started"
+
+    spectator = Client(_ws_url(port, f"/ws_spectate?room={room_code}"))
+    welcome = _spectate_handshake(spectator, "watcher", "watcher-user")
+    assert "live" in welcome["prompt"].lower()
+
+    seen_player_order = False
+    seen_roster = False
+    deadline = time.time() + 5
+    while time.time() < deadline and not (seen_player_order and seen_roster):
+        raw = spectator.receive(timeout=0.5)
+        if raw is None:
+            continue
+        msg = json.loads(raw)
+        data = msg.get("data") or {}
+        if data.get("event") == "player_order":
+            seen_player_order = True
+        elif data.get("event") == "opponent_state_sync":
+            seen_roster = True
+    assert seen_player_order, "spectator never got the turn order catch-up"
+    assert seen_roster, "spectator never got the opponent roster catch-up"
+
+    alice.close()
+    spectator.close()
+
+
+def test_reap_stale_rooms_closes_spectator_connections_too(running_web_server):
+    """Regression coverage: the reaper already closed a stale room's player
+    connections but never touched its spectators at all -- an orphaned
+    spectator socket (and its receiver thread) would otherwise sit open
+    forever once the room itself was deleted from `_rooms`."""
+    room_code = web_server.app.test_client().post(
+        "/api/create_game", json={"seats": 3, "bot_mix": []}
+    ).get_json()["room_code"]
+    room = web_server._rooms[room_code]
+
+    spectator = MagicMock()
+    spectator.active = True
+    room.spectators.append(spectator)
+    room.last_active_at = time.time() - web_server._ROOM_LOBBY_IDLE_TIMEOUT_SECONDS - 1
+
+    web_server._reap_stale_rooms_once()
+
+    assert room_code not in web_server._rooms
+    spectator.close.assert_called_once()
 
 
 def test_spectator_sees_the_game_live(running_web_server):
@@ -1818,6 +2003,21 @@ def test_matchmaking_join_returns_a_ticket_id(clean_matchmaking_queue, monkeypat
 def test_matchmaking_status_404s_for_an_unknown_ticket(clean_matchmaking_queue):
     resp = web_server.app.test_client().get("/api/matchmaking/status?ticket=nope")
     assert resp.status_code == 404
+
+
+def test_matchmaking_queue_reports_pre_join_depth_per_size(clean_matchmaking_queue, monkeypatch):
+    monkeypatch.setattr(game_history, "get_player_elo", lambda username: 1000)
+    client = web_server.app.test_client()
+
+    assert client.get("/api/matchmaking/queue?seats=3").get_json() == {"seats": 3, "waiting_count": 0}
+
+    client.post("/api/matchmaking/join", json={"username": "alice", "seats": 3})
+    client.post("/api/matchmaking/join", json={"username": "bob", "seats": 2})
+    assert client.get("/api/matchmaking/queue?seats=3").get_json()["waiting_count"] == 1
+    assert client.get("/api/matchmaking/queue?seats=2").get_json()["waiting_count"] == 1
+
+    assert client.get("/api/matchmaking/queue?seats=99").status_code == 400
+    assert client.get("/api/matchmaking/queue?seats=abc").status_code == 400
 
 
 def test_matchmaking_status_reports_waiting_below_the_seat_count(clean_matchmaking_queue, monkeypatch):

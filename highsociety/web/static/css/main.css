@@ -506,7 +506,11 @@ input.needs-attention {
 #screen-spectate-join .panel,
 #screen-finished .panel,
 #screen-matchmaking .panel,
-#screen-login .panel {
+#screen-login .panel,
+/* Just the lobby-wait sub-panel, not #screen-spectate's own live-game
+   panels below it -- those intentionally use the wider .table-layout
+   grid, same as the real game screen. */
+#spectate-lobby-wait {
   max-width: 460px;
   margin: var(--screen-top-gap) auto;
   box-shadow: var(--shadow);

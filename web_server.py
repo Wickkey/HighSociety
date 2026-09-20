@@ -32,7 +32,7 @@ from dotenv import load_dotenv
 from flask import Flask, Response, jsonify, render_template, request
 from flask_sock import Sock
 
-from highsociety.code.ai import BOT_TYPES, create_bot_players
+from highsociety.code.ai import BOT_TYPES, create_bot_players, create_tutorial_bots
 from highsociety.code.ai.mcts import decision_service
 from highsociety.code.ai.mcts.worker_pool_decision_service import WorkerPoolBotDecisionService
 from highsociety.code.common import achievements, matchmaking
@@ -120,6 +120,21 @@ if _BOT_POOL_SIZE > 0:
 # modified/non-browser client sends.
 _TURN_TIME_PRESETS = frozenset({15.0, 30.0, 60.0, 90.0, 120.0})
 
+# The guided first-game tutorial (see api_create_game's "tutorial" branch)
+# is always this exact table: the human plus two TutorialBots, no clock, no
+# hidden info. The seed is curated, not random -- picked by hand (see
+# highsociety/code/gamecore/dev_tools/inspect_seed.py --seed 8) because its
+# draw order hits every teaching moment a new player needs inside one short
+# game: a disgrace auction as the very first card (Passe), a green Prestige
+# Card right after, a Scandale (a disgrace card that's *also* green) partway
+# through, a FauxPas, and a natural ending via the 4th-green-card rule --
+# all in 8 rounds. Changing this seed changes what the tutorial teaches, so
+# don't touch it without re-running that inspection tool to verify the new
+# order still covers the same ground.
+_TUTORIAL_SEATS = 3
+_TUTORIAL_SEED = 8
+_TUTORIAL_BOT_THINK_TIME = 1.2
+
 
 def _compute_disconnect_grace_seconds(turn_time_limit: Optional[float]) -> float:
     """
@@ -144,11 +159,19 @@ class GameRoom:
 
     def __init__(self, room_code: str, seats: int, bot_mix: list[str], seed: Optional[int],
                  bot_think_time: float, visibility: str, turn_time_limit: Optional[float] = None,
-                 reveal_cards: bool = True, show_logs: bool = True, host_username: Optional[str] = None):
+                 reveal_cards: bool = True, show_logs: bool = True, host_username: Optional[str] = None,
+                 is_tutorial: bool = False):
         self.room_code = room_code
         self.game_id = generate_game_id()
         self.seats = seats
         self.bot_mix = bot_mix
+        # A scripted, one-off walkthrough game (see api_create_game) --
+        # never written to game_history (run_game's success/crash paths
+        # both check this), so it can never touch a real Elo/leaderboard/
+        # achievements row. See _TUTORIAL_SEED's own comment for why this
+        # is safe to keep fully deterministic regardless of what the human
+        # actually does.
+        self.is_tutorial = is_tutorial
         # Whoever's browser called /api/create_game -- purely informational
         # (game_history.py's games.host_player_id), resolved to a player_id
         # at game-history-write time the same way any other participant is.
@@ -179,7 +202,17 @@ class GameRoom:
         # rematch's early turns aren't missing the context of who just won.
         self.auction_history = AuctionHistory()
 
-        self.players = create_bot_players(bot_mix, bot_think_time) if bot_mix else []
+        # Tutorial players are built directly (create_tutorial_bots), not via
+        # create_bot_players/BOT_TYPES -- TutorialBot is deliberately not in
+        # that shared registry (see its own docstring), so bot_mix for a
+        # tutorial room stays [] rather than naming a bot type nothing else
+        # would recognize.
+        if is_tutorial:
+            self.players = create_tutorial_bots(bot_think_time)
+        elif bot_mix:
+            self.players = create_bot_players(bot_mix, bot_think_time)
+        else:
+            self.players = []
         self.human_seats = seats - len(self.players)
         self.spectators = []
 
@@ -279,8 +312,10 @@ class GameRoom:
                 # and "never happened" were indistinguishable in history.
                 # No participants (final_standings may never have been
                 # populated) -- is_finished_successfully=False is the
-                # entire signal this write exists to record.
-                if game_history.is_configured():
+                # entire signal this write exists to record. Skipped
+                # entirely for a tutorial room -- see is_tutorial's own
+                # comment, same as the success path below.
+                if not self.is_tutorial and game_history.is_configured():
                     game_history.record_finished_game_async(
                         room_code=self.room_code,
                         seats=self.seats,
@@ -327,7 +362,7 @@ def _record_game_history(room: "GameRoom", game: PlayGame, started_at: datetime.
     to its fire-and-forget writer — cheap to call even when no database is
     configured, since is_configured() short-circuits before touching a
     network connection."""
-    if not game_history.is_configured():
+    if room.is_tutorial or not game_history.is_configured():
         room.elo_changes = {}  # nothing to compute -- let the reveal poll resolve immediately, not time out
         return
     winner_usernames = {w.username for w in (game.winners or [])}
@@ -415,7 +450,7 @@ def _generate_room_code() -> str:
 def _create_room(seats: int, bot_mix: list[str], seed: Optional[int], bot_think_time: float,
                   visibility: str, turn_time_limit: Optional[float] = None,
                   reveal_cards: bool = True, show_logs: bool = True,
-                  host_username: Optional[str] = None) -> GameRoom:
+                  host_username: Optional[str] = None, is_tutorial: bool = False) -> GameRoom:
     with _rooms_lock:
         for _ in range(20):
             code = _generate_room_code()
@@ -428,7 +463,7 @@ def _create_room(seats: int, bot_mix: list[str], seed: Optional[int], bot_think_
         room = GameRoom(room_code=code, seats=seats, bot_mix=bot_mix, seed=seed,
                          bot_think_time=bot_think_time, visibility=visibility,
                          turn_time_limit=turn_time_limit, reveal_cards=reveal_cards,
-                         show_logs=show_logs, host_username=host_username)
+                         show_logs=show_logs, host_username=host_username, is_tutorial=is_tutorial)
         _rooms[code] = room
         return room
 
@@ -440,6 +475,46 @@ def _get_room(room_code: Optional[str]) -> Optional[GameRoom]:
         return _rooms.get(room_code)
 
 
+def _reap_stale_rooms_once() -> None:
+    """
+    One pass of the background hygiene loop below -- factored out so a test
+    can call it directly on demand instead of waiting for the real
+    background thread's own long interval.
+    """
+    if isinstance(decision_service.default_decision_service, WorkerPoolBotDecisionService):
+        decision_service.default_decision_service.reap_idle_pools()
+    now = time.time()
+    with _rooms_lock:
+        stale = [
+            (code, room) for code, room in _rooms.items()
+            if (room.state == "lobby" and now - room.last_active_at > _ROOM_LOBBY_IDLE_TIMEOUT_SECONDS)
+            or (room.state == "finished" and now - room.last_active_at > _ROOM_FINISHED_RETENTION_SECONDS)
+        ]
+        for code, _room in stale:
+            del _rooms[code]
+    # A finished room's human connections are deliberately kept open past
+    # game-end for rematches (see GameRoom.run_game) — once the room itself
+    # is gone, nobody's still-open tab should linger forever; close them
+    # here instead. Outside the lock: NetworkPlayer.close() can block
+    # briefly on the socket, and nothing else touches these rooms once
+    # they're out of `_rooms`.
+    #
+    # Spectators need the exact same cleanup and were missing it entirely:
+    # a spectator watching a lobby that never filled up (or lingering on a
+    # long-finished game's standings) had nothing that ever closed their
+    # connection once the room itself was deleted -- ws_spectate's own loop
+    # only exits on spectator.active/transport.is_connected turning false,
+    # neither of which this reap ever touched, leaking that connection (and
+    # its receiver thread) for as long as the process runs.
+    for _code, room in stale:
+        for p in room.players:
+            if isinstance(p, NetworkPlayer) and p.active:
+                p.close()
+        for s in room.spectators:
+            if s.active:
+                s.close()
+
+
 def _reap_stale_rooms() -> None:
     """
     Background hygiene for rooms nobody's using anymore: a lobby that never
@@ -447,35 +522,10 @@ def _reap_stale_rooms() -> None:
     for. Without this, `_rooms` only ever grows for the lifetime of the
     process. Runs forever as a daemon thread — see its start call near the
     bottom of this module.
-
-    Also reaps idle bot worker pools (see BOT_POOL_SIZE above) on the same
-    cadence -- an unrelated kind of staleness, but sharing this loop's
-    existing periodic wakeup avoids a whole second background thread just
-    for it.
     """
     while True:
         threading.Event().wait(_ROOM_REAPER_INTERVAL_SECONDS)
-        if isinstance(decision_service.default_decision_service, WorkerPoolBotDecisionService):
-            decision_service.default_decision_service.reap_idle_pools()
-        now = time.time()
-        with _rooms_lock:
-            stale = [
-                (code, room) for code, room in _rooms.items()
-                if (room.state == "lobby" and now - room.last_active_at > _ROOM_LOBBY_IDLE_TIMEOUT_SECONDS)
-                or (room.state == "finished" and now - room.last_active_at > _ROOM_FINISHED_RETENTION_SECONDS)
-            ]
-            for code, _room in stale:
-                del _rooms[code]
-        # A finished room's human connections are deliberately kept open past
-        # game-end for rematches (see GameRoom.run_game) — once the room
-        # itself is gone, nobody's still-open tab should linger forever;
-        # close them here instead. Outside the lock: NetworkPlayer.close()
-        # can block briefly on the socket, and nothing else touches these
-        # rooms once they're out of `_rooms`.
-        for _code, room in stale:
-            for p in room.players:
-                if isinstance(p, NetworkPlayer) and p.active:
-                    p.close()
+        _reap_stale_rooms_once()
 
 
 threading.Thread(target=_reap_stale_rooms, daemon=True, name="RoomReaper").start()
@@ -793,6 +843,21 @@ def api_matchmaking_cancel():
     return jsonify({})
 
 
+@app.route("/api/matchmaking/queue")
+def api_matchmaking_queue():
+    """Pre-join queue depth for a given match size -- powers the live
+    "N players searching for an N-player match" hint on the matchmaking
+    setup screen, before the visitor has actually joined the queue."""
+    try:
+        seats = int(request.args.get("seats", ""))
+    except (TypeError, ValueError):
+        return jsonify({"error": "seats must be an integer"}), 400
+    error = validate_player_count(seats)
+    if error:
+        return jsonify({"error": error}), 400
+    return jsonify({"seats": seats, "waiting_count": matchmaking.queue_depth(seats)})
+
+
 # ------------------------------------------------------- achievements/profile --
 
 @app.route("/api/achievements")
@@ -989,6 +1054,23 @@ def api_config():
 def api_create_game():
     body = request.get_json(silent=True) or {}
 
+    if body.get("tutorial"):
+        # The guided first-game tutorial: every field below is decided by
+        # the server, not the client -- a modified client can't turn
+        # "tutorial" into a backdoor for an otherwise-invalid room (a
+        # different bot type, an arbitrary seed, a public room, ...). See
+        # _TUTORIAL_SEED's own comment for why these exact values matter.
+        host_username = body.get("host_username")
+        if host_username is not None and not isinstance(host_username, str):
+            return jsonify({"error": "host_username must be a string"}), 400
+        room = _create_room(
+            seats=_TUTORIAL_SEATS, bot_mix=[], seed=_TUTORIAL_SEED,
+            bot_think_time=_TUTORIAL_BOT_THINK_TIME, visibility="private",
+            turn_time_limit=None, reveal_cards=True, show_logs=True,
+            host_username=host_username, is_tutorial=True,
+        )
+        return jsonify(_status_payload(room))
+
     try:
         seats = int(body.get("seats"))
     except (TypeError, ValueError):
@@ -1068,6 +1150,7 @@ def _status_payload(room: Optional[GameRoom]) -> dict:
         "turn_time_limit": room.turn_time_limit,
         "reveal_cards": room.reveal_cards,
         "show_logs": room.show_logs,
+        "is_tutorial": room.is_tutorial,
         "joined": room.joined_summary(),
     }
     if room.state == "finished" and room.game is not None:
@@ -1511,7 +1594,7 @@ def _broadcast_spectator_count(room: "GameRoom") -> None:
             p.send_message("", message_type="GLOBAL_EVENT", data=data)
 
 
-def _send_opponent_roster(player: NetworkPlayer, room: "GameRoom") -> None:
+def _send_opponent_roster(player: "NetworkPlayer | NetworkSpectator", room: "GameRoom") -> None:
     """
     Tells `player` about every other seat at the table right now — status
     cards, active state, bot-ness — as a batch of synthetic
@@ -1523,6 +1606,13 @@ def _send_opponent_roster(player: NetworkPlayer, room: "GameRoom") -> None:
     (being the random starting player, or reaching their first turn) —
     leaving an already-seated, real opponent looking like they didn't exist
     yet for however long that took.
+
+    Also reused as-is for a spectator's own catch-up (see
+    _send_spectator_catchup) -- the `other is player` self-exclusion below
+    only ever matters for an actual player (never true for a spectator,
+    since a spectator is never a member of room.players to begin with), so
+    every real seat is included correctly with no spectator-specific branch
+    needed; both types share the same send_message(...) shape.
     """
     for other in room.players:
         if other is player:
@@ -1587,6 +1677,44 @@ def _send_reconnect_catchup(player: NetworkPlayer, room: "GameRoom") -> None:
         "", message_type="GLOBAL_EVENT",
         data={"event": "spectator_count", "count": sum(1 for s in room.spectators if s.active)},
     )
+
+
+def _send_spectator_catchup(spectator: NetworkSpectator, room: "GameRoom") -> None:
+    """
+    Mirrors _send_reconnect_catchup above, but for a spectator connecting to
+    a game already underway (or already finished) -- ws_spectate never had
+    any equivalent of this at all, so a spectator joining anything but a
+    freshly-created, still-empty lobby saw a completely blank table (no
+    players listed, no current auction, "Current Highest Bid: 0") until the
+    next live event happened to arrive -- which, for an already-finished
+    game, never comes. No hand/points to send (a spectator only ever sees
+    what every player's own public status cards already reveal, never a
+    private hand), so this is just the turn order plus the same synthetic
+    "sync" auction state and opponent roster a reconnecting player gets.
+    """
+    if room.game is None:
+        return
+    spectator.send_message(
+        "", message_type="GLOBAL_EVENT",
+        data={"event": "player_order", "usernames": [p.username for p in room.game.players]},
+    )
+    live_state = room.game.get_live_auction_state()
+    if live_state.get("card") is not None:
+        spectator.send_message(
+            "", message_type="AUCTION_UPDATE",
+            data={
+                "round_number": live_state["round_number"],
+                "kind": "sync",
+                "card": live_state["card"],
+                "max_bid": live_state["max_bid"],
+                "turn_player": live_state["turn_player"],
+            },
+        )
+    # _send_opponent_roster only special-cases skipping the recipient's own
+    # seat (`if other is player: continue`) -- a spectator is never in
+    # room.players to begin with, so every real seat is included exactly as
+    # it should be; no spectator-specific variant needed.
+    _send_opponent_roster(spectator, room)
 
 
 def _handle_player_reconnect(ws, room: "GameRoom", rejoin_token: str) -> None:
@@ -1764,7 +1892,17 @@ def ws_spectate(ws):
     room.spectators.append(spectator)
     _broadcast_spectator_count(room)
 
-    _send(ws, game_id, "IDENTIFY_SUCCESS", f"Welcome {name}! You are now watching the game live.")
+    # Wording matches what's actually true right now -- "watching live" was
+    # shown even for a room still sitting in its lobby with nobody playing
+    # yet (see JS's own onSpectateJoin, which now renders a waiting view
+    # instead of the live table for exactly this state).
+    welcome = (
+        f"Welcome {name}! Waiting for the host to start the game…"
+        if room.state == "lobby"
+        else f"Welcome {name}! You are now watching the game live."
+    )
+    _send(ws, game_id, "IDENTIFY_SUCCESS", welcome)
+    _send_spectator_catchup(spectator, room)
 
     chat_thread = threading.Thread(target=_spectator_chat_listener, args=(spectator, room),
                                     daemon=True, name=f"Chat-{username}")

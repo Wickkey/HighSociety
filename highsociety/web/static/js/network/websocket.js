@@ -28,6 +28,7 @@ export function closeSocket() {
 }
 
 export function connectPlayerSocket() {
+  closeSocket(); // never open a second connection on top of an existing one -- see connectSpectatorSocket's identical guard for the real bug this fixes
   const socket = new WebSocket(wsUrl(`/ws?room=${encodeURIComponent(currentRoomCode())}`));
   ws = socket;
   socket.onmessage = (evt) => handlePlayerMessage(JSON.parse(evt.data));
@@ -54,6 +55,7 @@ export function attemptReconnect() {
   const info = loadRejoinInfo(currentRoomCode());
   if (!info) return false;
 
+  closeSocket(); // same guard as connectPlayerSocket -- never leave a prior connection orphaned
   beginReconnectAttempt();
   resetGameState(info.username, lastStatus());
   if (lastStatus()) seedOpponents(lastStatus(), info.username);
@@ -70,6 +72,17 @@ export function attemptReconnect() {
 }
 
 export function connectSpectatorSocket() {
+  // This used to be the real bug: an already-seated player switching to
+  // "Watch as a spectator instead" (lobby.js's onSpectateJoin) landed
+  // here with `ws` still pointing at their live player connection --
+  // reassigning `ws` below without closing it first orphaned that old
+  // connection (never explicitly closed, so the server never noticed and
+  // never freed the seat) while silently opening a second, unrelated
+  // spectator connection on top of it. Closing whatever's already open
+  // first reuses the exact same server-side lobby-disconnect cleanup
+  // onHomeLinkClick's closeSocket() call already relies on to free a
+  // seat correctly.
+  closeSocket();
   const socket = new WebSocket(wsUrl(`/ws_spectate?room=${encodeURIComponent(currentRoomCode())}`));
   ws = socket;
   socket.onmessage = (evt) => handleSpectatorMessage(JSON.parse(evt.data));

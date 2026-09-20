@@ -46,6 +46,15 @@ def join(username: str, elo: int, seats: int) -> str:
     return ticket_id
 
 
+def queue_depth(seats: int) -> int:
+    """How many tickets are currently waiting (not yet matched) for a
+    `seats`-sized match -- the same count status() surfaces as
+    waiting_count, but readable without holding a ticket, for the
+    pre-join "N players searching" hint on the matchmaking setup screen."""
+    with _lock:
+        return sum(1 for t in _tickets.values() if t.seats == seats and t.room_code is None)
+
+
 def cancel(ticket_id: str) -> None:
     """No-op if the ticket doesn't exist, already matched, or was already
     cancelled -- callers don't need to check status first."""

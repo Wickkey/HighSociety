@@ -315,6 +315,54 @@ def test_get_bid_accepts_a_message_with_no_game_id(player_and_peer):
     assert result == "pass"
 
 
+def test_get_bid_ignores_a_stale_response_meant_for_an_earlier_move(player_and_peer):
+    """
+    Regression test for a real, previously-recurring production bug: a
+    player's browser can still send a bid in the sub-250ms window right as
+    their own move timer visually expires, and WebSocketTransport's reader
+    thread queues it unconditionally regardless of whether anyone's still
+    waiting on it. If the server's own TurnClock also expires around the
+    same moment, that decision gets auto-passed -- but the already-queued
+    stale message doesn't go anywhere, and used to get delivered as the
+    answer to the *next* decision instead. A move_seq mismatch must be
+    discarded the same way a game_id mismatch already is.
+    """
+    player, peer = player_and_peer
+    player._current_move_seq = 7  # the *next* decision's move_seq
+
+    send_json(peer, {"message_type": "RESPONSE", "prompt": "[10]", "move_seq": 6})  # stale -- answered move 6
+    result = player.get_bid(timeout=0.3)
+    assert result is None  # discarded, not delivered as move 7's bid
+
+    # the real response for move 7, correctly tagged, is still picked up normally afterwards
+    send_json(peer, {"message_type": "RESPONSE", "prompt": "pass", "move_seq": 7})
+    result = player.get_bid(timeout=2.0)
+    assert result == "pass"
+
+
+def test_get_bid_accepts_a_message_with_no_move_seq(player_and_peer):
+    """Permissive on a missing move_seq — same convention as game_id, for
+    bots/tests/older clients that never send one."""
+    player, peer = player_and_peer
+    player._current_move_seq = 7
+    send_json(peer, {"message_type": "RESPONSE", "prompt": "pass"})
+    result = player.get_bid(timeout=2.0)
+    assert result == "pass"
+
+
+def test_choose_painting_to_discard_ignores_a_stale_response_meant_for_an_earlier_move(player_and_peer):
+    """Same protection as get_bid's, for the discard prompt -- see
+    test_get_bid_ignores_a_stale_response_meant_for_an_earlier_move."""
+    player, peer = player_and_peer
+    player.add_status_card(Painting(value=5))
+    player._current_move_seq = 7
+
+    send_json(peer, {"message_type": "RESPONSE", "prompt": "5", "move_seq": 6})  # stale -- answered move 6
+    send_json(peer, {"message_type": "RESPONSE", "prompt": "5", "move_seq": 7})  # the real response for move 7
+    result = player.choose_painting_to_discard()
+    assert result.value == 5
+
+
 def test_get_bid_does_not_crash_on_a_response_without_prompt(player_and_peer):
     """
     Regression test for a web-server crash: a browser client that sends a

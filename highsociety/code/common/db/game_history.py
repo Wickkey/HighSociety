@@ -374,10 +374,10 @@ def is_configured() -> bool:
 # slower than it needs to be, on every request. A small pool of already-
 # established connections, reused across calls, removes that handshake
 # from the common case entirely. minconn/maxconn are deliberately modest
-# (not "as many as this process could use") -- this app still uses
-# DATABASE_URL's *direct* connection (not Supabase's own pooler), which
-# has its own real ceiling on live connections that a future move to
-# their pooler endpoint would raise independently of this.
+# (not "as many as this process could use") -- DATABASE_URL already
+# points at Supabase's own connection pooler (not a direct connection),
+# which still has its own real ceiling on live sessions this process
+# shouldn't try to hog.
 _MIN_POOL_CONNECTIONS = 1
 _MAX_POOL_CONNECTIONS = 10
 _pool = None
@@ -394,16 +394,90 @@ def _get_pool():
                 from psycopg2.pool import ThreadedConnectionPool
                 _pool = ThreadedConnectionPool(
                     _MIN_POOL_CONNECTIONS, _MAX_POOL_CONNECTIONS, os.environ[_DATABASE_URL_ENV],
+                    # A connection the pooler quietly dropped while idle
+                    # goes "half open" -- TCP still looks up from this side,
+                    # but the server is gone. Without these, both a fresh
+                    # connect and any query on such a connection block
+                    # forever (that's the failure mode that took the whole
+                    # site down after ~5 idle days -- see _connect's
+                    # docstring). connect_timeout bounds establishment; TCP
+                    # keepalives make the OS notice a dead peer within ~1
+                    # minute and fail the socket instead of hanging, so
+                    # _connect's own SELECT 1 probe below actually gets an
+                    # error it can retry past rather than stalling on it;
+                    # statement_timeout is a last-resort ceiling on any
+                    # single query.
+                    connect_timeout=10,
+                    keepalives=1,
+                    keepalives_idle=30,
+                    keepalives_interval=10,
+                    keepalives_count=3,
+                    # Caps how long a *sent* packet waits for an ACK before
+                    # the socket errors out -- the piece connect_timeout and
+                    # keepalives don't cover, and the one that actually
+                    # bounds a query stuck writing to a peer that's silently
+                    # gone. Linux-only (Render's host); a no-op elsewhere.
+                    tcp_user_timeout=15000,
+                    options="-c statement_timeout=15000",
                 )
     return _pool
 
 
+_CONNECT_RETRY_ATTEMPTS = 3
+
+
 def _connect():
+    """
+    Hands back a pooled connection that's actually known-good, not just
+    "the pool still has a reference to it" -- a real production incident
+    this exact gap caused: after several idle days with no traffic,
+    Supabase's own pooler silently dropped every one of this pool's
+    idle connections. psycopg2's pool has no way to notice that on its
+    own (it only ever checks conn.closed, which stays 0 for a connection
+    that was cleanly dropped out from under it while idle -- that only
+    flips once something actually tries to use it and fails), so it kept
+    handing out those dead connections to every single request from then
+    on. Every one of this module's callers has its own broad `except
+    Exception` around the query itself, so each failure quietly mapped to
+    whatever fail-safe response that call site already had for "the
+    database is unreachable" -- get_leaderboard/get_rating_history/etc.
+    silently returning empty, username_is_taken() failing safe toward
+    "taken" (see its own docstring) -- with nothing to ever recover until
+    a manual process restart happened to hand out a fresh pool.
+
+    A cheap SELECT 1 here (much cheaper than the TCP+TLS handshake this
+    pool exists to avoid in the first place) catches that before the
+    caller ever sees a dead connection: a connection that fails it gets
+    discarded from the pool outright (never recycled again) and a
+    replacement is fetched instead. Capped at _CONNECT_RETRY_ATTEMPTS so
+    a genuine outage (not just some stale idle connections) still fails
+    fast, in roughly the same number of attempts as before, rather than
+    retrying indefinitely against a database that's actually down.
+    """
     # Imported lazily so merely importing this module (which web_server.py
     # does unconditionally) never fails for a dev/test setup that hasn't
     # installed psycopg2 — only actually needed once DATABASE_URL is set.
     import psycopg2  # noqa: F401 -- see _get_pool's own lazy psycopg2.pool import
-    return _get_pool().getconn()
+    pool = _get_pool()
+    last_error = None
+    for _ in range(_CONNECT_RETRY_ATTEMPTS):
+        try:
+            conn = pool.getconn()
+        except Exception as e:  # noqa: BLE001 -- the pool itself couldn't produce a connection (exhausted, or the database is genuinely unreachable)
+            last_error = e
+            continue
+        try:
+            # `with conn` (not just the cursor) so the probe's own implicit
+            # transaction is committed/closed straight away -- the caller
+            # gets a genuinely idle connection, not one sitting "idle in
+            # transaction" from an un-finalized SELECT.
+            with conn, conn.cursor() as cur:
+                cur.execute("SELECT 1")
+            return conn
+        except Exception as e:  # noqa: BLE001 -- this specific connection is dead; discard it and try another
+            last_error = e
+            pool.putconn(conn, close=True)
+    raise last_error
 
 
 def _release_connection(conn) -> None:
@@ -1055,7 +1129,9 @@ def _fetch_leaderboard_page(limit: int, offset: int) -> Optional[dict]:
                 """
                 SELECT username, elo, games_played, games_won
                 FROM players
-                WHERE google_id IS NOT NULL AND id NOT IN (SELECT player_id FROM bots)
+                WHERE google_id IS NOT NULL
+                  AND games_played > 0
+                  AND id NOT IN (SELECT player_id FROM bots)
                 ORDER BY elo DESC, username ASC
                 LIMIT %s OFFSET %s
                 """,
@@ -1080,13 +1156,14 @@ def get_leaderboard(limit: int = 20, offset: int = 0) -> dict:
     """
     Page of players ranked by elo -- {"rows": [{"username", "elo",
     "games_played", "games_won"}, ...], "has_more": bool}. Restricted to
-    Google-linked accounts (a guest's elo never moves off the 1000
-    default, so including them would just be a meaningless tie-heavy
-    list) and explicitly excluding the 3 reserved bot identities (see the
-    `bots` table): bots are real rated participants now (see record_
-    finished_game's own docstring) so their elo genuinely moves, but it
-    must never be shown to players. {"rows": [], "has_more": False} on
-    any failure or no database.
+    Google-linked accounts who've actually finished at least one game
+    (a guest's elo never moves off the 1000 default, and a linked account
+    that signed in but never played is just noise on the board -- neither
+    is a real ranking) and explicitly excluding the 3 reserved bot
+    identities (see the `bots` table): bots are real rated participants
+    now (see record_finished_game's own docstring) so their elo genuinely
+    moves, but it must never be shown to players. {"rows": [], "has_more":
+    False} on any failure or no database.
 
     The leaderboard is the exact same data for every single visitor --
     unlike everything else in this module, there's no per-user identity

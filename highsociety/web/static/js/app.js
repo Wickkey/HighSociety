@@ -15,6 +15,7 @@ import {
 import {
   showAccountScreen, onAccountSaveClick, showAchievementsScreen,
   onAccountEditUsernameClick, onAccountCancelEditClick, onEloChartRangeClick,
+  onAchievementTileClick, onAchievementTileKeydown,
 } from './account/account.js';
 import {
   showHomeTile, showHomeTiles, onHomeLinkClick, navigateFromSidebar, onCreateGame, onJoinByCode, onJoinRoomCodeInput,
@@ -22,6 +23,7 @@ import {
   onCopyRoomLink, onJoin, onSpectateJoin, onChangeJoinIdentity, onChangeSpectateIdentity,
   startRoomsPolling, currentRoomCode, isActivelyPlayingLiveGame,
   applySpectateIdentityDefaults, refreshStatus, leaveToHome, setCurrentRoomCode,
+  onStartTutorial, markTutorialOffered,
 } from './lobby/lobby.js';
 import { initLobbySeatGrid } from './lobby/playerList.js';
 import {
@@ -34,13 +36,14 @@ import {
   getPlayerProfileReturnTo, onPlayerProfileHistoryPrevClick, onPlayerProfileHistoryNextClick,
   onPlayerProfileEloChartRangeClick,
 } from './lobby/playerProfile.js';
-import { onPlayClick, onFindMatch, onMatchmakingCancel, onMatchmakingAddBots } from './lobby/matchmaking.js';
+import { onPlayClick, onFindMatch, onMatchmakingCancel, onMatchmakingAddBots, onMatchmakingSeatButtonClick } from './lobby/matchmaking.js';
 import { showRulesDemo, onRulesDemoToggleClick, onRulesDemoPrevClick, onRulesDemoNextClick } from './lobby/rulesDemo.js';
 import {
   onRequestRematchClick, onCancelRematchForm, onSendRematchRequest, onAcceptRematch, onDeclineRematch,
   onStandingsTableClick,
 } from './lobby/rematch.js';
 import { onPlaceBid, onPass, onResign, onDiscardPainting, onQuickReactionClick } from './game/gameActions.js';
+import { onTutorialCoachNextClick } from './ui/notifications.js';
 
 // Debug-only bridge, not part of the app's real API surface: lets a
 // browser console (or a Playwright page.evaluate, as used throughout this
@@ -116,6 +119,11 @@ function wireStaticHandlers() {
   });
   $('btn-spectate-join').addEventListener('click', onSpectateJoin);
   $('btn-new-game').addEventListener('click', () => leaveToHome());
+  $('btn-start-tutorial').addEventListener('click', onStartTutorial);
+  $('btn-dismiss-tutorial-cta').addEventListener('click', markTutorialOffered);
+  $('btn-play-tutorial').addEventListener('click', onStartTutorial);
+  $('btn-replay-tutorial').addEventListener('click', onStartTutorial);
+  $('btn-tutorial-coach-next').addEventListener('click', onTutorialCoachNextClick);
   $('connection-badge').addEventListener('click', onProfileChipClick);
   $('btn-open-account').addEventListener('click', () => { closeProfilePopover(); showAccountScreen(); });
   // navigateFromSidebar itself no longer renders anything on its own (see
@@ -160,6 +168,8 @@ function wireStaticHandlers() {
   $('btn-leaderboard-prev').addEventListener('click', onLeaderboardPrevClick);
   $('btn-leaderboard-next').addEventListener('click', onLeaderboardNextClick);
   $('leaderboard-body').addEventListener('click', onLeaderboardTableClick);
+  $('achievements-grid').addEventListener('click', onAchievementTileClick);
+  $('achievements-grid').addEventListener('keydown', onAchievementTileKeydown);
   $('game-detail-body').addEventListener('click', onGameDetailTableClick);
   // Reached from a name click (Leaderboard, or the game detail modal
   // opened from Home/My Games/Account/another profile) -- Back has to
@@ -192,6 +202,7 @@ function wireStaticHandlers() {
   // right below it; the profile chip's own popover menu (wired below)
   // is the one remaining, already-functional way to log out.
   $('btn-find-match').addEventListener('click', onFindMatch);
+  $('matchmaking-seats-buttons').addEventListener('click', onMatchmakingSeatButtonClick);
   $('btn-matchmaking-cancel').addEventListener('click', onMatchmakingCancel);
   $('btn-matchmaking-back').addEventListener('click', onMatchmakingCancel);
   $('btn-matchmaking-add-bots').addEventListener('click', onMatchmakingAddBots);
@@ -205,6 +216,7 @@ function wireStaticHandlers() {
   $('btn-change-spectate-identity').addEventListener('click', onChangeSpectateIdentity);
   $('home-link').addEventListener('click', onHomeLinkClick);
   $('btn-stop-watching').addEventListener('click', onHomeLinkClick);
+  $('btn-stop-watching-lobby-wait').addEventListener('click', onHomeLinkClick);
   $('home-link').addEventListener('keydown', (e) => {
     if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onHomeLinkClick(); }
   });

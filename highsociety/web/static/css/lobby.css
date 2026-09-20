@@ -9,11 +9,66 @@
 }
 /* Previously centered as a "quick play" card, but that made this the only
    screen in the app not left-aligned like Host/Join -- inconsistent with
-   every sibling screen using the same .panel/label/input pattern. Left-
-   aligned to match; #matchmaking-seats keeps a capped width so the number
-   input doesn't stretch full-width the way a text field would. */
-.matchmaking-panel #matchmaking-seats { max-width: 120px; }
-#btn-find-match { width: 100%; }
+   every sibling screen using the same .panel/label pattern. Left-aligned
+   to match. */
+#btn-find-match { width: 100%; margin-top: 1rem; }
+
+/* Setup-screen dressing (see FRONTEND_REWORK.MD) -- a segmented 2-5
+   picker, a one-line hint, a live "who else is queuing" pill, and a
+   faint suit flourish in the corner, all in the app's own palette. */
+.matchmaking-suits {
+  position: absolute;
+  top: 1.4rem;
+  right: 1.6rem;
+  display: flex;
+  gap: 0.35rem;
+  font-size: 0.95rem;
+  color: var(--accent);
+  opacity: 0.45;
+}
+.matchmaking-field-label {
+  display: block;
+  margin: 1.1rem 0 0.5rem;
+  font-size: 0.9rem;
+  font-weight: 500;
+}
+.matchmaking-hint { margin: 0.5rem 0 0; font-size: 0.8rem; color: var(--muted); }
+.matchmaking-queue-pill {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  margin-top: 0.9rem;
+  padding: 0.6rem 0.8rem;
+  background: var(--panel-bg-soft);
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-sm);
+  font-size: 0.82rem;
+  color: var(--text);
+}
+.matchmaking-queue-dot {
+  position: relative;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--chip-money);
+  flex-shrink: 0;
+}
+.matchmaking-queue-dot::after {
+  content: '';
+  position: absolute;
+  inset: -4px;
+  border-radius: 50%;
+  border: 2px solid var(--chip-money);
+  opacity: 0.5;
+  animation: matchmaking-queue-pulse 1.8s ease-out infinite;
+}
+@keyframes matchmaking-queue-pulse {
+  0% { transform: scale(0.6); opacity: 0.6; }
+  100% { transform: scale(1.7); opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .matchmaking-queue-dot::after { animation: none; }
+}
 
 .shuffle-anim {
   position: relative;
@@ -52,8 +107,13 @@
    text action below everything else, not a full button competing with
    the primary actions above it. Resets every default <button> property
    (background/border/margin/underline) a plain button or .link-button
-   would otherwise apply, same fix as the profile popover menu items. */
-.matchmaking-cancel-link {
+   would otherwise apply, same fix as the profile popover menu items.
+   Shared by the matchmaking screen's Cancel and (see lobby.css's own
+   join-screen section) the Join screen's "Watch as a spectator instead" --
+   both are a secondary path that shouldn't visually compete with the
+   real primary action above it (Find Match / Join Game), which a same-
+   weight bordered button used to do. */
+.quiet-action-link {
   display: block;
   width: auto;
   margin: 1.2rem auto 0;
@@ -68,7 +128,7 @@
   text-decoration: none;
   cursor: pointer;
 }
-.matchmaking-cancel-link:hover { background: var(--panel-bg-soft); color: var(--text); }
+.quiet-action-link:hover { background: var(--panel-bg-soft); color: var(--text); }
 
 /* ---------------- login screen ---------------- */
 
@@ -415,7 +475,14 @@ h3:has(.section-icon) { display: flex; align-items: center; gap: 0.5rem; }
 
 /* Locked tiles are fully desaturated (grayscale + faded) so an unlock reads
    as a real color reveal, not just a border/shadow change. Icon badge
-   mirrors .home-tile-icon's "colored circle behind a line icon" language. */
+   mirrors .home-tile-icon's "colored circle behind a line icon" language.
+
+   Click-to-flip (not hover) reveals the description on a back face --
+   .achievement-tile is the fixed-size 3D scene (perspective), .achievement-
+   tile-inner is what actually rotates, and the two .achievement-tile-face
+   children are absolutely positioned so both faces stack in the same spot
+   with backface-visibility hiding whichever one is currently turned away.
+   A fixed height is required for that absolute stacking to work. */
 .achievements-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
@@ -423,16 +490,35 @@ h3:has(.section-icon) { display: flex; align-items: center; gap: 0.5rem; }
 }
 .achievement-tile {
   position: relative;
+  height: 148px;
+  perspective: 1000px;
+  cursor: pointer;
+}
+.achievement-tile-inner {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  transition: transform 0.6s var(--ease-out);
+  transform-style: preserve-3d;
+}
+.achievement-tile.flipped .achievement-tile-inner { transform: rotateY(180deg); }
+.achievement-tile-face {
+  position: absolute;
+  inset: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
+  justify-content: center;
   text-align: center;
   gap: 0.4rem;
   padding: 0.9rem 0.6rem;
+  border-radius: var(--radius-sm);
+  backface-visibility: hidden;
+}
+.achievement-tile-front {
   background: var(--panel-bg);
   border: 1px solid var(--panel-border);
-  border-radius: var(--radius-sm);
-  transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+  transition: box-shadow 0.15s ease, border-color 0.15s ease;
 }
 .achievement-icon {
   position: relative;
@@ -448,16 +534,16 @@ h3:has(.section-icon) { display: flex; align-items: center; gap: 0.5rem; }
 }
 .achievement-icon svg { width: 24px; height: 24px; }
 .achievement-name { font-weight: 700; font-size: 0.82rem; line-height: 1.2; }
-.achievement-tile.locked {
+.achievement-tile.locked .achievement-tile-front {
   filter: grayscale(1);
   opacity: 0.45;
 }
 .achievement-tile.locked .achievement-icon { background: rgba(0, 0, 0, 0.05); border-color: var(--panel-border); color: var(--muted); }
-.achievement-tile.unlocked {
+.achievement-tile.unlocked .achievement-tile-front {
   border-color: var(--accent-light);
   box-shadow: var(--shadow-sm);
 }
-.achievement-tile.unlocked:hover { transform: translateY(-2px); box-shadow: var(--shadow); }
+.achievement-tile.unlocked:not(.flipped):hover .achievement-tile-front { transform: translateY(-2px); box-shadow: var(--shadow); }
 /* A small pin on the icon badge itself, not just the tile's overall
    grayscale/faded treatment -- "why is this one different" reads at a
    glance instead of needing the fade to be noticed and interpreted. */
@@ -476,35 +562,34 @@ h3:has(.section-icon) { display: flex; align-items: center; gap: 0.5rem; }
   border: 2px solid var(--panel-bg);
 }
 .achievement-lock svg { width: 9px; height: 9px; }
-/* Instant, styled tooltip replacing a native title="..." -- shows exactly
-   how to unlock a locked achievement (or just confirms what an unlocked
-   one was for) on hover *or* focus, so a keyboard user (see the tile's
-   own tabindex) gets the same info a mouse hover does. */
-.achievement-tile { cursor: default; }
-/* Below the tile, not above -- a first-row tile's tooltip opening upward
-   collided with the floating session-status toast that sits just above
-   this whole panel (confirmed live); the panel has much more headroom
-   below any row than the viewport has above the topmost one. */
-.achievement-tooltip {
-  display: none;
-  position: absolute;
-  top: calc(100% + 0.5rem);
-  left: 50%;
-  transform: translateX(-50%);
-  width: 170px;
-  background: var(--felt-2);
-  color: #f5f1e6;
-  font-size: 0.74rem;
-  font-weight: 500;
-  line-height: 1.4;
-  padding: 0.55rem 0.7rem;
-  border-radius: var(--radius-sm);
-  box-shadow: var(--shadow);
-  z-index: 5;
-  pointer-events: none;
+/* Back face: the exact same surface and locked/unlocked treatment as the
+   front (cream background, grayscale+faded when locked, full color/border/
+   shadow when unlocked) -- per explicit feedback, a separately-colored
+   dark "reveal" surface read as an unrelated, off-palette scheme instead
+   of "the same tile, turned around". The lock badge (same icon used on
+   the front) stands in for a locked back face's status, rather than a
+   text label -- also per feedback ("you used a lock symbol before, use
+   that here also; don't say lock/unlock"). */
+.achievement-tile-back {
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  transform: rotateY(180deg);
 }
-.achievement-tile:hover .achievement-tooltip,
-.achievement-tile:focus-visible .achievement-tooltip { display: block; }
+.achievement-tile.locked .achievement-tile-back { filter: grayscale(1); opacity: 0.45; }
+.achievement-tile.unlocked .achievement-tile-back { border-color: var(--accent-light); box-shadow: var(--shadow-sm); }
+.achievement-tile-back strong { font-size: 0.85rem; }
+.achievement-tile-back-lock {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: var(--muted);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.achievement-tile-back-lock svg { width: 13px; height: 13px; }
+.achievement-tile-back p { margin: 0; font-size: 0.74rem; font-weight: 500; line-height: 1.4; color: var(--text); }
 
 /* Actions (left) + Recent Games (right), side by side -- replaces a
    3-tile grid that left most of the screen's width empty once the tiles'
@@ -524,6 +609,53 @@ h3:has(.section-icon) { display: flex; align-items: center; gap: 0.5rem; }
   .home-grid { grid-template-columns: 1fr; max-width: 480px; }
 }
 .home-tiles { display: flex; flex-direction: column; gap: 0.85rem; }
+/* Spans both of .home-grid's columns as its own full-width row above the
+   tiles/recent-games -- a plain sibling here would otherwise land in the
+   grid's *second* column next to #home-tiles (pushing #home-recent-games
+   down into a second row under the tile picker instead of beside it),
+   since grid auto-placement fills cells in DOM order. */
+.home-tutorial-cta {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+  position: relative;
+  background: var(--accent-soft);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  padding: 0.9rem 2.6rem 0.9rem 1rem;
+}
+.home-tutorial-cta-icon {
+  flex-shrink: 0;
+  width: 30px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--accent-strong);
+}
+.home-tutorial-cta-icon svg { width: 22px; height: 22px; }
+.home-tutorial-cta-text { flex: 1; }
+.home-tutorial-cta-dismiss {
+  position: absolute;
+  top: 0.6rem;
+  right: 0.6rem;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+}
+.home-tutorial-cta-dismiss svg { width: 14px; height: 14px; }
+.home-tutorial-cta-dismiss:hover { color: var(--text); }
+@media (max-width: 560px) {
+  .home-tutorial-cta { flex-wrap: wrap; }
+}
 /* Fades/rises in on appearing (same gentle vocabulary as the finished
    screen's .standing-row -- not the bouncier .elo-reveal-pop, since this
    isn't a celebratory moment) instead of the abrupt instant pop-in a
@@ -635,24 +767,6 @@ h3:has(.section-icon) { display: flex; align-items: center; gap: 0.5rem; }
   outline: none;
 }
 .home-tile:hover .home-tile-arrow, .home-tile:focus-visible .home-tile-arrow { transform: translateX(3px); color: var(--accent-strong); }
-/* Same cream background as every other tile, per explicit feedback (the
-   gold fill made Host look like a different kind of control rather than
-   one of three equal options) -- "start here if you're not sure" is now
-   carried by the "Most popular" badge alone, not a whole-tile color
-   change. */
-.home-tile-badge {
-  position: absolute;
-  top: 0.7rem;
-  right: 1rem;
-  font-size: 0.65rem;
-  font-weight: 800;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--accent-strong);
-  background: var(--accent-soft);
-  padding: 0.2rem 0.55rem;
-  border-radius: 999px;
-}
 /* A colored badge behind the line icon rather than a bare glyph -- gives
    the tile a focal point and ties the icon to the app's own gold accent
    instead of it just floating there at whatever color an emoji happened
@@ -749,6 +863,14 @@ h3:has(.section-icon) { display: flex; align-items: center; gap: 0.5rem; }
 .rules-cue-card-icon-green { color: var(--card-green-2); }
 .rules-cue-card-flip { background: rgba(31, 122, 77, 0.1); border-left-color: var(--chip-money); }
 .rules-cue-card-flip .rules-cue-card-icon { color: var(--chip-money); }
+/* The "play a real game" callout at the end of How to Play -- same cue-card
+   shell, but its content is a paragraph + a button rather than just a
+   paragraph, so align-items switches to center to keep the icon vertically
+   balanced against both lines instead of pinned to the paragraph's own top. */
+.rules-cue-card-tutorial { align-items: center; }
+.rules-cue-card-tutorial p { margin-bottom: 0.6rem; }
+
+.tutorial-finished-actions { margin-bottom: 0.8rem; }
 
 .rules-auction-compare {
   display: grid;
@@ -1314,6 +1436,35 @@ button.secondary.standalone { margin-top: 0.9rem; display: inline-block; }
 }
 .bot-add-label select:focus { outline: none; border-color: var(--accent); }
 
+/* The one real action on this screen -- full-width and slightly taller
+   than a default button so it actually reads as the main event, now that
+   "Watch as a spectator instead" below it is a quiet text link rather
+   than a same-weight bordered button competing with it. */
+.join-cta { width: 100%; padding: 0.8rem 1.3rem; font-size: 1rem; }
+
+/* A real success banner, not a bare "✅" emoji glyph glued to plain
+   paragraph text -- same green "you're good" language this app already
+   uses for a positive Elo change / a saved setting (see .rules-cue-card-
+   flip, .elo-reveal.gain, --chip-money's own comment). */
+.lobby-joined-banner {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  background: rgba(31, 122, 77, 0.1);
+  border-left: 3px solid var(--chip-money);
+  border-radius: var(--radius-sm);
+  padding: 0.65rem 0.9rem;
+  margin: 0 0 0.6rem;
+  /* Was inheriting the panel's ~1rem body size at weight 600 -- visibly
+     heavier and larger than every sibling line on this screen (the seat
+     label, .lobby-status). Matched to those instead. */
+  font-size: 0.9rem;
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--text);
+}
+.lobby-joined-banner svg { flex-shrink: 0; width: 1rem; height: 1rem; color: var(--chip-money); }
+
 .lobby-status {
   background: var(--panel-bg-soft);
   border: 1px solid var(--panel-border);
@@ -1328,12 +1479,22 @@ button.secondary.standalone { margin-top: 0.9rem; display: inline-block; }
    line with a real per-seat grid (see JOIN_GAME_REWORK.MD) -- the same
    live roster data (playerList.js's poll), just rendered as tiles instead
    of a sentence, with host-only inline controls to add/remove a seat. */
+.lobby-seats-label-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
 .lobby-seats-label {
   margin: 0 0 0.6rem;
   font-size: 0.85rem;
   font-weight: 600;
   color: var(--muted);
 }
+/* Stays visible whether the host is seated, spectating, or has left --
+   see renderHostLabel's own comment in playerList.js. */
+.lobby-host-label { margin: 0 0 0.6rem; font-size: 0.8rem; color: var(--muted); font-style: italic; }
 .lobby-seats {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
@@ -1357,8 +1518,26 @@ button.secondary.standalone { margin-top: 0.9rem; display: inline-block; }
   height: 34px;
   border-radius: 9px;
   font-size: 1rem;
+  /* Missing entirely before -- a bot's emoji/a human's initial is plain
+     inline text with no centering at all, so it just sat at the box's
+     top-left corner (following normal text flow) instead of in the
+     middle of its own tinted square. */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
 }
-.lobby-seat-avatar.is-human { border-radius: 50%; }
+/* A human seat never got a background at all (only a bot's inline style=
+   sets one) -- just a bare letter floating with nothing behind it. Same
+   solid-circle treatment as this app's own account/profile-chip avatars
+   elsewhere, so a human seat reads as consistent with the rest of the app,
+   not merely "less finished" than a bot's own tinted tile. */
+.lobby-seat-avatar.is-human {
+  border-radius: 50%;
+  background: var(--accent-light);
+  color: #1c1a16;
+  font-weight: 700;
+}
 .lobby-seat-name {
   font-size: 0.78rem;
   font-weight: 600;
@@ -1376,11 +1555,18 @@ button.secondary.standalone { margin-top: 0.9rem; display: inline-block; }
   right: -6px;
   width: 20px;
   height: 20px;
+  /* The generic `button { padding: 0.65rem 1.3rem }` rule (see main.css)
+     was never reset here -- fighting with this explicit 20x20 size, it
+     rendered as an oval/pill instead of a circle (same root cause the
+     .bot-add-row/.button-row margin-top comments elsewhere in this file
+     already document for a different property: a small icon-sized button
+     inheriting a large generic button rule meant for full-size buttons). */
+  padding: 0;
+  margin: 0;
   border-radius: 50%;
   background: var(--panel-bg);
   border: 1px solid var(--panel-border);
   color: var(--muted);
-  font-size: 0.7rem;
   line-height: 1;
   display: flex;
   align-items: center;
@@ -1396,75 +1582,152 @@ button.secondary.standalone { margin-top: 0.9rem; display: inline-block; }
   transform: scale(1);
 }
 .lobby-seat-remove:hover { background: var(--danger); border-color: var(--danger); color: #fff; }
+/* A real stroked SVG cross, not a text "×" glyph -- at 20px, a font's own
+   glyph metrics rarely optically center inside a perfect circle (the
+   literal "X button looks weird" complaint); a fixed-geometry icon does,
+   regardless of font/rendering differences across browsers. */
+.lobby-seat-remove svg { width: 11px; height: 11px; }
 
 .lobby-seat.open {
+  /* Even top/bottom padding, unlike the base .lobby-seat's own extra top
+     clearance for the hover-reveal remove button (see .lobby-seat-remove)
+     -- an open seat never shows one, so keeping that extra top space just
+     left its "+"/"Open" content sitting visibly off-center vertically. */
+  padding-top: 0.6rem;
   background: transparent;
   border: 1.5px dashed var(--panel-border);
 }
 .lobby-seat.open .lobby-seat-name { color: var(--muted); font-weight: 500; }
+/* A plain solid-outline circle, not its own second dashed rectangle inside
+   the seat's already-dashed one -- two nested dashed borders at slightly
+   different scales was the actual "doesn't look symmetrical" complaint,
+   not the padding alone. One dashed boundary (the seat itself, marking
+   "this slot is open") is enough. */
 .lobby-seat-add-btn {
   width: 34px;
   height: 34px;
-  border-radius: 9px;
-  font-size: 1.05rem;
-  background: transparent;
-  border: 1.5px dashed var(--panel-border);
+  /* Same fix as .lobby-seat-remove above -- the generic button padding
+     rule was never reset here either, so the "+" sat off-center inside a
+     box that wasn't actually the 34x34 circle it looked like. */
+  padding: 0;
+  margin: 0;
+  border-radius: 50%;
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
   color: var(--muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
   cursor: pointer;
   transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
 }
-.lobby-seat-add-btn:hover, .lobby-seat.open.picker-open .lobby-seat-add-btn {
-  background: var(--accent-soft);
-  border-color: var(--accent);
-  color: var(--accent-strong);
-}
+.lobby-seat-add-btn:hover { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-strong); }
+/* A real stroked SVG plus, not a text "+" glyph -- same reasoning as the
+   remove button's own SVG cross (font glyph metrics don't reliably
+   optically center in a small circle). */
+.lobby-seat-add-btn svg { width: 14px; height: 14px; }
+/* The targeted seat itself -- the shared "Fill this seat with a bot?"
+   panel below never names which seat it means (see its own comment), so
+   a solid accent border here is the only way to tell which "Open" tile
+   it's actually talking about, especially with more than one open seat. */
+.lobby-seat.open.selected { border-color: var(--accent); border-style: solid; }
+.lobby-seat.open.selected .lobby-seat-add-btn { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-strong); }
 
-/* Add-a-bot popover, anchored under whichever open seat's + was clicked. */
-.lobby-bot-picker {
-  position: absolute;
-  top: calc(100% + 6px);
-  left: 50%;
-  transform: translateX(-50%);
-  width: 132px;
+/* One shared, clearly-labeled panel below the whole grid instead of a
+   small popover anchored under whichever seat's + was clicked -- see
+   index.html's own comment on #lobby-bot-picker-panel for why. The tinted
+   heading ("in a different color fill", per the original request) makes
+   this read as its own deliberate step, not something about to vanish. */
+.lobby-bot-picker-panel {
+  margin-top: 0.9rem;
+  border: 1px solid var(--accent-light);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+.lobby-bot-picker-heading {
+  margin: 0;
+  padding: 0.55rem 0.9rem;
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+.lobby-bot-picker-options {
+  display: flex;
+  gap: 0.5rem;
+  padding: 0.7rem 0.9rem;
   background: var(--panel-bg);
+}
+.lobby-bot-option {
+  flex: 1 1 0;
+  background: var(--panel-bg-soft);
   border: 1px solid var(--panel-border);
   border-radius: var(--radius-sm);
-  box-shadow: 0 12px 28px -8px rgba(0, 0, 0, 0.35);
-  padding: 0.4rem;
-  z-index: 20;
-  text-align: left;
-}
-.lobby-bot-picker[hidden] { display: none; }
-.lobby-bot-option {
-  display: block;
-  width: 100%;
-  background: none;
-  border: none;
-  border-radius: 6px;
-  padding: 0.4rem 0.45rem;
+  padding: 0.55rem 0.4rem;
   font-family: inherit;
   font-size: 0.82rem;
   font-weight: 600;
   color: var(--text);
   cursor: pointer;
-  text-align: left;
+  text-align: center;
+  transition: background 0.12s ease, border-color 0.12s ease;
 }
-.lobby-bot-option:hover { background: var(--panel-bg-soft); }
+.lobby-bot-option:hover { background: var(--accent-soft); border-color: var(--accent-light); }
 
 .room-code-display {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 0.6rem;
+  flex-wrap: wrap;
+  gap: 0.7rem;
+  margin-bottom: 0.6rem;
+}
+
+/* A labeled block (small eyebrow + a big, letter-spaced code) rather than
+   the room code sitting inline in a sentence -- the one piece of
+   information this whole screen exists to hand over, so it gets to look
+   like it. Left accent border echoes the account-elo-chart-col's own
+   "important block" treatment elsewhere in this app. */
+.room-code-block {
   background: var(--accent-soft);
   border: 1px solid var(--accent-light);
+  border-left: 4px solid var(--accent);
   border-radius: var(--radius-sm);
-  padding: 0.6rem 0.9rem;
-  margin-bottom: 0.6rem;
-  font-size: 0.95rem;
-  font-weight: 600;
-  letter-spacing: 0.02em;
+  padding: 0.45rem 1rem 0.5rem;
 }
+.room-code-eyebrow {
+  display: block;
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.room-code-value {
+  font-size: 1.35rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--accent-strong);
+}
+
+/* A colored dot + label instead of "(public)"/"(private)" stuffed in
+   parentheses after the code -- reads as its own real piece of status,
+   not an afterthought. */
+.room-visibility-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+.room-visibility-tag::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+.room-visibility-tag.is-private::before { background: var(--muted); }
 
 /* A dedicated row (its own line, below the room-code badge above) for the
    invite link -- an icon-only button next to a bare room-code badge was
@@ -1575,7 +1838,13 @@ button.secondary.standalone { margin-top: 0.9rem; display: inline-block; }
   border-radius: 999px;
   overflow: hidden;
 }
-.room-row-bar-fill { height: 100%; background: var(--accent); border-radius: 999px; }
+/* display:block is load-bearing here, not decoration -- .room-row-bar-fill
+   is a <span> (inline by default), and CSS width/height have no effect at
+   all on inline elements. Without this, the inline style="width: X%" set
+   in JS was silently ignored every time, so the fill never actually
+   reflected how full a room was -- a real reported bug, not just hard to
+   see. */
+.room-row-bar-fill { display: block; height: 100%; background: var(--accent); border-radius: 999px; }
 .room-row-progress-text { font-size: 0.78rem; color: var(--muted); white-space: nowrap; }
 
 /* A dashed, quieter treatment than a real .panel -- this is a "nothing to
@@ -1704,22 +1973,46 @@ button.secondary.standalone { margin-top: 0.9rem; display: inline-block; }
   border-bottom: 1px solid var(--panel-border);
 }
 .leaderboard-table th {
-  color: var(--muted);
-  font-size: 0.75rem;
+  /* A tinted header band (the app's own gold accent, faint) with the
+     label in the strong accent tone rather than plain muted grey --
+     reads as a deliberately designed table header, not just an
+     uppercase first row. Heavier bottom border on top of that keeps it
+     visually its own section. */
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  font-size: 0.72rem;
+  font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.03em;
-  /* A slightly heavier bottom border than the body rows below it --
-     separates the header as its own band instead of just looking like
-     one more (uppercase) row in an otherwise perfectly flat table. */
-  border-bottom: 2px solid var(--panel-border);
+  letter-spacing: 0.05em;
+  border-bottom: 2px solid var(--accent-light);
 }
+.leaderboard-table th:first-child { border-top-left-radius: var(--radius-sm); }
+.leaderboard-table th:last-child { border-top-right-radius: var(--radius-sm); }
 /* Alternating row tint -- a real zebra pattern reads as a deliberately
    designed table, not a wall of identical rows; :not(.leaderboard-row-me)
    so the "this is you" highlight below always wins on whichever row it
    lands on, striped or not. */
 .leaderboard-table tbody tr:nth-child(even):not(.leaderboard-row-me) { background: var(--panel-bg-soft); }
 .leaderboard-row-me { background: var(--accent-soft); font-weight: 700; }
-.leaderboard-rank-1 { color: var(--accent-strong); font-weight: 800; font-size: 1.05rem; }
+
+/* Top-3 medal pills -- gold / silver / bronze, the exact same gradients
+   the recent-games list already uses for a top-3 finish (see
+   .recent-game-placement-*), so a "3rd place" reads the same everywhere
+   it shows up in the app. Ranks 4+ just get a plain number. */
+.leaderboard-rank-cell { text-align: center; }
+.leaderboard-rank-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.5rem;
+  padding: 0.1rem 0.35rem;
+  border-radius: 999px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.leaderboard-rank-1 .leaderboard-rank-num { color: #3a2c0b; background: linear-gradient(135deg, var(--accent-highlight), var(--accent-light)); }
+.leaderboard-rank-2 .leaderboard-rank-num { color: #2c3230; background: linear-gradient(135deg, #d5dbd8, #aeb8b3); }
+.leaderboard-rank-3 .leaderboard-rank-num { color: #fff; background: linear-gradient(135deg, #cf8f5a, #a1663a); }
 .leaderboard-pagination { display: flex; align-items: center; justify-content: center; gap: 1rem; margin-top: 0.9rem; }
 .leaderboard-pagination button { margin: 0; }
 .leaderboard-pagination button:disabled { opacity: 0.4; cursor: default; }

@@ -56,9 +56,12 @@ async function loadLeaderboardPage(profile) {
     }
     body.innerHTML = rows.map((r, i) => {
       const rank = offset + i + 1;
+      // Gold / silver / bronze for the top 3, same medal language as the
+      // recent-games list's own placement pills (see .recent-game-placement-*).
+      const rankClass = rank <= 3 ? ` leaderboard-rank-${rank}` : '';
       return `
       <tr class="${profile && r.username === profile.username ? 'leaderboard-row-me' : ''}">
-        <td class="${rank === 1 ? 'leaderboard-rank-1' : ''}">${rank}</td>
+        <td class="leaderboard-rank-cell${rankClass}"><span class="leaderboard-rank-num">${rank}</span></td>
         <td><button type="button" class="name-link" data-username="${escapeHtml(r.username)}">${escapeHtml(r.username)}</button></td>
         <td>${r.elo}</td>
         <td>${r.games_played}</td>

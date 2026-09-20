@@ -77,6 +77,75 @@ def test_is_configured_reflects_the_env_var(no_database_url, monkeypatch):
     assert game_history.is_configured() is True
 
 
+def _fake_pool(getconn_side_effect):
+    """A MagicMock standing in for the module's real ThreadedConnectionPool
+    -- getconn_side_effect is a list consumed one item per _connect()
+    attempt: an exception instance to simulate that attempt failing (either
+    the pool itself couldn't produce a connection, or it handed back a
+    connection whose own probe query then fails), or a MagicMock connection
+    to simulate a good one. See _connect()'s own docstring for the real
+    production incident (Supabase silently dropping idle pooled
+    connections after several inactive days) this retry logic exists for."""
+    pool = MagicMock()
+    pool.getconn.side_effect = getconn_side_effect
+    return pool
+
+
+def _dead_connection():
+    """A pooled connection that LOOKS fine (conn.closed is falsy, same as
+    any real connection the network silently dropped while idle -- see
+    _connect()'s own docstring on why that flag alone can't catch this)
+    but fails the moment anything actually tries to use it."""
+    conn = MagicMock()
+    conn.closed = 0
+    conn.cursor.return_value.__enter__.return_value.execute.side_effect = Exception("server closed the connection unexpectedly")
+    return conn
+
+
+def test_connect_discards_a_stale_pooled_connection_and_retries(monkeypatch):
+    stale = _dead_connection()
+    healthy, _cursor = _fake_connection()
+    pool = _fake_pool([stale, healthy])
+    monkeypatch.setattr(game_history, "_get_pool", lambda: pool)
+
+    result = game_history._connect()
+
+    assert result is healthy
+    pool.putconn.assert_called_once_with(stale, close=True)  # discarded outright, never handed to anyone else
+
+
+def test_connect_retries_when_the_pool_itself_cannot_produce_a_connection(monkeypatch):
+    """Covers the pool.getconn() call raising directly (e.g. exhausted, or
+    the database is genuinely unreachable when the pool tries to open a
+    brand new connection to satisfy the request) -- distinct from getting
+    a connection back that then fails its own probe query."""
+    healthy, _cursor = _fake_connection()
+    pool = _fake_pool([RuntimeError("connection pool exhausted"), healthy])
+    monkeypatch.setattr(game_history, "_get_pool", lambda: pool)
+
+    result = game_history._connect()
+
+    assert result is healthy
+    pool.putconn.assert_not_called()  # nothing to discard -- no connection was ever actually obtained on the failed attempt
+
+
+def test_connect_gives_up_after_exhausting_every_retry_attempt(monkeypatch):
+    """A genuine, sustained outage (not just some stale idle connections)
+    must still fail -- and fail with the real underlying error, not hang
+    retrying forever -- so every existing caller's own `except Exception`
+    fail-safe behavior (empty leaderboard, etc.) still kicks in exactly
+    as before this retry logic existed."""
+    dead_connections = [_dead_connection() for _ in range(game_history._CONNECT_RETRY_ATTEMPTS)]
+    pool = _fake_pool(list(dead_connections))
+    monkeypatch.setattr(game_history, "_get_pool", lambda: pool)
+
+    with pytest.raises(Exception, match="server closed the connection unexpectedly"):
+        game_history._connect()
+
+    assert pool.getconn.call_count == game_history._CONNECT_RETRY_ATTEMPTS
+    assert pool.putconn.call_count == game_history._CONNECT_RETRY_ATTEMPTS
+
+
 def test_ensure_schema_is_a_silent_no_op_without_a_database(no_database_url):
     game_history.ensure_schema()
     assert game_history._schema_ready is False
@@ -1430,10 +1499,10 @@ def test_record_finished_game_gives_distinct_placements_to_same_difficulty_bot_s
     assert placements_by_name == {"alice": 2, "Milo bot": 1, "Ziggy bot": 3}
 
 
-def test_get_leaderboard_excludes_guests_and_bots_by_query(database_url):
+def test_get_leaderboard_excludes_guests_bots_and_the_never_played_by_query(database_url):
     """Doesn't fake a real WHERE-clause result (that's Postgres' job) --
-    just confirms the query text actually filters both, and the shape of
-    what comes back."""
+    just confirms the query text actually filters all three, and the
+    shape of what comes back."""
     game_history._schema_ready = True
     conn, cursor = _fake_connection()
     cursor.fetchall = MagicMock(return_value=[("alice", 1200, 10, 6)])
@@ -1441,6 +1510,7 @@ def test_get_leaderboard_excludes_guests_and_bots_by_query(database_url):
         result = game_history.get_leaderboard()
     query = cursor.execute.call_args.args[0]
     assert "google_id IS NOT NULL" in query
+    assert "games_played > 0" in query  # a linked account that never played is just noise on the board
     assert "NOT IN (SELECT player_id FROM bots)" in query
     assert result == {"rows": [{"username": "alice", "elo": 1200, "games_played": 10, "games_won": 6}],
                        "has_more": False}

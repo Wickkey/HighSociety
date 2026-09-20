@@ -93,9 +93,15 @@ export async function openGameDetailModal(gameId) {
       const nameHtml = linkUsername
         ? `<button type="button" class="name-link" data-username="${escapeHtml(linkUsername)}">${escapeHtml(p.name)}</button>`
         : escapeHtml(p.name);
+      // Same gold/silver/bronze medal pill the Leaderboard uses for its
+      // top 3 (see leaderboard.js / .leaderboard-rank-*) -- a 1st/2nd/3rd
+      // finish reads the same everywhere it shows up.
+      const place = p.placement;
+      const rankClass = place != null && place <= 3 ? ` leaderboard-rank-${place}` : '';
+      const rankInner = place != null ? `<span class="leaderboard-rank-num">${place}</span>` : '—';
       return `
       <tr>
-        <td>${p.placement != null ? p.placement : '—'}</td>
+        <td class="leaderboard-rank-cell${rankClass}">${rankInner}</td>
         <td>${nameHtml}${p.is_bot ? ' (bot)' : ''}${p.is_winner ? ' 🏆' : ''}</td>
         <td>${p.points}</td>
         <td>${p.money_left}</td>

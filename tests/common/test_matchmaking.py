@@ -22,6 +22,16 @@ def test_status_is_none_for_an_unknown_ticket():
     assert matchmaking.status("nope", _no_room_expected) is None
 
 
+def test_queue_depth_counts_only_the_matching_unmatched_bucket():
+    assert matchmaking.queue_depth(3) == 0
+    matchmaking.join("alice", elo=1000, seats=3)
+    matchmaking.join("bob", elo=1010, seats=3)
+    matchmaking.join("carol", elo=1000, seats=2)  # different bucket -- must not count toward seats=3
+    assert matchmaking.queue_depth(3) == 2
+    assert matchmaking.queue_depth(2) == 1
+    assert matchmaking.queue_depth(5) == 0
+
+
 def test_status_reports_waiting_below_the_seat_count():
     ticket_id = matchmaking.join("alice", elo=1000, seats=3)
     result = matchmaking.status(ticket_id, _no_room_expected)

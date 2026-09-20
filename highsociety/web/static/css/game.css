@@ -169,6 +169,44 @@
 .event-toast.tone-green { background: var(--green-dot); }
 .event-toast.tone-start { background: var(--toast-start); }
 
+/* Tutorial-only coaching modal (see gameEvents.js's maybeShowTutorialCoach/
+   notifications.js's enqueueTutorialCoach) -- a real .modal-overlay (see
+   main.css), not an in-flow banner, so its fixed/full-viewport/click-
+   catching backdrop blocks the board underneath for free while a tip is
+   up, per explicit feedback that nothing else should be clickable until
+   it's read. Deliberately does NOT carry .rules-cue-card (its border-left
+   accent bar and flex-row layout are meant for an inline banner on a
+   cream .card.panel background already established by an ancestor --
+   layered onto .modal-box here, its own semi-transparent `background`
+   rule (lobby.css, loaded after main.css) won the cascade over .panel's
+   opaque one, making the box read as see-through with the board bleeding
+   through it). Only the per-kind ICON color (below) is reused for the
+   same coding as How to Play's cue cards -- .modal-box/.panel already
+   supplies a correct, opaque surface on its own. */
+.tutorial-coach-box {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.6rem;
+  text-align: center;
+}
+.tutorial-coach-box p { margin: 0; }
+.tutorial-coach-icon {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--accent-strong);
+}
+.tutorial-coach-icon svg { width: 24px; height: 24px; }
+/* Same tokens as How to Play's own disgrace-tip (.rules-cue-card-flip) and
+   green-card-tip (.rules-cue-card-icon-green) icons, applied directly here
+   instead of inheriting from those ancestor classes -- see notifications.js's
+   TUTORIAL_COACH_KINDS. */
+.tutorial-coach-icon-money { color: var(--chip-money); }
+.tutorial-coach-icon-green { color: var(--card-green-2); }
+
 /* Final green card overlay: distinctly bigger/louder than the routine
    green-card toast above, because this specific reveal ends the game
    immediately — a player should recognize "it's over" at a glance rather
