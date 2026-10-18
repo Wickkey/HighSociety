@@ -8,13 +8,13 @@ from highsociety.code.common.bot_roster import BOT_ROSTER, DIFFICULTIES, names_f
 # labeled test fixture. Each name is a persistent identity with a fixed
 # difficulty (see common/bot_roster.py): "Ziggy bot" is always Easy, so it
 # has its own profile, stats and Elo across every game it plays.
-BOT_NAME_POOL = [b.name[: -len(" bot")] for b in BOT_ROSTER]
+BOT_NAME_POOL = [b.name[: -len(" Bot")] for b in BOT_ROSTER]
 
 
 def assign_bot_names(count: int, taken: set = None,
                      difficulties: Optional[Sequence[Optional[str]]] = None) -> list[str]:
     """
-    Returns `count` distinct " bot"-suffixed names (e.g. "Niel bot"), so a
+    Returns `count` distinct " Bot"-suffixed names (e.g. "Niel Bot"), so a
     bot reads as clearly a bot at a glance without resorting to a type-based
     label ("Greedy1") — skips any already in `taken` (e.g. usernames already
     seated in the room this bot is joining, compared against the same

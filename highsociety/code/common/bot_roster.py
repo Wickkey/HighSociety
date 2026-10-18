@@ -1,7 +1,7 @@
 """
 The named bots -- each one a persistent identity with a fixed difficulty.
 
-"Ziggy bot" is always an Easy bot, in every game, so it has one players row
+"Ziggy Bot" is always an Easy bot, in every game, so it has one players row
 (see game_history.py's `bots` table), one Elo, one stats history and one
 public profile -- and two Easy bots at the same table are still two
 different players. A seat of difficulty X is only ever filled by one of X's
@@ -21,13 +21,13 @@ DIFFICULTIES = ("easy", "medium", "hard")
 
 class RosterBot(NamedTuple):
     key: str          # stable id, never shown: players.username is f"__bot_{key}__"
-    name: str         # the in-game seat name, e.g. "Ziggy bot"
+    name: str         # its name everywhere -- seat, profile, history -- e.g. "Ziggy Bot"
     difficulty: str   # "easy" / "medium" / "hard"
     bio: str
 
 
 def _bot(name: str, difficulty: str, bio: str) -> RosterBot:
-    return RosterBot(key=name.lower(), name=f"{name} bot", difficulty=difficulty, bio=bio)
+    return RosterBot(key=name.lower(), name=f"{name} Bot", difficulty=difficulty, bio=bio)
 
 
 BOT_ROSTER = (
@@ -72,7 +72,8 @@ def names_for_difficulty(difficulty: str) -> list[str]:
 
 
 def find_by_name(name: Optional[str]) -> Optional[RosterBot]:
-    """The roster entry behind an in-game seat name ("Ziggy bot"), or None
+    """The roster entry behind an in-game seat name ("Ziggy Bot"; case-insensitive, so
+    older history rows written as "Ziggy bot" still match), or None
     for anything else (a human, an overflow "Bot3", a renamed bot)."""
     return _BY_NAME.get((name or "").lower())
 

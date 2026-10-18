@@ -314,7 +314,7 @@ _SCHEMA_STATEMENTS = [
     "ALTER TABLE bots ADD COLUMN IF NOT EXISTS bot_key TEXT UNIQUE",
     "INSERT INTO players (username, display_name) VALUES "
     + ", ".join(f"('{bot_roster.roster_username(b)}', '{b.name}')" for b in bot_roster.BOT_ROSTER)
-    + " ON CONFLICT (username) DO NOTHING",
+    + " ON CONFLICT (username) DO UPDATE SET display_name = EXCLUDED.display_name",
     "INSERT INTO bots (player_id, difficulty, bot_key) "
     "SELECT p.id, v.difficulty, v.bot_key FROM players p JOIN (VALUES "
     + ", ".join(f"('{bot_roster.roster_username(b)}', '{b.difficulty}', '{b.key}')" for b in bot_roster.BOT_ROSTER)
@@ -1116,7 +1116,7 @@ def get_game_detail(game_id: int) -> Optional[dict]:
 
     `bot_profile_username` is a second, deliberately separate lookup from
     `name`: `name` stays this seat's own per-game flavor label (e.g.
-    "Ziggy bot", from `pg.bot_name`) so the row itself never changes, but
+    "Ziggy Bot", from `pg.bot_name`) so the row itself never changes, but
     a bot recorded under an identity also has a real players row (see the
     `bots` table) with genuine aggregate stats -- this is that row's
     username, for the caller to link the name to a real profile: the named
