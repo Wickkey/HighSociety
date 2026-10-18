@@ -264,11 +264,11 @@ def test_record_finished_game_writes_one_row_per_human_and_bot_participant(datab
     mock_release_connection.assert_called_once_with(conn)
 
 
-def test_record_finished_game_gives_a_bot_with_known_difficulty_a_real_player_id(database_url):
-    """BACKEND_REWORK.MD: a bot participant whose difficulty is known
-    resolves to the shared per-difficulty player_id from the `bots` table
-    (alongside its existing bot_name flavor label), instead of staying
-    player_id-less the way a bot with no difficulty info still does (see
+def test_record_finished_game_gives_a_named_bot_its_own_player_id(database_url):
+    """A roster bot ("Wagon bot", always Medium -- see common/bot_roster.py)
+    resolves to its *own* player_id from the `bots` table, looked up by
+    bot_key, alongside its existing bot_name label -- instead of staying
+    player_id-less the way a bot with no roster identity still does (see
     test_record_finished_game_writes_one_row_per_human_and_bot_participant,
     unchanged)."""
     game_history._schema_ready = True
@@ -276,17 +276,17 @@ def test_record_finished_game_gives_a_bot_with_known_difficulty_a_real_player_id
     cursor.fetchone.side_effect = iter([
         (1,),               # INSERT INTO games ... RETURNING id
         (10, None, 1000),   # _upsert_player(alice) -- guest, no google_id
-        (55, 1000),         # SELECT b.player_id, p.elo FROM bots b JOIN players p ... WHERE difficulty = 'hard'
+        (55, 1000),         # SELECT b.player_id, p.elo FROM bots b JOIN players p ... WHERE bot_key = 'wagon'
     ])
     participants = [
         {"is_bot": False, "username": "alice", "name": "Alice",
          "points": 12, "money_left": 3, "is_winner": True, "eliminated": False},
-        {"is_bot": True, "username": None, "name": "Wagon bot", "game_username": "wagonbot",
-         "points": 5, "money_left": 0, "is_winner": False, "eliminated": True, "difficulty": "hard"},
+        {"is_bot": True, "username": None, "name": "Wagon bot", "game_username": "wagon bot",
+         "points": 5, "money_left": 0, "is_winner": False, "eliminated": True, "difficulty": "medium"},
     ]
     with patch.object(game_history, "_connect", return_value=conn):
         game_history.record_finished_game(
-            room_code="ABCDE", seats=2, bot_mix=["hard"],
+            room_code="ABCDE", seats=2, bot_mix=["medium"],
             started_at=datetime.datetime.now(datetime.timezone.utc),
             finished_at=datetime.datetime.now(datetime.timezone.utc),
             participants=participants,
@@ -295,17 +295,93 @@ def test_record_finished_game_gives_a_bot_with_known_difficulty_a_real_player_id
     queries_and_params = [(call.args[0], call.args[1]) for call in cursor.execute.call_args_list]
     bot_lookups = [(q, p) for q, p in queries_and_params if "FROM bots" in q]
     assert bot_lookups == [
-        ("SELECT b.player_id, p.elo FROM bots b JOIN players p ON p.id = b.player_id WHERE b.difficulty = %s",
-         ("hard",)),
+        ("SELECT b.player_id, p.elo FROM bots b JOIN players p ON p.id = b.player_id WHERE b.bot_key = %s",
+         ("wagon",)),
     ]
 
     player_games_inserts = [p for q, p in queries_and_params if "INSERT INTO player_games" in q]
     bot_row = player_games_inserts[1]
-    assert bot_row[1] == 55  # player_id -- the shared "hard" identity, not None
+    assert bot_row[1] == 55  # player_id -- Wagon's own identity, not None
     assert bot_row[2] == "Wagon bot"  # bot_name -- the flavor label, untouched
-
     game_results_inserts = [p for q, p in queries_and_params if "INSERT INTO game_results" in q]
     assert any(p[1] == 55 for p in game_results_inserts)  # bot gets a game_results row too now
+
+
+def test_two_same_difficulty_named_bots_are_two_separate_identities(database_url):
+    """The point of named bots: two Medium bots at one table resolve to two
+    different player_ids, so their seats, rounds, actions and ratings are
+    never merged."""
+    game_history._schema_ready = True
+    conn, cursor = _fake_connection()
+    cursor.fetchone.side_effect = iter([
+        (1,),               # INSERT INTO games ... RETURNING id
+        (10, None, 1000),   # _upsert_player(alice)
+        (61, 1000),         # bots lookup for Milo
+        (62, 1000),         # bots lookup for Juno
+    ])
+    participants = [
+        {"is_bot": False, "username": "alice", "name": "Alice", "game_username": "alice",
+         "points": 8, "money_left": 62, "is_winner": False, "eliminated": False},
+        {"is_bot": True, "username": None, "name": "Milo bot", "game_username": "milo bot",
+         "points": 40, "money_left": 66, "is_winner": True, "eliminated": False, "difficulty": "medium"},
+        {"is_bot": True, "username": None, "name": "Juno bot", "game_username": "juno bot",
+         "points": 18, "money_left": 27, "is_winner": False, "eliminated": True, "difficulty": "medium"},
+    ]
+    with patch.object(game_history, "_connect", return_value=conn):
+        game_history.record_finished_game(
+            room_code="ABCDE", seats=3, bot_mix=["medium", "medium"],
+            started_at=datetime.datetime.now(datetime.timezone.utc),
+            finished_at=datetime.datetime.now(datetime.timezone.utc),
+            participants=participants,
+        )
+    calls = [(call.args[0], call.args[1]) for call in cursor.execute.call_args_list]
+    assert [p for q, p in calls if "FROM bots b JOIN" in q] == [("milo",), ("juno",)]
+    seat_ids = {row[2]: row[1] for q, row in calls if "INSERT INTO player_games" in q}
+    assert seat_ids == {None: 10, "Milo bot": 61, "Juno bot": 62}
+    rated_ids = {row[0] for q, row in calls if "INSERT INTO ratings" in q}
+    assert {61, 62} <= rated_ids  # one ratings row each, not one shared
+
+
+@pytest.mark.parametrize("name, difficulty", [
+    ("Ziggy bot", "hard"),    # a roster name, but Ziggy is always Easy
+    ("Ziggy bot", None),      # a heuristic bot that drew a roster name for flavor
+    ("Bot3", "medium"),       # overflow name, no roster identity
+])
+def test_a_bot_without_a_matching_roster_identity_gets_no_player_id(database_url, name, difficulty):
+    """Never falls back to the legacy per-difficulty rows: those are frozen
+    history, and a mismatched name must not borrow another bot's stats."""
+    game_history._schema_ready = True
+    conn, cursor = _fake_connection()
+    cursor.fetchone.side_effect = iter([(1,), (10, None, 1000)])
+    participants = [
+        {"is_bot": False, "username": "alice", "name": "Alice", "game_username": "alice",
+         "points": 8, "money_left": 62, "is_winner": True, "eliminated": False},
+        {"is_bot": True, "username": None, "name": name, "game_username": name.lower(),
+         "points": 4, "money_left": 2, "is_winner": False, "eliminated": False, "difficulty": difficulty},
+    ]
+    with patch.object(game_history, "_connect", return_value=conn):
+        game_history.record_finished_game(
+            room_code="ABCDE", seats=2, bot_mix=["easy"],
+            started_at=datetime.datetime.now(datetime.timezone.utc),
+            finished_at=datetime.datetime.now(datetime.timezone.utc),
+            participants=participants,
+        )
+    calls = [(call.args[0], call.args[1]) for call in cursor.execute.call_args_list]
+    assert not any("FROM bots b JOIN" in q for q, _ in calls)
+    bot_row = [row for q, row in calls if "INSERT INTO player_games" in q][1]
+    assert bot_row[1] is None and bot_row[2] == name
+
+
+def test_schema_seeds_one_players_and_bots_row_per_roster_bot():
+    from highsociety.code.common import bot_roster
+    seed_players = next(st for st in game_history._SCHEMA_STATEMENTS
+                        if "__bot_ziggy__" in st and st.startswith("INSERT INTO players"))
+    seed_bots = next(st for st in game_history._SCHEMA_STATEMENTS
+                     if "__bot_ziggy__" in st and st.startswith("INSERT INTO bots"))
+    for b in bot_roster.BOT_ROSTER:
+        assert f"('{bot_roster.roster_username(b)}', '{b.name}')" in seed_players
+        assert f"('{bot_roster.roster_username(b)}', '{b.difficulty}', '{b.key}')" in seed_bots
+
 
 
 def test_record_finished_game_resolves_host_username_to_host_player_id(database_url):
@@ -467,21 +543,23 @@ def test_record_finished_game_averages_elo_deltas_for_same_difficulty_bot_seats(
     "before" value despite the first update having already landed.
     Deltas are now grouped by player_id and averaged: one identity
     occupying N seats gets exactly one rating change, worth 1/N of the
-    naive sum, backed by exactly one ratings row."""
+    naive sum, backed by exactly one ratings row. Named bots each have
+    their own player_id now, so this only guards against a bad bots row
+    (faked here by returning the same id for both seats)."""
     game_history._schema_ready = True
     conn, cursor = _fake_connection()
     cursor.fetchone.side_effect = iter([
         (1,),                    # INSERT INTO games ... RETURNING id
         (10, "g-alice", 1000),   # _upsert_player(alice)
-        (55, 900),                # bots lookup for medium bot A -- deliberately not 1000 (see below)
-        (55, 900),                # bots lookup for medium bot B -- same shared player_id
+        (55, 900),                # bots lookup for Milo -- deliberately not 1000 (see below)
+        (55, 900),                # bots lookup for Juno -- same player_id (a bad bots row)
     ])
     participants = [
         {"is_bot": False, "username": "alice", "name": "Alice", "game_username": "alice",
          "points": 8, "money_left": 62, "is_winner": False, "eliminated": False},
-        {"is_bot": True, "username": None, "name": "Medium bot A", "game_username": "medium bot a",
+        {"is_bot": True, "username": None, "name": "Milo bot", "game_username": "milo bot",
          "points": 40, "money_left": 66, "is_winner": True, "eliminated": False, "difficulty": "medium"},
-        {"is_bot": True, "username": None, "name": "Medium bot B", "game_username": "medium bot b",
+        {"is_bot": True, "username": None, "name": "Juno bot", "game_username": "juno bot",
          "points": 18, "money_left": 27, "is_winner": False, "eliminated": True, "difficulty": "medium"},
     ]
     with patch.object(game_history, "_connect", return_value=conn):
@@ -494,7 +572,7 @@ def test_record_finished_game_averages_elo_deltas_for_same_difficulty_bot_seats(
 
     # Ground truth: what each seat's delta would independently be, exactly
     # matching the rated_standings this call built internally -- by
-    # placement (medium bot a won outright = 1st, alice 2nd, medium bot b
+    # placement (milo bot won outright = 1st, alice 2nd, juno bot
     # eliminated so ranks last regardless of its own points), not raw
     # points (see elo.compute_elo_deltas' own docstring on why those
     # can disagree). Bots deliberately rated below alice (900 vs 1000),
@@ -507,11 +585,11 @@ def test_record_finished_game_averages_elo_deltas_for_same_difficulty_bot_seats(
     # non-zero).
     expected_seat_deltas = elo.compute_elo_deltas([
         {"username": "alice", "placement": 2, "rating": 1000},
-        {"username": "medium bot a", "placement": 1, "rating": 900},
-        {"username": "medium bot b", "placement": 3, "rating": 900},
+        {"username": "milo bot", "placement": 1, "rating": 900},
+        {"username": "juno bot", "placement": 3, "rating": 900},
     ])
     expected_bot_delta = round(
-        (expected_seat_deltas["medium bot a"] + expected_seat_deltas["medium bot b"]) / 2
+        (expected_seat_deltas["milo bot"] + expected_seat_deltas["juno bot"]) / 2
     )
 
     ratings_inserts = [call.args[1] for call in cursor.execute.call_args_list
@@ -531,7 +609,7 @@ def test_record_finished_game_averages_elo_deltas_for_same_difficulty_bot_seats(
     # caller ever looks a bot seat up by name -- today only alice's own
     # entry is actually read, by web_server.py's Elo reveal).
     assert result["alice"]["rating_change"] == expected_seat_deltas["alice"]
-    assert result["medium bot a"] == result["medium bot b"] == {
+    assert result["milo bot"] == result["juno bot"] == {
         "old_rating": by_player[55][2], "new_rating": by_player[55][3], "rating_change": expected_bot_delta,
     }
 
@@ -548,12 +626,12 @@ def test_record_finished_game_rates_bot_games_but_never_gives_bots_achievements(
     cursor.fetchone.side_effect = iter([
         (1,),                    # INSERT INTO games ... RETURNING id
         (10, "g-alice", 1000),   # _upsert_player(alice) RETURNING id, google_id, elo
-        (99, 1000),              # SELECT b.player_id, p.elo FROM bots ... WHERE difficulty = 'hard'
+        (99, 1000),              # SELECT b.player_id, p.elo FROM bots ... WHERE bot_key = 'niel'
     ])
     participants = [
         {"is_bot": False, "username": "alice", "name": "Alice", "game_username": "alice",
          "points": 5, "money_left": 0, "is_winner": False, "eliminated": False},
-        {"is_bot": True, "username": None, "name": "Wagon bot", "game_username": "wagonbot",
+        {"is_bot": True, "username": None, "name": "Niel bot", "game_username": "niel bot",
          "points": 15, "money_left": 5, "is_winner": True, "eliminated": False, "difficulty": "hard"},
     ]
     with patch.object(game_history, "_connect", return_value=conn):
@@ -728,34 +806,36 @@ def test_record_finished_game_does_not_crash_when_two_same_difficulty_bots_share
     (games/player_games included, since it's all one commit) for any real
     game with 2+ same-difficulty bots. The ON CONFLICT DO NOTHING fix
     means both INSERT attempts still happen (this test asserts that), but
-    a real database silently keeps only the first instead of raising."""
+    a real database silently keeps only the first instead of raising.
+    Named bots each have their own player_id now, so this only guards
+    against a bad bots row (faked here)."""
     game_history._schema_ready = True
     conn, cursor = _fake_connection()
     cursor.fetchone.side_effect = iter([
         (1,),              # INSERT INTO games ... RETURNING id
         (10, None, 1000),  # _upsert_player(alice)
-        (55, 1000),        # bots lookup for "medium bot A"
-        (55, 1000),        # bots lookup for "medium bot B" -- same player_id as A
+        (55, 1000),        # bots lookup for Milo
+        (55, 1000),        # bots lookup for Juno -- same player_id (a bad bots row)
         (99,),             # SELECT card_id FROM cards ...
         (777,),            # INSERT INTO game_rounds ... RETURNING id
     ])
     participants = [
         {"is_bot": False, "username": "alice", "name": "Alice", "game_username": "alice",
          "points": 12, "money_left": 3, "is_winner": True, "eliminated": False},
-        {"is_bot": True, "username": None, "name": "Medium bot A", "game_username": "medium bot a",
+        {"is_bot": True, "username": None, "name": "Milo bot", "game_username": "milo bot",
          "points": 5, "money_left": 0, "is_winner": False, "eliminated": True, "difficulty": "medium"},
-        {"is_bot": True, "username": None, "name": "Medium bot B", "game_username": "medium bot b",
+        {"is_bot": True, "username": None, "name": "Juno bot", "game_username": "juno bot",
          "points": 5, "money_left": 0, "is_winner": False, "eliminated": True, "difficulty": "medium"},
     ]
     auction_rounds = [{
         "round_number": 1, "auction_type": "normal",
         "card": {"type": "Painting", "value": 5, "multiplier": 1, "is_green": False, "description": "x"},
         "events": [], "recipient": "alice",
-        "money_spent": {"alice": 5, "medium bot a": 0, "medium bot b": 0},
-        "cards_spent": {"alice": [5], "medium bot a": [], "medium bot b": []},
+        "money_spent": {"alice": 5, "milo bot": 0, "juno bot": 0},
+        "cards_spent": {"alice": [5], "milo bot": [], "juno bot": []},
         "started_at": "2026-01-01T00:00:00+00:00", "ended_at": "2026-01-01T00:00:01+00:00",
-        "starting_money": {"alice": 10, "medium bot a": 10, "medium bot b": 10},
-        "ending_money": {"alice": 5, "medium bot a": 10, "medium bot b": 10},
+        "starting_money": {"alice": 10, "milo bot": 10, "juno bot": 10},
+        "ending_money": {"alice": 5, "milo bot": 10, "juno bot": 10},
     }]
     with patch.object(game_history, "_connect", return_value=conn):
         game_history.record_finished_game(  # must not raise
@@ -1482,7 +1562,7 @@ def test_record_finished_game_gives_distinct_placements_to_same_difficulty_bot_s
          "points": 8, "money_left": 62, "is_winner": False, "eliminated": False},
         {"is_bot": True, "username": None, "name": "Milo bot", "game_username": "milo bot",
          "points": 40, "money_left": 66, "is_winner": True, "eliminated": False, "difficulty": "medium"},
-        {"is_bot": True, "username": None, "name": "Ziggy bot", "game_username": "ziggy bot",
+        {"is_bot": True, "username": None, "name": "Juno bot", "game_username": "juno bot",
          "points": 18, "money_left": 27, "is_winner": False, "eliminated": True, "difficulty": "medium"},
     ]
     with patch.object(game_history, "_connect", return_value=conn):
@@ -1497,7 +1577,7 @@ def test_record_finished_game_gives_distinct_placements_to_same_difficulty_bot_s
                              if "INSERT INTO player_games" in call.args[0]]
     # (game_id, player_id, bot_name, points, money_left, is_winner, eliminated, placement)
     placements_by_name = {row[2] or "alice": row[7] for row in player_games_inserts}
-    assert placements_by_name == {"alice": 2, "Milo bot": 1, "Ziggy bot": 3}
+    assert placements_by_name == {"alice": 2, "Milo bot": 1, "Juno bot": 3}
 
 
 def test_get_leaderboard_excludes_guests_bots_and_the_never_played_by_query(database_url):

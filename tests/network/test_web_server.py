@@ -2157,6 +2157,7 @@ def test_profile_endpoint_returns_stats_and_elo(monkeypatch):
         "avg_placement": 1.5, "avg_points": 12.0, "avg_money_remaining": 6.0, "elo": 1032,
         "created_at": "2025-06-01T00:00:00+00:00", "last_played_at": "2026-03-15T00:00:00+00:00",
         "is_bot": False, "display_name": "alice", "bio": None,
+        "bot_difficulty": None, "bot_legacy": False,
     }
 
 
@@ -2176,6 +2177,29 @@ def test_profile_endpoint_flags_the_reserved_bot_identities(monkeypatch):
     assert body["is_bot"] is True
     assert body["display_name"] == "Hard Bot"
     assert isinstance(body["bio"], str) and len(body["bio"]) > 0
+    assert body["bot_difficulty"] == "hard"
+    assert body["bot_legacy"] is True  # holds only games from before bots had names
+
+
+def test_profile_endpoint_serves_a_named_bot_with_its_own_bio_and_fixed_difficulty(monkeypatch):
+    monkeypatch.setattr(game_history, "get_player_profile_stats", lambda username: {
+        "games_played": 12, "wins": 2, "win_rate": 2 / 12, "elo": 960,
+        "avg_placement": 3.1, "avg_points": 9.0, "avg_money_remaining": 4.0,
+        "created_at": "2026-10-18T00:00:00+00:00", "last_played_at": "2026-10-18T00:00:00+00:00",
+    })
+    body = web_server.app.test_client().get("/api/profile/__bot_ziggy__").get_json()
+    assert body["is_bot"] is True
+    assert body["display_name"] == "Ziggy bot"
+    assert body["bot_difficulty"] == "easy"
+    assert body["bot_legacy"] is False
+    assert body["bio"]
+
+
+def test_every_roster_bot_has_a_profile():
+    from highsociety.code.common import bot_roster
+    for b in bot_roster.BOT_ROSTER:
+        profile = web_server.BOT_PROFILES[bot_roster.roster_username(b)]
+        assert profile == {"display_name": b.name, "bio": b.bio, "difficulty": b.difficulty, "legacy": False}
 
 
 def test_global_stats_endpoint_returns_204_when_unavailable(monkeypatch):

@@ -517,6 +517,7 @@
             <span id="player-profile-avatar" class="profile-chip-avatar account-avatar"></span>
             <div>
               <h2 id="player-profile-name"></h2>
+              <span id="player-profile-bot-tag" class="profile-bot-tag hidden"></span>
               <div id="player-profile-elo-hero" class="account-elo-hero hidden">
                 <span id="player-profile-elo" class="account-elo-value"></span> <span class="account-elo-label">ELO RATING</span>
               </div>
@@ -524,8 +525,8 @@
           </div>
           <!-- Bots get a bit of flavor text instead of the player-since/
                last-played meta a human profile shows -- both would just
-               read as "since the schema was created" for a shared identity
-               that never actually joined (see BOT_PROFILES' own comment). -->
+               read as "since the schema was created" for a bot that never
+               actually joined (see BOT_PROFILES' own comment). -->
           <p id="player-profile-bio" class="muted hidden"></p>
           <div id="player-profile-meta-row" class="account-meta-row hidden">
             <span class="account-meta-item">

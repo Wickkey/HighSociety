@@ -35,7 +35,11 @@ def create_bot_players(bot_mix: list[str], think_time: float = 1.5, taken_userna
     added to after creation) that must not collide with the name assigned
     here — see web_server.py's "add a bot to the lobby" endpoint.
     """
-    names = assign_bot_names(len(bot_mix), taken=taken_usernames)
+    # A difficulty preset ("easy"/"medium"/"hard") only ever gets one of its
+    # own roster names -- the name is that bot's persistent identity (see
+    # common/bot_roster.py). Heuristic types pass through and draw from the
+    # whole pool.
+    names = assign_bot_names(len(bot_mix), taken=taken_usernames, difficulties=bot_mix)
     return [
         BOT_TYPES[bot_type](name=name, username=name.lower(), think_time=think_time)
         for bot_type, name in zip(bot_mix, names)

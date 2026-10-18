@@ -95,7 +95,12 @@ function seatTileHtml(seat, index, canManage, selfUsername) {
   } else {
     avatarContent = escapeHtml(seat.name.charAt(0).toUpperCase());
   }
-  const nameHtml = seat.is_bot ? `${safeName}<span>Bot</span>` : safeName;
+  // A difficulty-preset bot's name has one fixed difficulty (see
+  // common/bot_roster.py), so the tag says which: "Easy bot", not just "Bot".
+  const botTag = seat.difficulty
+    ? `${seat.difficulty.charAt(0).toUpperCase()}${seat.difficulty.slice(1)} bot`
+    : 'Bot';
+  const nameHtml = seat.is_bot ? `${safeName}<span>${escapeHtml(botTag)}</span>` : safeName;
   // The manager's own seat still gets an x -- clicking it just isn't a
   // kick (see initLobbySeatGrid's remove-seat handler): it shows a plain
   // inline "you can't kick yourself" rather than the "Kick {name}?"

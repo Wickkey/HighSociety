@@ -11,9 +11,9 @@ Schema (see _SCHEMA_STATEMENTS for the exact DDL; the core three tables
 below, plus bots/game_results/ratings/cards/meta added for
 BACKEND_REWORK.MD's rework — see record_finished_game's own docstring for
 how those fit together):
-  players       One row per distinct human username ever seen, plus 3
-                reserved rows representing the shared identity of each bot
-                difficulty tier (see `bots`). `username` is the identity
+  players       One row per distinct human username ever seen, plus one
+                reserved row per named bot (see `bots` and
+                common/bot_roster.py) and 3 legacy per-difficulty bot rows. `username` is the identity
                 key today, since there's no login system yet — the
                 nullable google_id/email columns exist so a future Google
                 Sign-In can attach a *real* identity to an existing
@@ -24,11 +24,10 @@ how those fit together):
                 rematch is just another call to record_finished_game).
   player_games  The "key that maps players to their past games": one row
                 per (game, participant). A bot participant is recorded by
-                flavor name (bot_name) same as always, and — when its
-                difficulty is known — also by the shared per-difficulty
-                player_id from `bots`, so it's no longer forced to be
-                identity-less the way a genuinely unique-per-bot row would
-                have to be.
+                seat name (bot_name) same as always, and — when it's one of
+                the named roster bots — also by that bot's own player_id
+                from `bots`. Games from before named identities point at
+                the legacy per-difficulty player_id instead.
 """
 import datetime
 import json
@@ -37,7 +36,7 @@ import threading
 import time
 from typing import Callable, Optional
 
-from highsociety.code.common import elo
+from highsociety.code.common import bot_roster, elo
 from highsociety.code.common.achievements import WIN_COUNT_MILESTONES
 from highsociety.code.common.logger_module.logger.logging_manager import LoggingManager
 
@@ -106,12 +105,11 @@ _SCHEMA_STATEMENTS = [
     "ALTER TABLE players ADD COLUMN IF NOT EXISTS games_played INTEGER NOT NULL DEFAULT 0",
     "ALTER TABLE players ADD COLUMN IF NOT EXISTS games_won INTEGER NOT NULL DEFAULT 0",
 
-    # One row per difficulty tier, pointing at a dedicated players row (see
-    # the seed INSERTs below) -- NOT one row per bot flavor name. A "Wagon
-    # bot" this game and a "Pip bot" next game can both be Hard difficulty;
-    # there's no meaningful persistent identity behind the random flavor
-    # name itself; there is behind the difficulty tier, which is what a
-    # game_actions/game_rounds row actually wants to attribute to.
+    # One row per bot identity, pointing at a dedicated players row (see
+    # the seed INSERTs below). Originally one row per difficulty tier, when
+    # bot names were random flavor; now each named bot (bot_key, added
+    # below) has its own row with a fixed difficulty, and the 3 tier rows
+    # stay only as the identity older games were recorded under.
     """
     CREATE TABLE IF NOT EXISTS bots (
         player_id INTEGER PRIMARY KEY REFERENCES players(id) ON DELETE CASCADE,
@@ -277,7 +275,7 @@ _SCHEMA_STATEMENTS = [
         ('games', 'One row per finished (or crashed/aborted -- see is_finished_successfully) game, including each rematch.'),
         ('player_games', 'One row per (game, participant), human or bot -- the join between players/bots and games.'),
         ('player_achievements', 'Unlocked achievement ids per player, Google-linked accounts only.'),
-        ('bots', 'Maps the 3 reserved per-difficulty players rows to their difficulty tier.'),
+        ('bots', 'One row per bot identity: each named bot (bot_key, fixed difficulty), plus the 3 legacy per-difficulty rows (bot_key NULL) older games were recorded under.'),
         ('game_results', 'One row per (game, participant) shaped for "show me a player''s last N games".'),
         ('ratings', 'Append-only Elo rating history, one row per rated participant per game.'),
         ('cards', 'Metadata mirror of the fixed status-card set -- one row per physical card, not deduplicated by design/value.'),
@@ -304,6 +302,24 @@ _SCHEMA_STATEMENTS = [
         AS v(username, difficulty) ON p.username = v.username
     ON CONFLICT (player_id) DO NOTHING
     """,
+
+    # The named bots (see common/bot_roster.py) -- one players row each, so
+    # "Ziggy bot" has its own Elo/stats/profile across every game, and two
+    # same-difficulty bots at one table are two different players. bot_key
+    # is NULL for the 3 legacy per-difficulty rows above, which no new game
+    # is recorded under any more: they're kept as-is for the history that
+    # predates named identities. DO UPDATE (not NOTHING) on the bots row so
+    # moving a name to another difficulty in the roster takes effect on the
+    # next startup.
+    "ALTER TABLE bots ADD COLUMN IF NOT EXISTS bot_key TEXT UNIQUE",
+    "INSERT INTO players (username, display_name) VALUES "
+    + ", ".join(f"('{bot_roster.roster_username(b)}', '{b.name}')" for b in bot_roster.BOT_ROSTER)
+    + " ON CONFLICT (username) DO NOTHING",
+    "INSERT INTO bots (player_id, difficulty, bot_key) "
+    "SELECT p.id, v.difficulty, v.bot_key FROM players p JOIN (VALUES "
+    + ", ".join(f"('{bot_roster.roster_username(b)}', '{b.difficulty}', '{b.key}')" for b in bot_roster.BOT_ROSTER)
+    + ") AS v(username, difficulty, bot_key) ON p.username = v.username "
+    "ON CONFLICT (player_id) DO UPDATE SET difficulty = EXCLUDED.difficulty, bot_key = EXCLUDED.bot_key",
 
     # Derived entirely from PlayGame.get_auction_history() at game-end (see
     # _record_auction_rounds) -- no live-path DB writes anywhere. card_id
@@ -1075,13 +1091,12 @@ def get_game_detail(game_id: int) -> Optional[dict]:
     `bot_profile_username` is a second, deliberately separate lookup from
     `name`: `name` stays this seat's own per-game flavor label (e.g.
     "Ziggy bot", from `pg.bot_name`) so the row itself never changes, but
-    a bot with a known difficulty also has a real, shared players row
-    (see the `bots` table) with genuine aggregate stats -- this is that
-    row's username (one of `__bot_easy__`/`__bot_medium__`/`__bot_hard__`),
-    for the caller to link the name to a real profile. None for a human
-    participant, or for a bot with no known difficulty (nothing to link
-    to -- see record_finished_game's own docstring on `difficulty` being
-    optional).
+    a bot recorded under an identity also has a real players row (see the
+    `bots` table) with genuine aggregate stats -- this is that row's
+    username, for the caller to link the name to a real profile: the named
+    bot's own `__bot_ziggy__`, or for an older game one of the legacy
+    `__bot_easy__`/`__bot_medium__`/`__bot_hard__`. None for a human
+    participant, or for a bot recorded with no identity at all.
     """
     if not is_configured():
         return None
@@ -1597,12 +1612,11 @@ def record_finished_game(*, room_code: str, seats: int, bot_mix: list,
     bot seats' actions/rounds attributed -- everything else is unaffected.
     Exactly one of (is_bot False + username set) or (is_bot True + username
     None) holds per participant. `difficulty` ("easy"/"medium"/"hard") is
-    only meaningful when is_bot is True — see the `bots` table: a bot
-    participant with a known difficulty gets a real player_id (the shared
-    identity for that whole difficulty tier) alongside its existing
-    bot_name flavor label; omitted or unrecognized, it falls back to the
-    original bot_name-only behavior (player_id stays NULL), so older
-    callers/tests that don't pass it are unaffected.
+    only meaningful when is_bot is True — see the `bots` table: a bot whose
+    `name` is a roster bot's seat name (common/bot_roster.py) *and* whose
+    difficulty matches the one the roster pins that name to gets that
+    bot's own player_id alongside its bot_name; anything else (no
+    difficulty, a non-roster name) stays bot_name-only (player_id NULL).
 
     `achievement_unlocks`: {username: {achievement_id, ...}} from
     achievements.detect_per_game_achievements — everything earned in this
@@ -1733,21 +1747,30 @@ def record_finished_game(*, room_code: str, seats: int, bot_mix: list,
                 bot_name = None
                 if p["is_bot"]:
                     bot_name = p["name"]
-                    difficulty = p.get("difficulty")
-                    if difficulty:
-                        # Also fetches the bot's *current* elo (unlike the
-                        # player_id-only lookup this used to be) -- bots
-                        # are now real rated participants (see the elo
-                        # gating below), so this needs elo_before the same
-                        # way _upsert_player already gives a human.
+                    # The seat's own named identity (see common/bot_roster.py),
+                    # only when the name really is that roster bot -- same
+                    # name *and* the difficulty the roster pins it to. A
+                    # heuristic bot that drew a roster name for flavor
+                    # (CLI/scripts, difficulty None) or an overflow "Bot3"
+                    # stays bot_name-only. Never the legacy per-difficulty
+                    # rows: those are frozen history now.
+                    roster_bot = bot_roster.find_by_name(p["name"])
+                    if roster_bot is not None and roster_bot.difficulty == p.get("difficulty"):
+                        # Also fetches the bot's *current* elo -- bots are
+                        # real rated participants (see the elo gating
+                        # below), so this needs elo_before the same way
+                        # _upsert_player already gives a human.
                         cur.execute(
                             "SELECT b.player_id, p.elo FROM bots b JOIN players p ON p.id = b.player_id "
-                            "WHERE b.difficulty = %s",
-                            (difficulty,),
+                            "WHERE b.bot_key = %s",
+                            (roster_bot.key,),
                         )
                         row = cur.fetchone()
                         if row is not None:
                             player_id, elo_before = row
+                            # A named bot's username is stable now, so its
+                            # cached profile Elo must refresh like a human's.
+                            real_username_by_player_id[player_id] = bot_roster.roster_username(roster_bot)
                 else:
                     player_id, google_id, elo_before = _upsert_player(cur, p["username"], p["name"])
                     real_username_by_player_id[player_id] = p["username"]
@@ -1855,9 +1878,9 @@ def record_finished_game(*, room_code: str, seats: int, bot_mix: list,
             # showing a change that a later failure in this same block (e.g.
             # _record_auction_rounds) could still roll back, which is
             # exactly the kind of cache/database disagreement this cache
-            # can't afford to have. Bots are skipped -- their "username" is
-            # an ephemeral per-game display name, not a stable identity
-            # anything would ever look up again.
+            # can't afford to have. A named bot is included (its
+            # __bot_<key>__ username is a stable profile identity); a bot
+            # with no roster identity never gets this far.
             cache_refreshes = []
             for player_id, seat_deltas in deltas_by_player_id.items():
                 combined_delta = round(sum(seat_deltas) / len(seat_deltas))
