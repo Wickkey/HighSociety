@@ -1808,3 +1808,42 @@ def test_fetch_selfplay_records_samples_within_a_batch(database_url, mock_releas
     query, params = cursor.execute.call_args.args
     assert "FROM selfplay_games" in query and "batch = %s" in query and "random()" in query
     assert params == ["rl-v1", 5]
+
+
+def test_the_leaderboard_cache_lives_three_months_because_writes_invalidate_it():
+    assert game_history._LEADERBOARD_CACHE_TTL_SECONDS == 90 * 24 * 60 * 60
+
+
+def test_a_rename_clears_the_cached_leaderboard(database_url, mock_release_connection):
+    """The board lists players by username -- with a 3-month TTL, a renamed
+    player would otherwise keep showing under the old name."""
+    game_history._schema_ready = True
+    game_history._leaderboard_cache[(20, 0)] = (time.monotonic(), {"rows": [{"username": "alice"}], "has_more": False})
+    conn, cursor = _fake_connection()
+    cursor.rowcount = 1
+    with patch.object(game_history, "username_is_taken", return_value=False), \
+            patch.object(game_history, "_connect", return_value=conn):
+        assert game_history.rename_player("alice", "bob") is True
+    assert game_history._leaderboard_cache == {}
+
+
+def test_a_game_with_no_rating_change_still_clears_the_cached_leaderboard(database_url, mock_release_connection):
+    """games_played/games_won are on the board too, and they move even when
+    nobody's Elo does (a guest-only game here)."""
+    game_history._schema_ready = True
+    game_history._leaderboard_cache[(20, 0)] = (time.monotonic(), {"rows": ["stale"], "has_more": False})
+    conn, cursor = _fake_connection()
+    participants = [
+        {"is_bot": False, "username": "alice", "name": "Alice", "game_username": "alice", "seat": 0,
+         "points": 5, "money_left": 3, "is_winner": True, "eliminated": False},
+        {"is_bot": False, "username": "bob", "name": "Bob", "game_username": "bob", "seat": 1,
+         "points": 1, "money_left": 9, "is_winner": False, "eliminated": False},
+    ]
+    with patch.object(game_history, "_connect", return_value=conn):
+        game_history.record_finished_game(
+            room_code="ABCDE", seats=2, bot_mix=[],
+            started_at=datetime.datetime.now(datetime.timezone.utc),
+            finished_at=datetime.datetime.now(datetime.timezone.utc),
+            participants=participants,
+        )
+    assert game_history._leaderboard_cache == {}

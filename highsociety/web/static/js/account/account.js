@@ -4,14 +4,15 @@ import { $, hide, show, showError, showScreen, setScreenPath } from '../utils/do
 import { escapeHtml, timeAgo } from '../utils/formatting.js';
 import { loadProfile, saveProfile, renderProfileChip } from '../auth/profile.js';
 import { fetchJSON } from '../lobby/lobby.js';
-// Circular with gameHistory.js (which imports getPrefetchedStats from
+// Circular with gameHistory.js (which imports profileStats from
 // here) -- safe by this project's own established convention: both sides
 // only ever touch the other's export inside a function body, never at
 // this module's own top-level evaluation. See gameHistory.js's identical
 // note on its own import from here.
 import { fetchGamesPage, renderIfChanged } from '../lobby/gameHistory.js';
 import { showToast } from '../ui/notifications.js';
-import { createEloChartController } from '../ui/eloChart.js';
+import { createEloChartController, fetchRatingHistory } from '../ui/eloChart.js';
+import { swr } from '../utils/swrCache.js';
 
 // Static catalog mirroring highsociety/code/common/achievements.py's
 // ACHIEVEMENTS -- small enough to duplicate client-side (12 entries) rather
@@ -123,26 +124,37 @@ export function onAchievementTileKeydown(e) {
 // browsing the home screen removes that wait from the moment they open
 // Account. Keyed by username so a mid-session identity change (login/
 // logout/username edit) doesn't serve a stale prefetch for someone else.
-let _statsPrefetch = null;
-let _statsPrefetchUsername = null;
+//
+// Now backed by utils/swrCache.js: the stats for any username (yours on
+// Account and the Home Elo badge, anyone's on their public profile) are one
+// cache entry that survives reloads. Every caller paints `cached` at once
+// and re-renders on `freshPromise`, so a finished game is never hidden
+// behind stale numbers for longer than one round trip.
+export function profileStats(username) {
+  return swr(`profile:${username}`, () => fetchJSON(`/api/profile/${encodeURIComponent(username)}`));
+}
 
+// Fresh stats when the server answers, else the last cached copy -- for
+// callers that need one answer rather than a two-step paint (see
+// lobby.js's refreshTutorialCta).
+export async function getPrefetchedStats(username) {
+  const { cached, freshPromise } = profileStats(username);
+  return (await freshPromise) || cached;
+}
+
+// Called right after login (and after each game, see rematch.js): warms the
+// cache for everything the signed-in player is likely to open next, all in
+// parallel and in the background, so Account, Achievements, My Games, the
+// Leaderboard and Home's own widgets open with real data already in place.
 export function prefetchAccountStats() {
   const profile = loadProfile();
   if (!profile) return;
-  _statsPrefetchUsername = profile.username;
-  _statsPrefetch = fetchJSON(`/api/profile/${encodeURIComponent(profile.username)}`).catch(() => null);
-}
-
-// Shared read-only access to that same prefetch -- lets gameHistory.js's
-// Home widget show the current Elo rating alongside Recent Games without
-// firing a second request for data already in flight. Falls back to a
-// fresh fetch only if the prefetch doesn't exist yet or was for a
-// different username (a very early call before login's own prefetch
-// fired, or a mid-session identity change) -- correctness over always
-// reusing the cache.
-export function getPrefetchedStats(username) {
-  if (_statsPrefetch && _statsPrefetchUsername === username) return _statsPrefetch;
-  return fetchJSON(`/api/profile/${encodeURIComponent(username)}`).catch(() => null);
+  profileStats(profile.username);
+  fetchGamesPage(profile.username, 0);
+  fetchRatingHistory(`/api/profile/${encodeURIComponent(profile.username)}/rating_history`);
+  if (profile.google_id) fetchAchievements(profile.username);
+  import('../lobby/leaderboard.js').then((m) => m.fetchLeaderboardPage(0)).catch(() => {});
+  import('../lobby/lobby.js').then((m) => m.fetchGlobalStats()).catch(() => {});
 }
 
 // account-stats-row.loading CSS) the instant the screen opens, then
@@ -196,14 +208,11 @@ async function loadAccountStats() {
   const row = $('account-stats-row');
   row.classList.add('loading');
   if (!profile) return;
-  if (_statsPrefetch && _statsPrefetchUsername === profile.username) {
-    try {
-      renderAccountStats(await _statsPrefetch, profile);
-    } catch (e) { /* fall through to the fresh fetch below */ }
-  }
-  try {
-    renderAccountStats(await fetchJSON(`/api/profile/${encodeURIComponent(profile.username)}`), profile);
-  } catch (e) { /* 404: no games recorded yet -- leave whatever's already rendered (or the skeleton) */ }
+  const { cached, freshPromise } = profileStats(profile.username);
+  if (cached) renderAccountStats(cached, profile);
+  // null on a 404 (no games recorded yet) -- leave whatever's already
+  // rendered (or the skeleton).
+  renderAccountStats(await freshPromise, profile);
 }
 
 // ------------------------------------------------------------ Elo chart --
@@ -277,7 +286,12 @@ async function loadRecentActivity(profile) {
 // before the real fetch landed, even for a returning visitor who'd
 // already unlocked half of them -- that's what actually read as slow,
 // not the network call itself.
-const achievementsCache = new Map(); // username -> Set(unlocked ids)
+// Unlocked achievement ids for `username`, cached across reloads (see
+// utils/swrCache.js) -- shared by Achievements and the login-time prefetch.
+function fetchAchievements(username) {
+  return swr(`achievements:${username}`, () =>
+    fetchJSON(`/api/achievements?username=${encodeURIComponent(username)}`).then((r) => r.achievements || []));
+}
 
 function renderAchievementsIfChanged(grid, unlocked) {
   const html = ACHIEVEMENTS.map((a) => renderAchievementTile(a, unlocked.has(a.id))).join('');
@@ -304,18 +318,14 @@ async function loadAchievements() {
     return;
   }
   hide(guestNote);
-  const cached = achievementsCache.get(profile.username);
-  if (cached) {
-    renderAchievementsIfChanged(grid, cached); // instant repaint from last known-good state -- no locked-then-unlocked flash
-  } else {
-    renderAchievementsIfChanged(grid, new Set()); // first time this session -- nothing to paint from yet, show the locked skeleton as "loading"
-  }
-  try {
-    const result = await fetchJSON(`/api/achievements?username=${encodeURIComponent(profile.username)}`);
-    const unlocked = new Set(result.achievements || []);
-    achievementsCache.set(profile.username, unlocked);
-    renderAchievementsIfChanged(grid, unlocked);
-  } catch (e) { /* transient network error -- leave whatever's already rendered (cached or locked skeleton) */ }
+  const { cached, freshPromise } = fetchAchievements(profile.username);
+  // Cached: instant repaint from the last known-good state -- no
+  // locked-then-unlocked flash. Never seen on this browser: the locked
+  // skeleton stands in as "loading".
+  renderAchievementsIfChanged(grid, new Set(cached || []));
+  const fresh = await freshPromise;
+  if (fresh) renderAchievementsIfChanged(grid, new Set(fresh));
+  // null: transient network error -- leave whatever's already rendered
 }
 
 // Reached via the popover's "Account" item or the sidebar's Account tab --

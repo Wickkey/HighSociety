@@ -27,6 +27,7 @@ import { renderLobby, showSpectateForStatus } from './playerList.js';
 // never at this module's own top-level evaluation.
 import { getPrefetchedStats } from '../account/account.js';
 import { loadHomeRecentGames } from './gameHistory.js';
+import { swr } from '../utils/swrCache.js';
 
 export async function fetchJSON(url, opts) {
   const res = await fetch(url, opts);
@@ -174,18 +175,28 @@ export function showHomeTiles() {
 // scoped to "active" in any real sense. Fetched fresh every time the tile
 // picker is (re-)shown rather than cached, since it's cheap and this
 // screen is revisited often (e.g. every "Return to Home").
+// Cached across reloads (utils/swrCache.js); resolves to null when the
+// server has no database (204) or the request fails.
+export function fetchGlobalStats() {
+  return swr('global_stats', async () => {
+    const res = await fetch('/api/global_stats');
+    if (res.status === 204 || !res.ok) throw new Error('unavailable');
+    return res.json();
+  });
+}
+
 export async function loadHomeGlobalStats() {
   const section = $('home-global-stats');
-  try {
-    const res = await fetch('/api/global_stats');
-    if (res.status === 204) { hide(section); return; } // no database configured
-    const stats = await res.json();
+  const paint = (stats) => {
     $('home-global-stat-games').textContent = stats.total_games;
     $('home-global-stat-players').textContent = stats.total_players;
     show(section);
-  } catch (e) {
-    hide(section); // transient network hiccup -- just skip the section
-  }
+  };
+  const { cached, freshPromise } = fetchGlobalStats();
+  if (cached) paint(cached);
+  const fresh = await freshPromise;
+  if (fresh) paint(fresh);
+  else if (!cached) hide(section); // no database, or a transient hiccup -- just skip the section
 }
 
 // Clears whatever this tab knew about being in a room -- the part every

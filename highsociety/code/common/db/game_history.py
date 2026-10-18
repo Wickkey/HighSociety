@@ -1173,20 +1173,17 @@ def get_game_detail(game_id: int) -> Optional[dict]:
             _release_connection(conn)
 
 
-# 20s made sense back when this TTL was the *only* staleness bound --
-# now that record_finished_game eagerly invalidates (and re-warms) this
-# same cache the instant a rated game actually commits (see
-# _warm_leaderboard_cache below), this TTL is just a safety net for
-# whatever that path doesn't cover (a transient DB hiccup during the
-# eager refresh, or -- if this app ever runs more than the single
-# gunicorn worker it does today -- another process's own cache having no
-# other way to hear about the write). None of that calls for anything
-# close to real-time, so this is set conservatively long rather than
-# tuned to feel instant: an out-of-band leaderboard change (a direct DB
-# edit, say) surfaces within 10 minutes worst-case, which is already far
-# tighter than anyone is realistically checking a leaderboard for
-# unexplained staleness.
-_LEADERBOARD_CACHE_TTL_SECONDS = 600
+# Three months -- effectively "until something changes it". Every write
+# that can change what the leaderboard shows clears it on the spot (see
+# _invalidate_leaderboard_cache: each finished game, which moves Elo and
+# games_played/games_won, and every rename), and a deploy restarts the
+# process with an empty cache anyway. So the TTL only bounds an
+# out-of-band change nothing here knows about (a manual DB edit), and that
+# is rare enough to fix with a restart rather than a short TTL that makes
+# the first visitor after every expiry pay for the query. If this app ever
+# runs more than the single gunicorn worker it does today, the other
+# workers' copies wouldn't hear about a write -- revisit this then.
+_LEADERBOARD_CACHE_TTL_SECONDS = 90 * 24 * 60 * 60
 _leaderboard_cache: dict = {}  # (limit, offset) -> (cached_at_monotonic, result)
 _leaderboard_cache_lock = threading.Lock()
 
@@ -1280,6 +1277,25 @@ def get_leaderboard(limit: int = 20, offset: int = 0) -> dict:
     with _leaderboard_cache_lock:
         _leaderboard_cache[cache_key] = (now, result)
     return result
+
+
+def _invalidate_leaderboard_cache(rewarm: bool = False) -> None:
+    """
+    Drops every cached leaderboard page after a write that can change it
+    (see _LEADERBOARD_CACHE_TTL_SECONDS on why that's what keeps it fresh,
+    not the TTL). Clearing every page, not just the first, covers any
+    offset someone might have cached, since a rank shift can move players
+    across page boundaries.
+
+    rewarm: also re-fetch the default first page right away, so the next
+    visitor -- almost always on page one -- gets a warm hit instead of
+    paying for the query. Worth it after a rating change (people check the
+    board right after a game); otherwise the next visit simply refills it.
+    """
+    with _leaderboard_cache_lock:
+        _leaderboard_cache.clear()
+    if rewarm:
+        _warm_leaderboard_cache()
 
 
 def _warm_leaderboard_cache() -> None:
@@ -1437,6 +1453,9 @@ def rename_player(old_username: str, new_username: str) -> bool:
                     "INSERT INTO players (username, display_name) VALUES (%s, %s)",
                     (new_username, new_username),
                 )
+        # The leaderboard lists players by username -- a renamed player
+        # must not keep showing under the old name until the TTL.
+        _invalidate_leaderboard_cache()
         return True
     except Exception as e:  # noqa: BLE001 -- includes a uniqueness-constraint race, deliberately not special-cased
         LoggingManager.warning(f"game_history.rename_player failed: {e}")
@@ -1971,21 +1990,13 @@ def record_finished_game(*, room_code: str, seats: int, bot_mix: list,
     # own comment on why this can't happen any earlier.
     for username, new_rating in cache_refreshes:
         _refresh_cached_elo(username, new_rating)
-    if cache_refreshes:
-        # A rated game just changed someone's standing -- don't make
-        # everyone wait out the rest of the leaderboard's TTL to see it.
-        # Clearing (not just the default page) covers every paginated
-        # offset someone might have cached, since a rank shift can move
-        # players across page boundaries too. _warm_leaderboard_cache
-        # then immediately re-fetches just the default first page, so
-        # the very next real visitor -- the overwhelmingly common case --
-        # gets a warm cache hit instead of paying for the query this
-        # clear would otherwise have pushed onto them. Runs on this same
-        # background write thread (see record_finished_game_async), so
-        # it costs a real player nothing either way.
-        with _leaderboard_cache_lock:
-            _leaderboard_cache.clear()
-        _warm_leaderboard_cache()
+    if participants:
+        # Any finished game can change the leaderboard -- not just Elo
+        # (cache_refreshes), but games_played/games_won too, which move
+        # even when a rating doesn't. Runs on this same background write
+        # thread (see record_finished_game_async), so it costs a real
+        # player nothing.
+        _invalidate_leaderboard_cache(rewarm=bool(cache_refreshes))
     return elo_changes
 
 
