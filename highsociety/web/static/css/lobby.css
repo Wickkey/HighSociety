@@ -628,27 +628,37 @@ h3:has(.section-icon) { display: flex; align-items: center; gap: 0.5rem; }
    grid's *second* column next to #home-tiles (pushing #home-recent-games
    down into a second row under the tile picker instead of beside it),
    since grid auto-placement fills cells in DOM order. */
+/* Same cream card as the .home-tile buttons right below it (it sits on the
+   green felt, where the old translucent-gold fill left dark text on a
+   murky, low-contrast background), set apart only by a gold left rule and
+   a soft gold icon disc -- the app's own accent vocabulary. */
 .home-tutorial-cta {
   grid-column: 1 / -1;
   display: flex;
   align-items: center;
   gap: 0.9rem;
   position: relative;
-  background: var(--accent-soft);
-  border: 1px solid var(--accent);
-  border-radius: var(--radius-sm);
-  padding: 0.9rem 2.6rem 0.9rem 1rem;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.35), rgba(255, 255, 255, 0) 40%), var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  border-left: 4px solid var(--accent);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+  color: var(--text);
+  padding: 1rem 2.6rem 1rem 1.1rem;
 }
 .home-tutorial-cta-icon {
   flex-shrink: 0;
-  width: 30px;
-  height: 30px;
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-light);
   display: flex;
   align-items: center;
   justify-content: center;
   color: var(--accent-strong);
 }
-.home-tutorial-cta-icon svg { width: 22px; height: 22px; }
+.home-tutorial-cta-icon svg { width: 18px; height: 18px; margin-left: 2px; /* optically center the play triangle */ }
 .home-tutorial-cta-text { flex: 1; }
 .home-tutorial-cta-dismiss {
   position: absolute;
