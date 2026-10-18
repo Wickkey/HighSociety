@@ -32,6 +32,11 @@ Configuration (env var, or the matching --flag, which wins):
                                      stop starting new games after this long
                                      (default 11h, under Render's 12h cron cap)
     SELFPLAY_FLUSH_EVERY     20      games buffered per DB insert
+    SELFPLAY_NOTIFY_EVERY    1000    email a progress update every this many
+                                     stored games (0 = off); also emails on
+                                     finishing and on an aborted run. Needs
+                                     NOTIFY_SMTP_USER/NOTIFY_SMTP_PASSWORD --
+                                     see highsociety/code/common/notify.py
 
 Usage:
     python3 selfplay_job.py
@@ -49,6 +54,7 @@ from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
 from dotenv import load_dotenv
 
 from highsociety.code.ai import BOT_TYPES, create_bot_players
+from highsociety.code.common import notify
 from highsociety.code.common.db import game_history
 from highsociety.code.common.logger_module.logger.logging_manager import LoggingManager
 from highsociety.code.gamecore.game_manager.auction_history import AuctionHistory
@@ -142,6 +148,7 @@ def parse_args(argv=None):
     parser.add_argument("--max-runtime-seconds", type=float,
                         default=float(_env("SELFPLAY_MAX_RUNTIME_SECONDS", 11 * 3600)))
     parser.add_argument("--flush-every", type=int, default=int(_env("SELFPLAY_FLUSH_EVERY", 20)))
+    parser.add_argument("--notify-every", type=int, default=int(_env("SELFPLAY_NOTIFY_EVERY", 1000)))
     args = parser.parse_args(argv)
     args.bot_pool = [b.strip() for b in args.bot_pool.split(",") if b.strip()]
     unknown = set(args.bot_pool) - set(BOT_TYPES)
@@ -181,12 +188,33 @@ def run(args) -> int:
     buffer, stored, failures, attempted = [], 0, 0, 0
     durations = []
 
+    def _rate() -> float:
+        elapsed = time.monotonic() - started
+        return stored / elapsed * 3600 if elapsed else 0.0
+
+    def _status_lines(total: int) -> str:
+        rate = _rate()
+        left = args.target_games - total
+        eta = f"about {left / rate:.0f} h left at this rate" if rate and left > 0 else ""
+        return (f"{total:,} / {args.target_games:,} games stored in batch {args.batch!r}.\n"
+                f"This run: +{stored:,} games, {rate:.0f} games/hour, {failures} failed. {eta}\n"
+                f"Bot pool {args.bot_pool}, {args.players} players, {args.workers} workers, engine {engine_version}.")
+
     def _flush():
         nonlocal buffer, stored
         if buffer:
+            before = already + stored
             _with_db_retry(game_history.insert_selfplay_games, args.batch, buffer, engine_version)
             stored += len(buffer)
             buffer = []
+            after = already + stored
+            # Milestones come from the stored count, not this run's own
+            # tally, so a restart neither repeats nor skips one. The final
+            # one is the "done" email below, not a progress update.
+            every = args.notify_every
+            if every > 0 and after < args.target_games and after // every > before // every:
+                notify.send_email(f"Self-play: {after // every * every:,} / {args.target_games:,} games",
+                                  _status_lines(after))
 
     def _report():
         elapsed = time.monotonic() - started
@@ -248,9 +276,15 @@ def run(args) -> int:
 
     total = already + stored
     if failures >= _MAX_FAILURES_ABSOLUTE and failures > _MAX_FAILURE_RATE * attempted:
+        notify.send_email(f"Self-play run ABORTED at {total:,} / {args.target_games:,}",
+                          f"Too many games failed to replay ({failures} of {attempted} attempted) -- the run "
+                          f"stopped. Nothing that failed was stored; check the job's logs.\n\n"
+                          + _status_lines(total))
         return 1
     if total >= args.target_games:
         print(f"target of {args.target_games} reached.", flush=True)
+        notify.send_email(f"Self-play done: {total:,} games", "The target is reached.\n" + _status_lines(total)
+                          + "\n\nLater scheduled runs now exit immediately -- suspend the job whenever you like.")
     else:
         print(f"stopped at {total}/{args.target_games}; the next run resumes from here.", flush=True)
     return 0

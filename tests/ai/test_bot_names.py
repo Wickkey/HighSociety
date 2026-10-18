@@ -54,3 +54,12 @@ def test_heuristic_bots_still_draw_from_the_whole_pool():
 def test_mismatched_difficulties_length_is_rejected():
     with pytest.raises(ValueError):
         assign_bot_names(2, difficulties=["easy"])
+
+
+def test_a_bot_is_named_with_a_capital_bot_suffix():
+    assert all(b.name.endswith(" Bot") for b in bot_roster.BOT_ROSTER)
+    assert all(name.endswith(" Bot") for name in assign_bot_names(3, difficulties=["easy", "medium", "hard"]))
+
+
+def test_older_lowercase_seat_names_still_resolve_to_their_bot():
+    assert bot_roster.find_by_name("Pepper bot") == bot_roster.find_by_name("Pepper Bot")

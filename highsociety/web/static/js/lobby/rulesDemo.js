@@ -13,7 +13,7 @@
 // keeping; a per-seat running total was the misleading, invented part.
 import { $ } from '../utils/dom.js';
 
-const SEAT_NAMES = ['You', 'Marble bot', 'Ziggy bot'];
+const SEAT_NAMES = ['You', 'Marble Bot', 'Ziggy Bot'];
 
 // Each step: `card` ({label, kind}) and `seats` (bid/passed/active/
 // winner per seat, indices matching SEAT_NAMES) describe the state to
@@ -32,7 +32,7 @@ const DEMOS = {
         seats: [{ bid: 3, active: true }, {}, {}],
       },
       {
-        narration: 'Marble bot raises to 5.',
+        narration: 'Marble Bot raises to 5.',
         seats: [{ bid: 3 }, { bid: 5, active: true }, {}],
       },
       {
@@ -40,11 +40,11 @@ const DEMOS = {
         seats: [{ passed: true }, { bid: 5 }, {}],
       },
       {
-        narration: 'Ziggy bot raises to 8. Nobody else raises again.',
+        narration: 'Ziggy Bot raises to 8. Nobody else raises again.',
         seats: [{ passed: true }, { bid: 5 }, { bid: 8, active: true }],
       },
       {
-        narration: 'Ziggy bot wins the Painting, paying 8 -- everyone else keeps every chip they never actually spent.',
+        narration: 'Ziggy Bot wins the Painting, paying 8 -- everyone else keeps every chip they never actually spent.',
         seats: [{ passed: true }, {}, { winner: true }],
       },
     ],
@@ -62,15 +62,15 @@ const DEMOS = {
         seats: [{ bid: 2, active: true }, {}, {}],
       },
       {
-        narration: 'Marble bot raises to 4 -- same idea, trying to outlast you.',
+        narration: 'Marble Bot raises to 4 -- same idea, trying to outlast you.',
         seats: [{ bid: 2 }, { bid: 4, active: true }, {}],
       },
       {
-        narration: 'Ziggy bot passes first -- stuck with Faux Pas, but keeps every chip.',
+        narration: 'Ziggy Bot passes first -- stuck with Faux Pas, but keeps every chip.',
         seats: [{ bid: 2 }, { bid: 4 }, { passed: true, winner: true }],
       },
       {
-        narration: 'You and Marble bot get your raised money back -- you never actually spent it. Ziggy bot must now discard a Painting.',
+        narration: 'You and Marble Bot get your raised money back -- you never actually spent it. Ziggy Bot must now discard a Painting.',
         seats: [{}, {}, { winner: true }],
       },
     ],

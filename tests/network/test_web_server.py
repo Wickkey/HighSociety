@@ -2200,7 +2200,7 @@ def test_profile_endpoint_serves_a_named_bot_with_its_own_bio_and_fixed_difficul
     })
     body = web_server.app.test_client().get("/api/profile/__bot_ziggy__").get_json()
     assert body["is_bot"] is True
-    assert body["display_name"] == "Ziggy bot"
+    assert body["display_name"] == "Ziggy Bot"
     assert body["bot_difficulty"] == "easy"
     assert body["bot_legacy"] is False
     assert body["bio"]
