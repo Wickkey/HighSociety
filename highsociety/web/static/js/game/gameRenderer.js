@@ -3,7 +3,7 @@
 import { $ } from '../utils/dom.js';
 import { escapeHtml } from '../utils/formatting.js';
 import { CLOCK_ICON_SVG, CARD_INFO_TEXT } from '../utils/constants.js';
-import { game, ensureOpponent, computePoints, answerMyPrompt } from './gameState.js';
+import { game, ensureOpponent, computePoints, answerMyPrompt, spentSoFar, topSpender } from './gameState.js';
 
 // ---------------------------------------------------------------- cards --
 
@@ -169,7 +169,31 @@ export function renderMovePanel() {
   const panel = $('move-panel');
   panel.classList.remove('hidden');
   panel.classList.toggle('pending', !game.myPrompt || game.myPrompt.answered);
+  syncTutorialBidHint();
   renderAuctionPanel(false); // the turn label depends on game.myPrompt too
+}
+
+// Tutorial only: the animated "tap money cards" hint (#tutorial-bid-hint
+// plus a staggered pulse on the chips), shown only while it's actually
+// your turn to bid -- game.tutorialBidHint stays on across turns until the
+// player first picks a card (see renderMoneyChips), so someone who passes
+// their first turn sees it again next time.
+export function syncTutorialBidHint() {
+  const on = !!(game && game.tutorialBidHint && game.myPrompt && !game.myPrompt.answered);
+  $('tutorial-bid-hint').classList.toggle('hidden', !on);
+  $('my-money-cards').classList.toggle('tutorial-hint-pulse', on);
+}
+
+// Tutorial only: "Spent N" on a player tile, flagged when that player has
+// paid the most so far -- the elimination rule (least money left at the
+// end) is the one a first game most often loses to without noticing.
+// Blank outside the tutorial (.spent-tag:empty hides it).
+function renderSpentTag(el, username) {
+  if (!game.isTutorial) { el.textContent = ''; el.classList.remove('top'); return; }
+  const isTop = topSpender() === username;
+  el.textContent = `Spent ${spentSoFar(username)}${isTop ? ' · most' : ''}`;
+  el.classList.toggle('top', isTop);
+  el.title = isTop ? 'Has paid the most so far. Least money left at the end is eliminated.' : 'Money paid so far';
 }
 
 export function renderAuctionPanel(isSpectator) {
@@ -284,7 +308,7 @@ export function renderOpponents(isSpectator) {
       // rather than floating in its own slot between the timer and points.
       row.innerHTML = '<div class="opponent-header">'
         + '<div class="opponent-header-left"><span class="name"></span><span class="bid-badge"></span></div>'
-        + '<div class="opponent-header-right"><span class="opp-timer"></span><span class="pts"></span></div>'
+        + '<div class="opponent-header-right"><span class="opp-timer"></span><span class="spent-tag"></span><span class="pts"></span></div>'
         + '</div>'
         + '<div class="chip-row small"></div>';
     }
@@ -312,6 +336,7 @@ export function renderOpponents(isSpectator) {
     else if (o.outOfAuction) statusSuffix = ' (passed)';
     row.querySelector('.name').textContent = `${o.name}${statusSuffix}`;
     row.querySelector('.pts').textContent = ptsLabel;
+    renderSpentTag(row.querySelector('.spent-tag'), username);
 
     // Live countdown for whichever opponent's turn it currently is —
     // same math as your own move-timer (startMoveTimer), just anchored to
@@ -361,6 +386,7 @@ setInterval(() => { renderOpponents(false); renderOpponents(true); }, 500);
 export function renderMyPanel() {
   $('my-username-label').textContent = game.myUsername || '';
   $('my-points').textContent = game.myPoints;
+  renderSpentTag($('my-spent'), game.myUsername);
   const chips = $('my-status-cards');
   chips.innerHTML = '';
   game.myStatusCards.forEach((c) => chips.appendChild(cardEl(c)));
@@ -378,6 +404,11 @@ export function renderMoneyChips(values) {
       if (game.selectedBid.has(value)) game.selectedBid.delete(value); else game.selectedBid.add(value);
       btn.classList.toggle('selected');
       updateSelectedBidTotal();
+      if (game.tutorialBidHint) {
+        game.tutorialBidHint = false;
+        game.tutorialCoachShown.bid_hint = true; // learned it -- don't bring it back next turn
+        syncTutorialBidHint();
+      }
     });
     row.appendChild(btn);
   });

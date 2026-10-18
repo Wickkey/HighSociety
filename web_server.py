@@ -123,16 +123,18 @@ _TURN_TIME_PRESETS = frozenset({15.0, 30.0, 60.0, 90.0, 120.0})
 # The guided first-game tutorial (see api_create_game's "tutorial" branch)
 # is always this exact table: the human plus two TutorialBots, no clock, no
 # hidden info. The seed is curated, not random -- picked by hand (see
-# highsociety/code/gamecore/dev_tools/inspect_seed.py --seed 8) because its
-# draw order hits every teaching moment a new player needs inside one short
-# game: a disgrace auction as the very first card (Passe), a green Prestige
-# Card right after, a Scandale (a disgrace card that's *also* green) partway
-# through, a FauxPas, and a natural ending via the 4th-green-card rule --
-# all in 8 rounds. Changing this seed changes what the tutorial teaches, so
-# don't touch it without re-running that inspection tool to verify the new
+# highsociety/code/gamecore/dev_tools/inspect_seed.py --seed 765) because its
+# draw order eases a new player in: two plain painting auctions first (6, 9),
+# then a green Prestige Card, another painting, and only then the disgrace
+# cards, simplest first -- Passe, then Faux Pas once three paintings are out
+# (so someone has one to throw away), then Scandale (a disgrace card that's
+# *also* green) -- ending naturally via the 4th-green-card rule, all in 9
+# rounds. Changing this seed changes what the tutorial teaches, so don't
+# touch it without re-running that inspection tool (and
+# tests/ai/test_tutorial_bot.py's TestCuratedTutorialSeed) to verify the new
 # order still covers the same ground.
 _TUTORIAL_SEATS = 3
-_TUTORIAL_SEED = 8
+_TUTORIAL_SEED = 765
 _TUTORIAL_BOT_THINK_TIME = 1.2
 
 

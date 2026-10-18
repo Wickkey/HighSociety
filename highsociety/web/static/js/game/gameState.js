@@ -88,6 +88,15 @@ export function resetGameState(myUsername, status) {
     // so it resets for free every time `game` itself is replaced, same as
     // every other per-game concern on this object.
     tutorialCoachShown: {},
+    // Tutorial only: what each player has actually paid so far (username
+    // -> total), built from AUCTION_RESULT's money_spent -- see
+    // recordMoneySpent. Public information at a real table too (everyone
+    // sees the cards played), just not added up for you there.
+    spentBy: {},
+    // Tutorial only: the animated "tap money cards" hint stays up on each
+    // of your turns until you first pick a card (see gameRenderer.js's
+    // syncTutorialBidHint).
+    tutorialBidHint: false,
   };
   // Every other piece of state whose lifetime is "this one active game" --
   // not already inside the `game` object above -- must be reset here too.
@@ -175,6 +184,35 @@ export function ensureOpponent(username) {
     game.opponents[username] = { name: username, statusCards: [], active: true, outOfAuction: false, lastBid: null };
   }
   return game.opponents[username];
+}
+
+// Adds one finished auction's payments to game.spentBy. money_spent holds
+// every player's bid on the table at the end, but who actually pays
+// depends on the auction: in a normal auction only the winner pays (the
+// rest take their bids back); in a disgrace auction the player stuck with
+// the card keeps their money and everyone else loses what they bid.
+export function recordMoneySpent(result) {
+  const spent = result.money_spent || {};
+  const payers = result.auction_type === 'disgrace'
+    ? Object.keys(spent).filter((u) => u !== result.recipient)
+    : (result.recipient ? [result.recipient] : []);
+  payers.forEach((u) => { game.spentBy[u] = (game.spentBy[u] || 0) + (spent[u] || 0); });
+}
+
+export function spentSoFar(username) {
+  return game.spentBy[username] || 0;
+}
+
+// Whoever has paid strictly the most so far, or null (nobody has paid
+// yet, or a tie at the top).
+export function topSpender() {
+  let top = null;
+  let topAmount = 0;
+  let tied = false;
+  Object.entries(game.spentBy).forEach(([u, amount]) => {
+    if (amount > topAmount) { top = u; topAmount = amount; tied = false; } else if (amount === topAmount && amount > 0) tied = true;
+  });
+  return tied ? null : top;
 }
 
 // Points formula mirrors BasePlayer.__calculate_points(): sum of values,

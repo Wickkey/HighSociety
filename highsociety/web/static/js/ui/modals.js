@@ -21,11 +21,14 @@ import { showPlayerProfileScreen } from '../lobby/playerProfile.js';
 // can't resign and click the home link in the same instant), so a single
 // pending resolver is enough; no stacking/queueing needed.
 let _confirmDialogResolve = null;
-export function confirmDialog(message, confirmLabel) {
+// tone: the confirm button's style -- 'danger' (the default, for
+// irreversible exits like Resign) or 'primary' for an ordinary go-ahead.
+export function confirmDialog(message, confirmLabel, { tone = 'danger' } = {}) {
   return new Promise((resolve) => {
     _confirmDialogResolve = resolve;
     $('confirm-modal-message').textContent = message;
     $('confirm-modal-confirm').textContent = confirmLabel;
+    $('confirm-modal-confirm').className = tone;
     show($('confirm-modal'));
   });
 }

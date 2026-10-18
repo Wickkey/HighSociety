@@ -3,11 +3,11 @@
 // mutations and DOM updates.
 import { $, show, hide, showScreen } from '../utils/dom.js';
 import { escapeHtml } from '../utils/formatting.js';
-import { game, ensureOpponent, openMyPrompt } from './gameState.js';
+import { game, ensureOpponent, openMyPrompt, recordMoneySpent, topSpender, spentSoFar } from './gameState.js';
 import {
   renderAuctionPanel, renderOpponents, renderMyPanel, renderMoneyChips,
   renderPaintingChoices, updateBidStatus, actorLabel, describeCard, cardTypeName,
-  clearMoveTimer, startMoveTimer, renderMovePanel,
+  clearMoveTimer, startMoveTimer, renderMovePanel, syncTutorialBidHint,
 } from './gameRenderer.js';
 import { setSelectedDiscardValue, disarmActionWatchdog } from './gameActions.js';
 import {
@@ -253,6 +253,16 @@ function showError_moveError(text) {
 // simultaneously the disgrace mechanic, that card's own effect, AND the
 // green-card rule) -- enqueueTutorialCoach's own queue shows them one
 // after another via the modal's "Next" button, never several at once.
+// Plain-language effect of each disgrace card for the tutorial's tips --
+// the engine's own card descriptions (shown in the card's ⓘ popover) are
+// written for a player who already knows the game.
+const TUTORIAL_CARD_EFFECTS = {
+  Passe: 'Passe: whoever ends up with it loses 5 points.',
+  FauxPas: 'Faux Pas: whoever ends up with it must throw away one of their paintings. '
+    + 'No paintings yet? Then the next one they win goes instead.',
+  Scandale: 'Scandale: whoever ends up with it has their final score halved.',
+};
+
 const TUTORIAL_TIPS = [
   {
     id: 'normal',
@@ -282,7 +292,7 @@ const TUTORIAL_TIPS = [
     id: (d) => `disgrace_effect_${d.card.type}`,
     kind: 'disgrace',
     matches: (d) => d.auction_type === 'disgrace',
-    text: (d) => `${cardTypeName(d.card)}: ${d.card.description}`,
+    text: (d) => TUTORIAL_CARD_EFFECTS[d.card.type] || `${cardTypeName(d.card)}: ${d.card.description}`,
   },
   {
     id: 'green',
@@ -291,6 +301,46 @@ const TUTORIAL_TIPS = [
     text: 'The 4th green card ends the game instantly — even mid-round.',
   },
 ];
+
+// Tips that follow an auction's *result* rather than its start, each at
+// most once per game (game.tutorialCoachShown, same as TUTORIAL_TIPS):
+// - the first payment: what the Spent tags are and why they matter;
+// - the first time you become the biggest spender (on a later auction, so
+//   it never stacks on top of the first one);
+// - the Faux Pas: if a bot takes it, what it means and what it would mean
+//   for you; if you take it with no paintings, that your next one goes.
+//   You taking it *with* paintings is covered by the discard prompt's own
+//   tip (see applyPlayerMove), the moment you actually have to choose.
+function maybeShowTutorialResultCoach(d) {
+  if (!game.isTutorial) return;
+  const seen = game.tutorialCoachShown;
+  const show = (id, text, kind) => {
+    if (seen[id]) return;
+    seen[id] = true;
+    enqueueTutorialCoach(text, kind);
+  };
+
+  const anyonePaid = Object.values(game.spentBy).some((v) => v > 0);
+  if (anyonePaid && !seen.spent_intro) {
+    show('spent_intro', 'The "Spent" tag on each player adds up the money they\'ve paid so far. '
+      + 'Keep an eye on it: when the game ends, whoever has the least money left is eliminated.', 'normal');
+  } else if (topSpender() === game.myUsername) {
+    show('you_spent_most', `Heads up: you've spent the most so far (${spentSoFar(game.myUsername)}). `
+      + 'If you have the least money left when the game ends, you\'re eliminated, even with the most points.', 'normal');
+  }
+
+  if (d.card && d.card.type === 'FauxPas' && d.recipient) {
+    if (d.recipient !== game.myUsername) {
+      const who = (game.opponents[d.recipient] && game.opponents[d.recipient].name) || d.recipient;
+      show('faux_pas_other', `${who} is stuck with the Faux Pas, so they must throw away one of their `
+        + 'paintings (or the next one they win, if they have none). If you ever end up with a Faux Pas, '
+        + 'you\'ll pick which of your paintings to lose.', 'disgrace');
+    } else if (!game.myStatusCards.some((c) => c.type === 'Painting')) {
+      show('faux_pas_mine_later', 'You\'re stuck with the Faux Pas, but you have no paintings yet. '
+        + 'The next painting you win will have to be thrown away.', 'disgrace');
+    }
+  }
+}
 
 // A no-op for every real game (game.isTutorial is only ever true for the
 // guided first-game room).
@@ -434,7 +484,10 @@ function applyAuctionResult(msg, isSpectator) {
     enqueueEvent(isSpectator, `Nobody wanted ${describeCard(d.card)}`, 'pass');
     logLine(`⚠️ Nobody took ${describeCard(d.card)}`, isSpectator);
   }
+  recordMoneySpent(d);
   renderOpponents(isSpectator);
+  if (!isSpectator) renderMyPanel();
+  maybeShowTutorialResultCoach(d);
 }
 
 function applyPlayerState(msg) {
@@ -481,6 +534,14 @@ function applyPlayerMove(msg) {
     bidControls.classList.add('hidden');
     discardControls.classList.remove('hidden');
     renderPaintingChoices(msg.constraints.allowed_paintings, setSelectedDiscardValue);
+    if (game.isTutorial) {
+      $('my-paintings').classList.add('tutorial-hint-pulse');
+      if (!game.tutorialCoachShown.discard_prompt) {
+        game.tutorialCoachShown.discard_prompt = true;
+        enqueueTutorialCoach('Because of the Faux Pas, you have to throw away one of your paintings now. '
+          + 'Tap the painting you\'d rather lose, then press Discard.', 'disgrace');
+      }
+    }
     // Discard prompts never carry a per-move timer (see
     // NetworkPlayer.choose_painting_to_discard — it waits indefinitely), so
     // clear out any leftover countdown from this player's last bidding turn
@@ -500,6 +561,10 @@ function applyPlayerMove(msg) {
     game.selectedBid = new Set();
     renderMoneyChips(msg.constraints.allowed_money_cards);
     updateBidStatus();
+    if (game.isTutorial && !game.tutorialCoachShown.bid_hint) {
+      game.tutorialBidHint = true;
+      syncTutorialBidHint();
+    }
   }
 }
 
