@@ -119,7 +119,7 @@ class MCTSBot(BasePlayer):
 
 
 DIFFICULTY_PRESETS = {
-    # Tuned by feel, not measurement — bot_evaluator.py (see repo root) is
+    # Tuned by feel, not measurement — scripts/bot_evaluator.py is
     # the intended tool for actually comparing these against each other and
     # adjusting the numbers.
     "easy": MCTSConfig(iterations=20, determinizations=2, exploration_constant=1.4),

@@ -1,5 +1,5 @@
 """
-Email notifications for long-running jobs (selfplay_job.py, and any later
+Email notifications for long-running jobs (scripts/selfplay_job.py, and any later
 batch job) -- so the person who started a two-day job hears about progress
 and the finish without watching logs.
 

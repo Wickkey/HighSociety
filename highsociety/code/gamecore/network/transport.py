@@ -19,7 +19,7 @@ from highsociety.code.common.logger_module.logger.logging_manager import Logging
 
 try:
     # Only needed by WebSocketTransport (web_server.py's browser path) —
-    # CLI/socket play (main.py, network_server.py) never imports this module's
+    # CLI/socket play (scripts/play_cli.py, scripts/network_server.py) never imports this module's
     # WebSocketTransport class, so keep it optional here rather than making
     # flask-sock/simple-websocket a hard dependency for every player.
     from simple_websocket import ConnectionClosed
@@ -61,7 +61,7 @@ class Transport(ABC):
 class SocketTransport(Transport):
     """
     Transport implementation over a raw TCP socket — the only Transport that
-    exists today (see network_server.py / network_client.py). Owns the
+    exists today (see scripts/network_server.py / scripts/network_client.py). Owns the
     receiver thread, message queue, and PING-based heartbeat tracking that
     used to live directly inside NetworkPlayer.
 

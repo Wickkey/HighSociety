@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-verify_replay.py
+scripts/verify_replay.py
 
 Proves stored games are reproducible using Supabase as the only source of
 truth. For a website game, the record is assembled from the regular history
@@ -11,9 +11,9 @@ and must reproduce every action, every auction's card/winner/price and the
 final standings exactly.
 
 Usage:
-    python3 verify_replay.py --source selfplay --sample 200            # random self-play games
-    python3 verify_replay.py --source selfplay --batch rl-v1 --sample 50
-    python3 verify_replay.py --source game --ids 812 813                # real website games
+    python3 -m scripts.verify_replay --source selfplay --sample 200            # random self-play games
+    python3 -m scripts.verify_replay --source selfplay --batch rl-v1 --sample 50
+    python3 -m scripts.verify_replay --source game --ids 812 813                # real website games
 Exit code is 0 only if every checked game reproduced.
 """
 import argparse

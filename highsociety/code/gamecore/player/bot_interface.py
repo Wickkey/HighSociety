@@ -8,7 +8,7 @@ class BotInterface(ABC):
     """
     The contract PlayGame relies on for whoever is sitting in a player seat.
     CLIPlayer and NetworkPlayer both satisfy it today; a bot (embedded or
-    remote-over-the-wire, see BOT_API.md) needs to satisfy it too.
+    remote-over-the-wire, see docs/BOT_API.md) needs to satisfy it too.
 
     To write an embedded bot: subclass BasePlayer (it gives you bidding/card
     bookkeeping — place_bid, withdraw_bid, add_status_card, money_left,
@@ -91,7 +91,7 @@ class BotInterface(ABC):
         The room's AuctionHistory object (see game_manager/auction_history.py)
         — an aggregated snapshot of every player's *current* state (money
         cards, status cards held, points, Faux Pas status), refreshed after
-        every turn. None if the caller (e.g. network_server.py's CLI/socket
+        every turn. None if the caller (e.g. scripts/network_server.py's CLI/socket
         path) didn't configure one for this game.
 
         This is what lets a decision be made as a pure function of "what's
@@ -153,7 +153,7 @@ class BotInterface(ABC):
         """
         Called by PlayGame to narrate everything — your own turn prompts,
         other players' turns, auction results, final standings, and more.
-        See BOT_API.md's message_type table for what you actually need to
+        See docs/BOT_API.md's message_type table for what you actually need to
         act on (PLAYER_MOVE) versus what's purely informational.
 
         You must implement this even if your bot only reacts to

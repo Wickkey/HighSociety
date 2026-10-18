@@ -3,7 +3,7 @@ import { $ } from '../utils/dom.js';
 import { ws } from '../network/websocket.js';
 
 // A CHAT message is never echoed back to its own sender over the wire (see
-// PLAYING.md) — that's a relay-layer rule to avoid double-delivery, not a
+// docs/PLAYING.md) — that's a relay-layer rule to avoid double-delivery, not a
 // reason to leave the sender's own chat log blank. Appending it locally,
 // formatted the same way an incoming one would be, keeps "did that actually
 // send?" from ever being a question.

@@ -414,7 +414,7 @@ _SCHEMA_STATEMENTS = [
     WHERE table_name = 'game_actions'
     """,
 
-    # Bot-vs-bot self-play episodes for RL training (see selfplay_job.py),
+    # Bot-vs-bot self-play episodes for RL training (see scripts/selfplay_job.py),
     # deliberately NOT written into games/player_games/ratings: thousands of
     # bot-only games there would swing the bots' own Elo, flood the
     # leaderboard's/global stats' counts, and buy nothing an episode row
@@ -443,7 +443,7 @@ _SCHEMA_STATEMENTS = [
     "CREATE INDEX IF NOT EXISTS idx_selfplay_games_batch ON selfplay_games (batch)",
     """
     INSERT INTO meta (table_name, description) VALUES
-        ('selfplay_games', 'Bot-vs-bot self-play episodes for RL training, grouped by generation batch -- kept out of games/ratings on purpose. `replay` is the same game record (seed, seats, actions, rounds, standings) game_history.fetch_game_record assembles from game_actions; see recording/game_replay.py and selfplay_job.py.')
+        ('selfplay_games', 'Bot-vs-bot self-play episodes for RL training, grouped by generation batch -- kept out of games/ratings on purpose. `replay` is the same game record (seed, seats, actions, rounds, standings) game_history.fetch_game_record assembles from game_actions; see recording/game_replay.py and scripts/selfplay_job.py.')
     ON CONFLICT (table_name) DO NOTHING
     """,
 ]
@@ -1471,7 +1471,7 @@ def _record_auction_rounds(cur, game_id: int, auction_rounds: list, player_id_by
     Populates game_rounds/round_players from `auction_rounds`
     (the same AuctionRecord.to_dict()-shaped list PlayGame.get_auction_
     history() returns) -- called once, at game-end, from data the engine
-    already built for BOT_API.md's AUCTION_RESULT feed. No live-path DB
+    already built for docs/BOT_API.md's AUCTION_RESULT feed. No live-path DB
     writes anywhere; this only ever runs after the whole game is over.
 
     `player_id_by_username`: real per-game username -> player_id (see
@@ -2031,7 +2031,7 @@ def record_finished_game_async(on_complete: Optional[Callable[[dict], None]] = N
 
 
 # ---------------------------------------------------------------------------
-# Self-play episodes (selfplay_job.py) and replay lookups (verify_replay.py).
+# Self-play episodes (scripts/selfplay_job.py) and replay lookups (scripts/verify_replay.py).
 # Unlike everything above, these RAISE on failure instead of logging and
 # returning a fail-safe default: their callers are batch jobs, where a
 # silently-swallowed write error would quietly lose data (or make a job

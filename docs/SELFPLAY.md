@@ -1,8 +1,8 @@
 # Self-play data for RL training
 
-`selfplay_job.py` plays 5-player bot-vs-bot games back to back and stores each
+`scripts/selfplay_job.py` plays 5-player bot-vs-bot games back to back and stores each
 one in Supabase until a target count (default **10,000**) is reached.
-`verify_replay.py` proves the stored games are reproducible, using the
+`scripts/verify_replay.py` proves the stored games are reproducible, using the
 database as the only source of truth.
 
 ## What gets stored
@@ -88,8 +88,8 @@ rescale from there.
 ## Checking reproducibility
 
 ```bash
-python3 verify_replay.py --source selfplay --batch rl-v1 --sample 500
-python3 verify_replay.py --source game --sample 50       # website games, rebuilt from game_actions
+python3 -m scripts.verify_replay --source selfplay --batch rl-v1 --sample 500
+python3 -m scripts.verify_replay --source game --sample 50       # website games, rebuilt from game_actions
 ```
 
 This exits non-zero if any checked game diverges.
@@ -102,5 +102,5 @@ the seat at the same moment. Only games recorded before this format (no
 ## Local run
 
 ```bash
-python3 selfplay_job.py --target-games 20 --batch scratch --bot-pool easy --workers 4
+python3 -m scripts.selfplay_job --target-games 20 --batch scratch --bot-pool easy --workers 4
 ```

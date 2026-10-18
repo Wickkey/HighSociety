@@ -4,12 +4,12 @@ HighSociety Web Server
 
 Serves the browser frontend (highsociety/web/) and hosts one game "room" per
 running process, played over WebSockets instead of raw sockets. Unlike
-network_server.py, nothing about the game (seat count, bot mix, seed) is
+scripts/network_server.py, nothing about the game (seat count, bot mix, seed) is
 configured on the command line: the first browser to open the page configures
 it, and everyone else just opens the same URL and types their name.
 
 Architecture note: this reuses the exact same engine/protocol layers
-network_server.py does — PlayGame, NetworkPlayer, NetworkSpectator,
+scripts/network_server.py does — PlayGame, NetworkPlayer, NetworkSpectator,
 network/protocol.py — completely unchanged. The only new piece is
 WebSocketTransport (network/transport.py), a second implementation of the
 existing Transport interface. See README.md's "Architecture: adding a new
@@ -60,7 +60,7 @@ app = Flask(__name__, template_folder=os.path.join(WEB_DIR, "templates"),
 # Every sock.route() connection gets these options (see flask_sock.Sock.route's
 # use of current_app.config['SOCK_SERVER_OPTIONS']) — ping_interval gives us
 # dead-connection detection for free (a missed pong flips ws.connected to
-# False), so unlike network_server.py's SocketTransport there's no need for a
+# False), so unlike scripts/network_server.py's SocketTransport there's no need for a
 # custom PING-message convention or a heartbeat-monitor thread here.
 app.config['SOCK_SERVER_OPTIONS'] = {"ping_interval": 20}
 sock = Sock(app)
@@ -541,7 +541,7 @@ threading.Thread(target=_reap_stale_rooms, daemon=True, name="RoomReaper").start
 
 
 def _is_valid_identify_ack(data: dict, game_id: str) -> bool:
-    """Same rule network_server.py's accept_players/accept_spectators use:
+    """Same rule scripts/network_server.py's accept_players/accept_spectators use:
     permissive on a missing game_id, strict on one that's present but wrong."""
     if not isinstance(data, dict) or data.get("message_type") != "IDENTIFY_ACK":
         return False
@@ -579,7 +579,7 @@ def _send(ws, game_id: str, message_type: str, prompt: str, requires_response: b
 
 def _identify(ws, game_id: str, first_prompt: str, second_prompt: str):
     """
-    Runs the two-step IDENTIFY -> IDENTIFY_ACK handshake network_server.py
+    Runs the two-step IDENTIFY -> IDENTIFY_ACK handshake scripts/network_server.py
     already uses (see accept_players/accept_spectators), just reusable for
     either prompt ordering (players: username then name; spectators: name
     then username). Returns (first_answer, second_answer), or None if the
@@ -1859,7 +1859,7 @@ def ws_player(ws):
 
 
 def _spectator_chat_listener(spectator: NetworkSpectator, room: GameRoom) -> None:
-    """Mirrors network_server.py's _spectator_chat_listener: relays a
+    """Mirrors scripts/network_server.py's _spectator_chat_listener: relays a
     spectator's CHAT to everyone (default) or spectators only."""
     while spectator.active:
         msg = spectator.transport.receive(timeout=1.0)
@@ -1899,7 +1899,7 @@ def ws_spectate(ws):
         return
 
     game_id = room.game_id
-    # Same prompt order network_server.py's accept_spectators uses (name, then username).
+    # Same prompt order scripts/network_server.py's accept_spectators uses (name, then username).
     identity = _identify(ws, game_id, "You are connected as a spectator. Enter your name:", "Enter your username:")
     if identity is None:
         return

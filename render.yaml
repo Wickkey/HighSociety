@@ -1,4 +1,4 @@
-# Render Blueprint for the RL self-play data job only (see SELFPLAY.md).
+# Render Blueprint for the RL self-play data job only (see docs/SELFPLAY.md).
 # The website itself is still configured in Render's dashboard, not here --
 # a Blueprint only manages the services it declares, so syncing this file
 # creates/updates the cron job below and leaves the web service untouched.
@@ -13,7 +13,7 @@ services:
     schedule: "0 * * * *"
     plan: pro  # 2 CPUs -- keep SELFPLAY_WORKERS equal to the plan's CPU count
     buildCommand: pip install -r requirements.txt
-    startCommand: python selfplay_job.py
+    startCommand: python -m scripts.selfplay_job
     envVars:
       - key: DATABASE_URL
         sync: false  # set in the dashboard: same Supabase URL the web service uses

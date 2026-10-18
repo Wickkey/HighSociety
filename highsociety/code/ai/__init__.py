@@ -6,8 +6,8 @@ from highsociety.code.ai.tutorial_bot import TutorialBot
 from highsociety.code.ai.bot_names import assign_bot_names
 
 # Shared name -> bot class registry, so anything that lets a user pick bots
-# by name on the command line (dev_tools/simulate_bots.py, network_server.py
-# --bots, bot_evaluator.py) stays in sync with what actually exists in this
+# by name on the command line (dev_tools/simulate_bots.py, scripts/network_server.py
+# --bots, scripts/bot_evaluator.py) stays in sync with what actually exists in this
 # package. "pass"/"greedy"/"capped" stay registered here for exactly that —
 # scripts/tuning/evaluation keep full access to the plain heuristic bots —
 # but the web lobby only ever offers "easy"/"medium"/"hard" (see
@@ -27,7 +27,7 @@ def create_bot_players(bot_mix: list[str], think_time: float = 1.5, taken_userna
     """
     Build bot instances from a list of type names (e.g. ["greedy", "greedy",
     "pass"]) — the single shared implementation for every entry point that
-    creates bots (main.py, network_server.py's --bots flag, web_server.py,
+    creates bots (scripts/play_cli.py, scripts/network_server.py's --bots flag, web_server.py,
     dev_tools/simulate_bots.py), so bot naming logic (see bot_names.py) only
     lives in one place instead of being reimplemented per caller.
 

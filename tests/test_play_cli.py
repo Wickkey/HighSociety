@@ -1,4 +1,4 @@
-from main import create_bot_players, create_players
+from scripts.play_cli import create_bot_players, create_players
 from highsociety.code.ai.pass_bot import PassBot
 from highsociety.code.ai.greedy_bot import GreedyBot
 from highsociety.code.ai.bot_names import BOT_NAME_POOL
@@ -29,7 +29,7 @@ def test_create_players_fills_bot_seats_first_and_prompts_for_the_rest(monkeypat
         prompted_indices.append(player_idx)
         return f"human{player_idx}", f"Human {player_idx}"
 
-    monkeypatch.setattr("main.get_player_details", fake_get_player_details)
+    monkeypatch.setattr("scripts.play_cli.get_player_details", fake_get_player_details)
 
     players = create_players(num_players=3, bot_mix=["greedy"])
 
@@ -41,7 +41,7 @@ def test_create_players_fills_bot_seats_first_and_prompts_for_the_rest(monkeypat
 
 
 def test_create_players_with_no_bots_prompts_for_every_seat(monkeypatch):
-    monkeypatch.setattr("main.get_player_details", lambda i: (f"human{i}", f"Human {i}"))
+    monkeypatch.setattr("scripts.play_cli.get_player_details", lambda i: (f"human{i}", f"Human {i}"))
 
     players = create_players(num_players=2)
 

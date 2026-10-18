@@ -5,7 +5,7 @@ import time
 
 import pytest
 
-from network_server import start_server, accept_players
+from scripts.network_server import start_server, accept_players
 from highsociety.code.common.utils.network_utility import send_json, receive_json
 from highsociety.code.ai.pass_bot import PassBot
 
@@ -41,7 +41,7 @@ def _free_port_pair() -> int:
 class ScriptedSocketClient:
     """
     Drives the real wire protocol over a real TCP socket, without needing a
-    terminal/stdin — used to exercise network_server.py + NetworkPlayer
+    terminal/stdin — used to exercise scripts/network_server.py + NetworkPlayer
     end-to-end. Always responds "pass" to every PLAYER_MOVE, so a whole game
     completes deterministically and quickly.
     """
@@ -276,8 +276,8 @@ def test_a_bot_pre_seeded_into_start_server_fills_a_seat_without_a_socket():
 def test_recorded_network_game_replays_identically_via_a_plain_cli_replay(tmp_path):
     """
     Cross-mode record/replay: a game actually played over real sockets is
-    recorded with network_server.py's --record, then replayed purely through
-    PlayGame + ReplayPlayer (the same mechanism main.py --replay uses) with
+    recorded with scripts/network_server.py's --record, then replayed purely through
+    PlayGame + ReplayPlayer (the same mechanism scripts/play_cli.py --replay uses) with
     no networking involved at all — replay never needs a live connection,
     since ReplayPlayer's wrapped state-holder is a plain CLIPlayer regardless
     of how the original game was played.
