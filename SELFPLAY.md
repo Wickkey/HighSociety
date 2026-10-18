@@ -15,15 +15,16 @@ Table **`selfplay_games`**: one row is one complete, replayable episode.
 | `seed` | the engine's per-game RNG seed |
 | `seat_kinds` | bot type per seat, in turn order, e.g. `["hard","easy","medium","easy","hard"]` |
 | `winner_seats` | winning seat indices (more than one on a tie, empty if nobody won) |
-| `num_rounds`, `num_decisions`, `duration_ms` | quick stats |
+| `num_rounds`, `num_decisions`, `duration_ms` | quick stats (`num_decisions` counts actions) |
 | `engine_version` | git commit the game was played on (`RENDER_GIT_COMMIT`) |
-| `replay` | the full log (JSONB). Format is documented in `highsociety/code/gamecore/recording/game_replay.py`. |
+| `replay` | the full game record (JSONB). Format is documented in `highsociety/code/gamecore/recording/game_replay.py`. |
 
-`replay` holds:
-- the realized deck order;
-- the seat order and starting seat;
-- every decision in order, keyed by seat. A bid is the actual **money cards** played, not just the total, and Faux Pas discards are included;
-- per-round winners and prices;
+`replay` is the same record a website game is rebuilt from:
+- the seed;
+- the seats in turn order;
+- `actions`, with exactly the rows and fields of the website's `game_actions` table: every bid
+  (with its **money cards**), pass, quit and Faux Pas discard, by seat, with `think_ms`;
+- per-round cards, winners and prices;
 - final standings.
 
 That is enough to rebuild every intermediate state for training.
@@ -36,8 +37,8 @@ already carry.
 Every game is replayed from its own log before it's inserted. A game that
 doesn't reproduce exactly is never stored.
 
-Real website games now also get a replay log, in **`game_replays`**
-(`game_id` → `replay`), written in the same transaction as the `games` row.
+Real website games are replayable the same way, straight from the regular history tables:
+`games.seed`, `player_games.seat`, `game_rounds` and `game_actions`.
 
 ## Running on Render
 
@@ -85,15 +86,15 @@ rescale from there.
 
 ```bash
 python3 verify_replay.py --source selfplay --batch rl-v1 --sample 500
-python3 verify_replay.py --source game --ids 812          # a real website game
+python3 verify_replay.py --source game --sample 50       # website games, rebuilt from game_actions
 ```
 
 This exits non-zero if any checked game diverges.
 
-Known limitation: a human who **disconnects** mid-game becomes inactive at an
-arbitrary moment, which no decision log can place exactly. Those games are
-stored faithfully but reported as "unsupported" rather than replayed. Bot
-games, and humans who finish or quit explicitly, replay exactly.
+Disconnects replay exactly too. The engine records a disconnect, resign or
+reconnect as an action, at a fixed checkpoint in the game, so a replay drops
+the seat at the same moment. Only games recorded before this format (no
+`games.seed`, or actions without a `seat`) are reported as "unsupported".
 
 ## Local run
 

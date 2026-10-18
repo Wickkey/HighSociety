@@ -4,20 +4,20 @@ import pytest
 
 import selfplay_job
 from highsociety.code.common.db import game_history
-from highsociety.code.gamecore.recording.game_replay import replay_game
+from highsociety.code.gamecore.recording.game_replay import replay_record
 
 
 def test_play_one_game_returns_a_verified_replay_with_seats_drawn_from_the_pool():
     episode = selfplay_job.play_one_game(seed=5, bot_pool=["greedy", "pass"], num_players=5)
-    replay = episode["replay"]
-    assert len(replay["seats"]) == 5
-    assert {p["kind"] for p in replay["players"]} <= {"greedy", "pass"}
+    record = episode["record"]
+    assert len(record["seats"]) == 5
+    assert {s["kind"] for s in record["seats"]} <= {"greedy", "pass"}
     assert episode["duration_ms"] >= 0
-    replay_game(replay)  # already verified inside play_one_game; must stay replayable afterward too
+    replay_record(record)  # already verified inside play_one_game; must stay replayable afterward too
 
 
 def test_the_same_seed_always_draws_the_same_bot_mix():
-    kinds = [[p["kind"] for p in selfplay_job.play_one_game(9, ["greedy", "pass", "capped"], 5)["replay"]["players"]]
+    kinds = [[s["kind"] for s in selfplay_job.play_one_game(9, ["greedy", "pass", "capped"], 5)["record"]["seats"]]
              for _ in range(2)]
     assert kinds[0] == kinds[1]
 

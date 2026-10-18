@@ -13,8 +13,9 @@ limit, a deploy, a crash) loses at most the last unflushed handful, and the
 next scheduled run simply picks up where it left off. Once the target is
 reached every later run exits within seconds.
 
-Every game is replayed from its own log (recording/game_replay.py) before
-it's stored -- a game that wouldn't reproduce exactly is counted as a
+Every game is replayed from its own record -- seed plus action rows, the
+same shape as the website's game_actions (recording/game_replay.py) --
+before it's stored. A game that wouldn't reproduce exactly is counted as a
 failure and never written, so every stored row is a verified, replayable
 episode.
 
@@ -52,7 +53,7 @@ from highsociety.code.common.db import game_history
 from highsociety.code.common.logger_module.logger.logging_manager import LoggingManager
 from highsociety.code.gamecore.game_manager.auction_history import AuctionHistory
 from highsociety.code.gamecore.game_manager.gameplay import PlayGame
-from highsociety.code.gamecore.recording.game_replay import replay_game
+from highsociety.code.gamecore.recording.game_replay import game_record, replay_record
 
 # Stop the whole run (rather than burn hours producing nothing) once this
 # many games have failed AND they're more than this fraction of attempts --
@@ -82,8 +83,8 @@ def _worker_init() -> None:
 
 
 def play_one_game(seed: int, bot_pool: list, num_players: int) -> dict:
-    """Plays one full game, verifies it replays exactly from its own log,
-    and returns {"replay", "duration_ms"}. Module-level (not a closure) so
+    """Plays one full game, verifies it replays exactly from its own record,
+    and returns {"record", "duration_ms"}. Module-level (not a closure) so
     ProcessPoolExecutor can pickle it. Raises if the replay diverges."""
     seat_rng = random.Random(seed)
     bot_mix = [seat_rng.choice(bot_pool) for _ in range(num_players)]
@@ -93,9 +94,9 @@ def play_one_game(seed: int, bot_pool: list, num_players: int) -> dict:
                     turn_duration=None, auction_history=AuctionHistory(), pace_events=False)
     game.play_game()
     duration_ms = int((time.perf_counter() - started) * 1000)
-    replay = game.replay_log.to_dict()
-    replay_game(replay)
-    return {"replay": replay, "duration_ms": duration_ms}
+    record = game_record(game)
+    replay_record(record)
+    return {"record": record, "duration_ms": duration_ms}
 
 
 def _engine_version() -> str:

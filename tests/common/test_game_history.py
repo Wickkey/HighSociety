@@ -417,7 +417,7 @@ def test_record_finished_game_can_mark_a_crashed_game_as_unsuccessful(database_u
             participants=[], is_finished_successfully=False,
         )
     games_insert = next(call for call in cursor.execute.call_args_list if "INSERT INTO games" in call.args[0])
-    assert games_insert.args[1][-1] is False
+    assert games_insert.args[1][-2] is False  # is_finished_successfully (seed follows it)
 
 
 def test_record_finished_game_increments_games_played_and_won_for_every_human(database_url):
@@ -678,15 +678,21 @@ def test_record_finished_game_does_not_rate_a_bot_with_unknown_difficulty(databa
     assert not any("INSERT INTO ratings" in q for q in queries)  # guest alice + unrated bot -- nobody to rate
 
 
+def _action(seq, seat, action, amount=None, cards=None, round_number=1, reason=None):
+    return {"seq": seq, "round": round_number, "seat": seat, "username": "x", "action": action, "amount": amount,
+            "cards": cards, "think_ms": 900, "reason": reason, "timestamp": "2026-01-01T00:00:00+00:00"}
+
+
 def test_record_finished_game_populates_game_rounds_round_players_and_game_actions(database_url):
     game_history._schema_ready = True
     conn, cursor = _fake_connection()
     participants = [
-        {"is_bot": False, "username": "alice", "name": "Alice", "game_username": "alice",
+        {"is_bot": False, "username": "alice", "name": "Alice", "game_username": "alice", "seat": 0,
          "points": 10, "money_left": 5, "is_winner": True, "eliminated": False},
-        {"is_bot": False, "username": "bob", "name": "Bob", "game_username": "bob",
+        {"is_bot": False, "username": "bob", "name": "Bob", "game_username": "bob", "seat": 1,
          "points": 0, "money_left": 20, "is_winner": False, "eliminated": False},
     ]
+    actions = [_action(1, 0, "bid", 5, [5]), _action(2, 1, "pass"), _action(3, 0, "discard", 3)]
     auction_rounds = [{
         "round_number": 1, "auction_type": "normal",
         "card": {"type": "Painting", "value": 5, "multiplier": 1, "is_green": False, "description": "x"},
@@ -709,19 +715,25 @@ def test_record_finished_game_populates_game_rounds_round_players_and_game_actio
             room_code="ABCDE", seats=2, bot_mix=[],
             started_at=datetime.datetime.now(datetime.timezone.utc),
             finished_at=datetime.datetime.now(datetime.timezone.utc),
-            participants=participants, auction_rounds=auction_rounds,
+            participants=participants, auction_rounds=auction_rounds, seed=77, actions=actions,
         )
 
     queries_and_params = [(call.args[0], call.args[1]) for call in cursor.execute.call_args_list]
 
+    games_params = next(p for q, p in queries_and_params if "INSERT INTO games" in q)
+    assert games_params[-1] == 77  # the seed -- with game_actions, all a replay needs
+    seats = [p[8] for q, p in queries_and_params if "INSERT INTO player_games" in q]
+    assert seats == [0, 1]
+
     card_lookup = [(q, p) for q, p in queries_and_params if "SELECT card_id FROM cards" in q]
     assert card_lookup == [("SELECT card_id FROM cards WHERE type = %s AND value = %s LIMIT 1", ("Painting", 5))]
 
-    game_id, round_number, card_id, winner_id, winning_bid, started_at, ended_at = next(
+    game_id, round_number, card_id, winner_id, winning_bid, started_at, ended_at, winner_seat = next(
         p for q, p in queries_and_params if "INSERT INTO game_rounds" in q)
     assert round_number == 1
     assert winning_bid == 5
     assert winner_id is not None  # alice's resolved player_id
+    assert winner_seat == 0
 
     # round_players/game_actions are now written as one batched multi-row
     # INSERT each (see _record_auction_rounds's own docstring on why),
@@ -734,11 +746,33 @@ def test_record_finished_game_populates_game_rounds_round_players_and_game_actio
     results = sorted(row[6] for row in round_players_rows)  # (..., result) -- index 6
     assert results == ["lost", "won"]
 
+    # One row per action_log entry, not derived from the auction events:
+    # (game_id, seq, seat, player_id, action_type, amount, cards, think_ms, reason, round, timestamp)
     game_actions_params, = [p for q, p in queries_and_params if "INSERT INTO game_actions" in q]
-    game_actions_rows = [game_actions_params[i:i + 6] for i in range(0, len(game_actions_params), 6)]
-    assert len(game_actions_rows) == 2
-    action_types = sorted(row[2] for row in game_actions_rows)  # (..., action_type, ...) -- index 2
-    assert action_types == ["BID", "PASS"]
+    rows = [game_actions_params[i:i + 11] for i in range(0, len(game_actions_params), 11)]
+    assert [(r[1], r[2], r[4], r[5], r[6], r[7]) for r in rows] == [
+        (1, 0, "BID", 5, [5], 900), (2, 1, "PASS", None, None, 900), (3, 0, "DISCARD", 3, None, 900),
+    ]
+    alice_id = rows[0][3]
+    assert alice_id is not None and rows[2][3] == alice_id and rows[1][3] not in (None, alice_id)
+
+
+def test_actions_of_a_seat_with_no_players_row_are_still_written_by_seat(database_url):
+    game_history._schema_ready = True
+    conn, cursor = _fake_connection()
+    participants = [
+        {"is_bot": True, "username": None, "name": "Bot1", "game_username": "bot1", "seat": 0,
+         "points": 1, "money_left": 5, "is_winner": True, "eliminated": False},
+    ]
+    with patch.object(game_history, "_connect", return_value=conn):
+        game_history.record_finished_game(
+            room_code="ABCDE", seats=1, bot_mix=["greedy"],
+            started_at=datetime.datetime.now(datetime.timezone.utc),
+            finished_at=datetime.datetime.now(datetime.timezone.utc),
+            participants=participants, seed=1, actions=[_action(1, 0, "pass")],
+        )
+    params, = [c.args[1] for c in cursor.execute.call_args_list if "INSERT INTO game_actions" in c.args[0]]
+    assert params[2] == 0 and params[3] is None  # seat 0, no player_id
 
 
 def test_record_finished_game_batches_round_players_and_game_actions_into_one_call_each(database_url):
@@ -753,9 +787,9 @@ def test_record_finished_game_batches_round_players_and_game_actions_into_one_ca
     game_history._schema_ready = True
     conn, cursor = _fake_connection()
     participants = [
-        {"is_bot": False, "username": "alice", "name": "Alice", "game_username": "alice",
+        {"is_bot": False, "username": "alice", "name": "Alice", "game_username": "alice", "seat": 0,
          "points": 10, "money_left": 5, "is_winner": True, "eliminated": False},
-        {"is_bot": False, "username": "bob", "name": "Bob", "game_username": "bob",
+        {"is_bot": False, "username": "bob", "name": "Bob", "game_username": "bob", "seat": 1,
          "points": 0, "money_left": 20, "is_winner": False, "eliminated": False},
     ]
     auction_rounds = [{
@@ -775,12 +809,15 @@ def test_record_finished_game_batches_round_players_and_game_actions_into_one_ca
         "starting_money": {"alice": 10, "bob": 20},
         "ending_money": {"alice": 5, "bob": 20},
     } for n in range(1, 6)]  # 5 rounds -- 10 round_players rows, 10 game_actions rows total
+    actions = [_action(2 * n - 1 + i, i, "bid" if i == 0 else "pass", 5 if i == 0 else None,
+                       [5] if i == 0 else None, round_number=n)
+               for n in range(1, 6) for i in range(2)]
     with patch.object(game_history, "_connect", return_value=conn):
         game_history.record_finished_game(
             room_code="ABCDE", seats=2, bot_mix=[],
             started_at=datetime.datetime.now(datetime.timezone.utc),
             finished_at=datetime.datetime.now(datetime.timezone.utc),
-            participants=participants, auction_rounds=auction_rounds,
+            participants=participants, auction_rounds=auction_rounds, seed=1, actions=actions,
         )
 
     queries = [call.args[0] for call in cursor.execute.call_args_list]
@@ -794,7 +831,7 @@ def test_record_finished_game_batches_round_players_and_game_actions_into_one_ca
 
     game_actions_params, = [call.args[1] for call in cursor.execute.call_args_list
                              if "INSERT INTO game_actions" in call.args[0]]
-    assert len(game_actions_params) == 5 * 2 * 6  # 5 rounds x 2 events x 6 columns
+    assert len(game_actions_params) == 5 * 2 * 11  # 5 rounds x 2 actions x 11 columns
 
 
 def test_record_finished_game_does_not_crash_when_two_same_difficulty_bots_share_a_round(database_url):
@@ -1706,25 +1743,7 @@ def test_get_rating_history_returns_rows_oldest_first(database_url):
     ]
 
 
-def test_record_finished_game_stores_the_replay_in_the_same_transaction(database_url, mock_release_connection):
-    game_history._schema_ready = True
-    conn, cursor = _fake_connection()
-    replay = {"version": 1, "seed": 42, "decisions": []}
-    with patch.object(game_history, "_connect", return_value=conn):
-        game_history.record_finished_game(
-            room_code="ABCDE", seats=2, bot_mix=[],
-            started_at=datetime.datetime.now(datetime.timezone.utc),
-            finished_at=datetime.datetime.now(datetime.timezone.utc),
-            participants=[], replay=replay,
-        )
-    replay_calls = [c for c in cursor.execute.call_args_list if "INSERT INTO game_replays" in c.args[0]]
-    assert len(replay_calls) == 1
-    game_id, version, seed, payload = replay_calls[0].args[1]
-    assert (game_id, version, seed) == (1, 1, 42)  # game_id: the games row's own RETURNING id
-    assert json.loads(payload) == replay
-
-
-def test_record_finished_game_without_a_replay_writes_no_replay_row(database_url, mock_release_connection):
+def test_no_game_actions_rows_without_an_action_log(database_url, mock_release_connection):
     game_history._schema_ready = True
     conn, cursor = _fake_connection()
     with patch.object(game_history, "_connect", return_value=conn):
@@ -1734,15 +1753,19 @@ def test_record_finished_game_without_a_replay_writes_no_replay_row(database_url
             finished_at=datetime.datetime.now(datetime.timezone.utc),
             participants=[],
         )
-    assert not any("game_replays" in c.args[0] for c in cursor.execute.call_args_list)
+    assert not any("INSERT INTO game_actions" in c.args[0] for c in cursor.execute.call_args_list)
 
 
-def _episode(seed, winner_seats=(1,)):
-    return {"duration_ms": 1234, "replay": {
+def test_schema_no_longer_creates_a_separate_replay_table():
+    assert not any("game_replays" in st for st in game_history._SCHEMA_STATEMENTS)
+
+
+def _episode(seed):
+    return {"duration_ms": 1234, "record": {
         "version": 1, "seed": seed,
-        "players": [{"username": "a", "kind": "easy"}, {"username": "b", "kind": "hard"}],
-        "seats": ["b", "a"], "rounds": [{}, {}, {}], "decisions": [{}] * 7,
-        "result": {"winner_seats": list(winner_seats)},
+        "seats": [{"seat": 1, "username": "a", "kind": "easy"}, {"seat": 0, "username": "b", "kind": "hard"}],
+        "rounds": [{}, {}, {}], "actions": [{}] * 7,
+        "standings": [{"seat": 0, "is_winner": False}, {"seat": 1, "is_winner": True}],
     }}
 
 
@@ -1756,7 +1779,7 @@ def test_insert_selfplay_games_batches_every_episode_into_one_insert(database_ur
     params = call.args[1]
     assert len(params) == 20  # 2 rows x 10 columns
     batch, seed, seat_kinds, winner_seats, num_rounds, num_decisions, duration_ms, engine, version, _ = params[:10]
-    # seat_kinds follows the realized seat order, not the pre-shuffle player list
+    # seat_kinds in seat order
     assert (batch, seed, json.loads(seat_kinds), json.loads(winner_seats)) == ("rl-v1", 1, ["hard", "easy"], [1])
     assert (num_rounds, num_decisions, duration_ms, engine, version) == (3, 7, 1234, "abc", 1)
 
@@ -1775,12 +1798,12 @@ def test_selfplay_helpers_refuse_to_run_without_a_database(no_database_url):
         game_history.count_selfplay_games("rl-v1")
 
 
-def test_fetch_replays_samples_within_a_batch(database_url, mock_release_connection):
+def test_fetch_selfplay_records_samples_within_a_batch(database_url, mock_release_connection):
     game_history._schema_ready = True
     conn, cursor = _fake_connection()
     cursor.fetchall.return_value = [(3, {"version": 1})]
     with patch.object(game_history, "_connect", return_value=conn):
-        rows = game_history.fetch_replays("selfplay", batch="rl-v1", sample=5)
+        rows = game_history.fetch_selfplay_records(batch="rl-v1", sample=5)
     assert rows == [(3, {"version": 1})]
     query, params = cursor.execute.call_args.args
     assert "FROM selfplay_games" in query and "batch = %s" in query and "random()" in query

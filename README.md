@@ -127,11 +127,20 @@ A database write happening slowly or failing outright never affects gameplay —
 fire-and-forget on a background thread after a game has already fully finished (see
 `record_finished_game_async`).
 
-Each finished game also gets a self-contained replay log in `game_replays`: the seed, the realized
-deck and seat order, and every decision by seat. That log alone rebuilds the game move for move
-(see `highsociety/code/gamecore/recording/game_replay.py`). For bulk bot-vs-bot self-play data
-(RL training), stored in its own `selfplay_games` table and run as a Render cron job, see
-[SELFPLAY.md](SELFPLAY.md).
+Every finished game is fully replayable from these tables alone. `games.seed` fixes the deck order
+and starting player, `player_games.seat` the turn order, and `game_actions` is the complete,
+ordered action log. Each row records:
+
+- its position (`seq`) and seat;
+- the action: a bid with the money cards behind it, a pass, fold or quit, a Faux Pas discard, or a
+  disconnect, resign or reconnect;
+- whether a timeout or a disconnect forced it (`reason`);
+- how long the player took to decide (`think_ms`).
+
+`python3 verify_replay.py --source game --sample 50` rebuilds stored games from those rows and
+checks every action and result reproduces. See `highsociety/code/gamecore/recording/game_replay.py`.
+For bulk bot-vs-bot self-play data (RL training), stored in its own `selfplay_games` table in the
+same format and run as a Render cron job, see [SELFPLAY.md](SELFPLAY.md).
 
 ## Analytics (optional)
 

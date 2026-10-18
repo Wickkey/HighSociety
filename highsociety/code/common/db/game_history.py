@@ -374,27 +374,54 @@ _SCHEMA_STATEMENTS = [
     """,
     "CREATE INDEX IF NOT EXISTS idx_game_actions_game_id ON game_actions (game_id)",
 
-    # The one table that makes a finished game reproducible from the
-    # database alone -- see recording/game_replay.py's module docstring for
-    # the audit of why game_rounds/round_players/game_actions above can't
-    # (no seed, no seat order, same-difficulty bots sharing a player_id,
-    # bid amounts without the money cards behind them, no Faux Pas
-    # discards). One self-contained JSON document per game, keyed by seat;
-    # replay_game() rebuilds and verifies it.
+    # What makes a finished game replayable from these tables alone (see
+    # recording/game_replay.py): the engine's seed (deck order and starting
+    # player), each seat's turn order, and game_actions as the complete,
+    # ordered action log -- every bid with the money cards behind it, every
+    # pass/quit (and whether a timeout or disconnect forced it), every Faux
+    # Pas discard, and every disconnect/reconnect. `seq` is the action's
+    # position in the game; `think_ms` how long the player took to decide.
+    # player_id is nullable now so a seat with no players row (a bot
+    # without a roster identity) still has its actions recorded, by seat.
+    "ALTER TABLE games ADD COLUMN IF NOT EXISTS seed BIGINT",
+    # Final points aren't always whole -- a Scandale halves them (1.5) --
+    # but these two columns were INTEGER, so Postgres silently rounded
+    # every halved score (caught by replaying a stored game). Widened once;
+    # the guard keeps every later startup from re-taking the table lock.
     """
-    CREATE TABLE IF NOT EXISTS game_replays (
-        game_id INTEGER PRIMARY KEY REFERENCES games(id) ON DELETE CASCADE,
-        format_version INTEGER NOT NULL,
-        seed BIGINT NOT NULL,
-        replay JSONB NOT NULL
-    )
+    DO $$ BEGIN
+        IF (SELECT data_type FROM information_schema.columns
+            WHERE table_name = 'player_games' AND column_name = 'points') = 'integer' THEN
+            ALTER TABLE player_games ALTER COLUMN points TYPE DOUBLE PRECISION;
+        END IF;
+        IF (SELECT data_type FROM information_schema.columns
+            WHERE table_name = 'game_results' AND column_name = 'final_score') = 'integer' THEN
+            ALTER TABLE game_results ALTER COLUMN final_score TYPE DOUBLE PRECISION;
+        END IF;
+    END $$
+    """,
+    "ALTER TABLE player_games ADD COLUMN IF NOT EXISTS seat INTEGER",
+    "ALTER TABLE game_rounds ADD COLUMN IF NOT EXISTS winner_seat INTEGER",
+    "ALTER TABLE game_actions ADD COLUMN IF NOT EXISTS seq INTEGER",
+    "ALTER TABLE game_actions ADD COLUMN IF NOT EXISTS seat INTEGER",
+    "ALTER TABLE game_actions ADD COLUMN IF NOT EXISTS cards INTEGER[]",
+    "ALTER TABLE game_actions ADD COLUMN IF NOT EXISTS think_ms INTEGER",
+    "ALTER TABLE game_actions ADD COLUMN IF NOT EXISTS reason TEXT",
+    "ALTER TABLE game_actions ALTER COLUMN player_id DROP NOT NULL",
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_game_actions_game_seq ON game_actions (game_id, seq)",
+    """
+    UPDATE meta SET description = 'Every action of a game in order (seq): bid (amount + money cards), pass/fold/quit (reason: timeout/disconnected when forced), discard (Faux Pas, amount = painting value), disconnect/resign/reconnect (amount = engine liveness check), with seat and think_ms. With games.seed, the complete record a game is replayed from -- see recording/game_replay.py.'
+    WHERE table_name = 'game_actions'
     """,
 
     # Bot-vs-bot self-play episodes for RL training (see selfplay_job.py),
     # deliberately NOT written into games/player_games/ratings: thousands of
     # bot-only games there would swing the bots' own Elo, flood the
     # leaderboard's/global stats' counts, and buy nothing an episode row
-    # doesn't already carry. `batch` names one generation run (bot pool,
+    # doesn't already carry. `replay` holds the game record
+    # (recording/game_replay.py) -- its "actions" are exactly game_actions'
+    # rows, so website and self-play games share one format; num_decisions
+    # counts those actions. `batch` names one generation run (bot pool,
     # engine version, target count) so a future run with different settings
     # never gets mixed into an earlier one's dataset.
     """
@@ -416,8 +443,7 @@ _SCHEMA_STATEMENTS = [
     "CREATE INDEX IF NOT EXISTS idx_selfplay_games_batch ON selfplay_games (batch)",
     """
     INSERT INTO meta (table_name, description) VALUES
-        ('game_replays', 'One self-contained replay log per game (seed, realized deck/seat order, every decision by seat) -- enough to rebuild and verify the game from this row alone; see recording/game_replay.py.'),
-        ('selfplay_games', 'Bot-vs-bot self-play episodes for RL training, one replay log per row, grouped by generation batch -- kept out of games/ratings on purpose; see selfplay_job.py.')
+        ('selfplay_games', 'Bot-vs-bot self-play episodes for RL training, grouped by generation batch -- kept out of games/ratings on purpose. `replay` is the same game record (seed, seats, actions, rounds, standings) game_history.fetch_game_record assembles from game_actions; see recording/game_replay.py and selfplay_job.py.')
     ON CONFLICT (table_name) DO NOTHING
     """,
 ]
@@ -1420,9 +1446,10 @@ def rename_player(old_username: str, new_username: str) -> bool:
             _release_connection(conn)
 
 
-def _record_auction_rounds(cur, game_id: int, auction_rounds: list, player_id_by_username: dict) -> None:
+def _record_auction_rounds(cur, game_id: int, auction_rounds: list, player_id_by_username: dict,
+                           seat_by_username: Optional[dict] = None) -> None:
     """
-    Populates game_rounds/round_players/game_actions from `auction_rounds`
+    Populates game_rounds/round_players from `auction_rounds`
     (the same AuctionRecord.to_dict()-shaped list PlayGame.get_auction_
     history() returns) -- called once, at game-end, from data the engine
     already built for BOT_API.md's AUCTION_RESULT feed. No live-path DB
@@ -1456,10 +1483,10 @@ def _record_auction_rounds(cur, game_id: int, auction_rounds: list, player_id_by
 
     # This SELECT stays one-per-round (not batched) -- there are only ever
     # as many rounds as cards in the deck (a couple dozen at most), so this
-    # was never the source of the real slowness; the round_players/
-    # game_actions writes below, one of which fires per player per round
-    # and the other per logged action per round, are what multiply into
-    # 100+ round trips for an ordinary game.
+    # was never the source of the real slowness; the round_players writes
+    # below (one per player per round) and game_actions' (one per action,
+    # see _record_actions) are what multiplied into 100+ round trips for an
+    # ordinary game before they were batched.
     round_rows = []
     for record in auction_rounds:
         card = record["card"]
@@ -1482,8 +1509,9 @@ def _record_auction_rounds(cur, game_id: int, auction_rounds: list, player_id_by
         winning_bid = None
         if recipient and record.get("auction_type") == "normal":
             winning_bid = (record.get("money_spent") or {}).get(recipient)
+        winner_seat = (seat_by_username or {}).get(recipient) if recipient else None
         round_rows.append((game_id, record["round_number"], card_id, winner_id, winning_bid,
-                            record.get("started_at"), record.get("ended_at")))
+                            record.get("started_at"), record.get("ended_at"), winner_seat))
 
     # One INSERT for every round's own row, in one round trip. Postgres
     # returns RETURNING rows in the same order as the VALUES list for a
@@ -1495,8 +1523,9 @@ def _record_auction_rounds(cur, game_id: int, auction_rounds: list, player_id_by
     # infrastructure needs to change for this.
     cur.execute(
         f"""
-        INSERT INTO game_rounds (game_id, round_number, card_id, winner_id, winning_bid, started_at, ended_at)
-        VALUES {_values_placeholder(len(round_rows), 7)}
+        INSERT INTO game_rounds (game_id, round_number, card_id, winner_id, winning_bid, started_at, ended_at,
+                                 winner_seat)
+        VALUES {_values_placeholder(len(round_rows), 8)}
         RETURNING id
         """,
         _flatten(round_rows),
@@ -1504,7 +1533,6 @@ def _record_auction_rounds(cur, game_id: int, auction_rounds: list, player_id_by
     round_ids = [cur.fetchone()[0] for _ in round_rows]
 
     round_player_rows = []
-    action_rows = []
     for record, round_id in zip(auction_rounds, round_ids):
         recipient = record.get("recipient")
         starting_money = record.get("starting_money") or {}
@@ -1517,13 +1545,6 @@ def _record_auction_rounds(cur, game_id: int, auction_rounds: list, player_id_by
             round_player_rows.append((game_id, round_id, player_id, starting_money.get(username),
                                        ending_money.get(username), money_spent.get(username),
                                        "won" if username == recipient else "lost"))
-
-        for event in record.get("events") or []:
-            player_id = player_id_by_username.get(event["player"])
-            if player_id is None:
-                continue
-            action_rows.append((game_id, player_id, event["action"].upper(), event.get("amount"),
-                                 record["round_number"], event.get("timestamp")))
 
     if round_player_rows:
         # Two bot seats of the same difficulty share one player_id (the
@@ -1547,14 +1568,28 @@ def _record_auction_rounds(cur, game_id: int, auction_rounds: list, player_id_by
             _flatten(round_player_rows),
         )
 
-    if action_rows:
-        cur.execute(
-            f"""
-            INSERT INTO game_actions (game_id, player_id, action_type, amount, round, timestamp)
-            VALUES {_values_placeholder(len(action_rows), 6)}
-            """,
-            _flatten(action_rows),
-        )
+
+
+def _record_actions(cur, game_id: int, actions: list, player_id_by_seat: dict) -> None:
+    """
+    One game_actions row per entry of PlayGame.action_log, in one batched
+    INSERT (see _record_auction_rounds' docstring on why batching matters
+    against Supabase). Keyed by seat; player_id rides along for joins and
+    is NULL for a seat with no players row.
+    """
+    rows = [
+        (game_id, a["seq"], a["seat"], player_id_by_seat.get(a["seat"]), a["action"].upper(), a.get("amount"),
+         a.get("cards"), a.get("think_ms"), a.get("reason"), a["round"], a["timestamp"])
+        for a in actions
+    ]
+    cur.execute(
+        f"""
+        INSERT INTO game_actions (game_id, seq, seat, player_id, action_type, amount, cards, think_ms, reason,
+                                  round, timestamp)
+        VALUES {_values_placeholder(len(rows), 11)}
+        """,
+        _flatten(rows),
+    )
 
 
 def _values_placeholder(num_rows: int, num_columns: int) -> str:
@@ -1578,7 +1613,7 @@ def record_finished_game(*, room_code: str, seats: int, bot_mix: list,
                           host_username: Optional[str] = None, time_control: Optional[int] = None,
                           is_finished_successfully: bool = True,
                           auction_rounds: Optional[list] = None,
-                          replay: Optional[dict] = None) -> dict:
+                          seed: Optional[int] = None, actions: Optional[list] = None) -> dict:
     """
     Returns {rating_key: {"old_rating", "new_rating", "rating_change"}} for
     every participant whose rating actually changed this game (a human's
@@ -1652,13 +1687,16 @@ def record_finished_game(*, room_code: str, seats: int, bot_mix: list,
 
     `auction_rounds`: the same list PlayGame.get_auction_history() returns
     (each entry AuctionRecord.to_dict()-shaped) -- populates game_rounds/
-    round_players/game_actions. None/empty (the default, for any caller
+    round_players. None/empty (the default, for any caller
     that predates this or a crashed game with no history) just skips that
     entirely; nothing else here depends on it.
 
-    `replay`: PlayGame.replay_log.to_dict() -- written to game_replays in
-    this same transaction, so a game row never exists without the replay
-    that makes it reproducible (or vice versa). None skips it.
+    `seed` (PlayGame.seed) and `actions` (PlayGame.action_log): what makes
+    the game replayable from the database -- seed goes on the games row,
+    actions become game_actions rows (one per action, in order). Each
+    participant's "seat" (its index in PlayGame.players) lands on
+    player_games and keys every action. Without `actions`, no game_actions
+    rows are written.
     """
     elo_changes: dict = {}
     if not is_configured():
@@ -1685,20 +1723,14 @@ def record_finished_game(*, room_code: str, seats: int, bot_mix: list,
             cur.execute(
                 """
                 INSERT INTO games (room_code, seats, started_at, finished_at,
-                                    host_player_id, time_control, is_finished_successfully)
-                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                                    host_player_id, time_control, is_finished_successfully, seed)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING id
                 """,
                 (room_code, seats, started_at, finished_at,
-                 host_player_id, time_control, is_finished_successfully),
+                 host_player_id, time_control, is_finished_successfully, seed),
             )
             game_id = cur.fetchone()[0]
-
-            if replay is not None:
-                cur.execute(
-                    "INSERT INTO game_replays (game_id, format_version, seed, replay) VALUES (%s, %s, %s, %s::jsonb)",
-                    (game_id, replay["version"], replay["seed"], json.dumps(replay)),
-                )
 
             # Mirrors PlayGame's own win rule (gameplay.py's
             # final_standings/winners computation), NOT a plain points
@@ -1785,11 +1817,11 @@ def record_finished_game(*, room_code: str, seats: int, bot_mix: list,
                 cur.execute(
                     """
                     INSERT INTO player_games
-                        (game_id, player_id, bot_name, points, money_left, is_winner, eliminated, placement)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                        (game_id, player_id, bot_name, points, money_left, is_winner, eliminated, placement, seat)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                     """,
                     (game_id, player_id, bot_name, p["points"], p["money_left"],
-                     p["is_winner"], p["eliminated"], placement_by_index[index]),
+                     p["is_winner"], p["eliminated"], placement_by_index[index], p.get("seat")),
                 )
 
                 if player_id is not None:
@@ -1919,8 +1951,15 @@ def record_finished_game(*, room_code: str, seats: int, bot_mix: list,
                 (winner_player_id, *seat_columns, game_id),
             )
 
+            seat_by_game_username = {p["game_username"]: p["seat"] for p in participants
+                                     if p.get("game_username") is not None and p.get("seat") is not None}
             if auction_rounds:
-                _record_auction_rounds(cur, game_id, auction_rounds, player_id_by_game_username)
+                _record_auction_rounds(cur, game_id, auction_rounds, player_id_by_game_username,
+                                       seat_by_game_username)
+            if actions:
+                player_id_by_seat = {seat: player_id_by_game_username.get(u)
+                                     for u, seat in seat_by_game_username.items()}
+                _record_actions(cur, game_id, actions, player_id_by_seat)
     except Exception as e:  # noqa: BLE001 — see record_finished_game_async's docstring
         LoggingManager.warning(f"game_history.record_finished_game failed: {e}")
         return {}
@@ -2010,21 +2049,21 @@ def count_selfplay_games(batch: str) -> int:
 
 
 def insert_selfplay_games(batch: str, episodes: list, engine_version: Optional[str] = None) -> None:
-    """One multi-row INSERT for a whole flush of finished episodes (each a
-    PlayGame.replay_log.to_dict() plus "duration_ms") -- see
-    _record_auction_rounds' docstring on why per-row round trips to
+    """One multi-row INSERT for a whole flush of finished episodes (each
+    {"record": recording/game_replay.game_record(...), "duration_ms"}) --
+    see _record_auction_rounds' docstring on why per-row round trips to
     Supabase are worth avoiding."""
     if not episodes:
         return
     _require_schema()
     rows = []
     for ep in episodes:
-        replay = ep["replay"]
-        kind_of = {p["username"]: p["kind"] for p in replay["players"]}
-        rows.append((batch, replay["seed"], json.dumps([kind_of[u] for u in replay["seats"]]),
-                     json.dumps(replay["result"]["winner_seats"]), len(replay["rounds"]),
-                     len(replay["decisions"]), ep["duration_ms"], engine_version, replay["version"],
-                     json.dumps(replay)))
+        record = ep["record"]
+        seats = sorted(record["seats"], key=lambda s: s["seat"])
+        rows.append((batch, record["seed"], json.dumps([s["kind"] for s in seats]),
+                     json.dumps(sorted(s["seat"] for s in record["standings"] if s["is_winner"])),
+                     len(record["rounds"]), len(record["actions"]), ep["duration_ms"], engine_version,
+                     record["version"], json.dumps(record)))
     row_placeholder = "(%s, %s, %s::jsonb, %s::jsonb, %s, %s, %s, %s, %s, %s::jsonb)"
     conn = _connect()
     try:
@@ -2039,33 +2078,22 @@ def insert_selfplay_games(batch: str, episodes: list, engine_version: Optional[s
         _release_connection(conn)
 
 
-def fetch_replays(source: str, ids: Optional[list] = None, batch: Optional[str] = None,
-                  sample: Optional[int] = None) -> list:
-    """
-    [(id, replay_dict), ...] straight from the database -- the source of
-    truth verify_replay.py checks against. `source` is "selfplay"
-    (selfplay_games.id) or "game" (game_replays.game_id). Either explicit
-    `ids`, or a random `sample` of that many rows (optionally within one
-    self-play `batch`).
-    """
+def fetch_selfplay_records(ids: Optional[list] = None, batch: Optional[str] = None,
+                           sample: Optional[int] = None) -> list:
+    """[(selfplay_games.id, game record), ...] -- explicit `ids`, or a random
+    `sample` of that many (optionally within one `batch`), else all."""
     _require_schema()
-    if source == "selfplay":
-        table, id_col = "selfplay_games", "id"
-    elif source == "game":
-        table, id_col = "game_replays", "game_id"
-    else:
-        raise ValueError(f"unknown replay source {source!r}")
     where, params = [], []
     if ids:
-        where.append(f"{id_col} = ANY(%s)")
+        where.append("id = ANY(%s)")
         params.append(list(ids))
-    if batch is not None and source == "selfplay":
+    if batch is not None:
         where.append("batch = %s")
         params.append(batch)
-    query = f"SELECT {id_col}, replay FROM {table}"
+    query = "SELECT id, replay FROM selfplay_games"
     if where:
         query += " WHERE " + " AND ".join(where)
-    query += " ORDER BY random() LIMIT %s" if sample else f" ORDER BY {id_col}"
+    query += " ORDER BY random() LIMIT %s" if sample else " ORDER BY id"
     if sample:
         params.append(sample)
     conn = _connect()
@@ -2073,5 +2101,95 @@ def fetch_replays(source: str, ids: Optional[list] = None, batch: Optional[str] 
         with conn, conn.cursor() as cur:
             cur.execute(query, params)
             return cur.fetchall()
+    finally:
+        _release_connection(conn)
+
+
+def assemble_game_record(seed: Optional[int], seat_rows: list, round_rows: list, action_rows: list) -> dict:
+    """
+    The replayable game record (recording/game_replay.py) built from the
+    history tables' own rows -- shared by fetch_game_records and tests, so
+    "what the database holds" and "what gets replayed" are one code path.
+
+    seat_rows:   (seat, username, name, is_bot, difficulty, points, money_left, is_winner, eliminated)
+                 -- player_games, difficulty from the bot's `bots` row (None for a human or no identity)
+    round_rows:  (round_number, card_type, card_value, winner_seat, winning_bid)             -- game_rounds
+    action_rows: (seq, round, seat, action_type, amount, cards, think_ms, reason, timestamp) -- game_actions
+    """
+    from highsociety.code.gamecore.recording.game_replay import GAME_RECORD_VERSION
+
+    seats, standings = [], []
+    for seat, username, name, is_bot, difficulty, points, money_left, is_winner, eliminated in sorted(
+            seat_rows, key=lambda r: (r[0] is None, r[0])):
+        kind = difficulty or ("bot" if is_bot else "human")
+        seats.append({"seat": seat, "username": username, "name": name, "kind": kind})
+        standings.append({"seat": seat, "points": points, "money_left": money_left,
+                          "is_winner": is_winner, "eliminated": eliminated})
+    rounds = [{"round": n, "card": {"type": t, "value": v}, "recipient_seat": ws, "price": price}
+              for n, t, v, ws, price in round_rows]
+    actions = [{"seq": seq, "round": rnd, "seat": seat, "action": action_type.lower(), "amount": amount,
+                "cards": list(cards) if cards is not None else None, "think_ms": think_ms, "reason": reason,
+                "timestamp": ts.isoformat() if hasattr(ts, "isoformat") else ts}
+               for seq, rnd, seat, action_type, amount, cards, think_ms, reason, ts in action_rows]
+    return {"version": GAME_RECORD_VERSION, "seed": seed, "settlement": "ForfeitSettlement",
+            "seats": seats, "actions": actions, "rounds": rounds, "standings": standings}
+
+
+def fetch_game_records(ids: Optional[list] = None, sample: Optional[int] = None) -> list:
+    """
+    [(game_id, game record), ...] assembled from the regular history tables
+    alone -- games.seed, player_games (seat, final standing), game_rounds
+    (card, winner_seat, winning_bid) and game_actions (every action, by
+    seq). This is the record recording/game_replay.replay_record rebuilds
+    and verifies, so it proves those tables are a complete source of truth.
+    Explicit `ids`, or a random `sample` of games that have a seed.
+    """
+    _require_schema()
+    conn = _connect()
+    try:
+        with conn, conn.cursor() as cur:
+            if ids:
+                game_ids = list(ids)
+            else:
+                cur.execute("SELECT id FROM games WHERE seed IS NOT NULL ORDER BY random() LIMIT %s",
+                            (sample or 20,))
+                game_ids = [r[0] for r in cur.fetchall()]
+            records = []
+            for game_id in game_ids:
+                cur.execute("SELECT seed FROM games WHERE id = %s", (game_id,))
+                row = cur.fetchone()
+                if row is None:
+                    continue
+                cur.execute(
+                    """
+                    SELECT pg.seat, COALESCE(p.username, pg.bot_name), COALESCE(pg.bot_name, p.display_name),
+                           pg.bot_name IS NOT NULL, b.difficulty,
+                           pg.points, pg.money_left, pg.is_winner, pg.eliminated
+                    FROM player_games pg
+                    LEFT JOIN players p ON p.id = pg.player_id
+                    LEFT JOIN bots b ON b.player_id = pg.player_id
+                    WHERE pg.game_id = %s
+                    """,
+                    (game_id,),
+                )
+                seat_rows = cur.fetchall()
+                cur.execute(
+                    """
+                    SELECT gr.round_number, c.type, c.value, gr.winner_seat, gr.winning_bid
+                    FROM game_rounds gr LEFT JOIN cards c ON c.card_id = gr.card_id
+                    WHERE gr.game_id = %s ORDER BY gr.round_number
+                    """,
+                    (game_id,),
+                )
+                round_rows = cur.fetchall()
+                cur.execute(
+                    """
+                    SELECT seq, round, seat, action_type, amount, cards, think_ms, reason, timestamp
+                    FROM game_actions WHERE game_id = %s ORDER BY seq
+                    """,
+                    (game_id,),
+                )
+                records.append((game_id, assemble_game_record(row[0], seat_rows, round_rows, cur.fetchall())))
+            return records
     finally:
         _release_connection(conn)

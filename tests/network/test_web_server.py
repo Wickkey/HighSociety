@@ -11,7 +11,7 @@ from highsociety.code.ai.tutorial_bot import TutorialBot
 from highsociety.code.common import matchmaking
 from highsociety.code.common.db import game_history
 from highsociety.code.gamecore.card_manager.money_card_manager import MoneyCardManager
-from highsociety.code.gamecore.recording.game_replay import replay_game
+from highsociety.code.gamecore.recording.game_replay import replay_record
 
 # CLI/socket play has zero third-party dependencies (see README.md); only the
 # web path needs flask/flask-sock installed (requirements.txt). Skip this
@@ -661,10 +661,11 @@ def test_finished_game_is_recorded_when_a_database_is_configured(running_web_ser
     player.close()
 
 
-def test_finished_web_game_hands_game_history_a_replay_that_reproduces_it(running_web_server, monkeypatch):
-    """The whole point of game_replays: a real room (a human over a real
-    WebSocket + a bot) must produce a log that rebuilds the identical game
-    with nothing else -- checked here by actually replaying it."""
+def test_a_finished_web_game_is_replayable_from_what_game_history_stores(running_web_server, monkeypatch):
+    """game_actions is the source of truth: a real room (a human over a real
+    WebSocket + bots) must hand game_history exactly the rows -- seed,
+    seats, rounds, actions -- that rebuild the identical game with nothing
+    else. Assembled here the same way fetch_game_records reads them back."""
     port = running_web_server
     monkeypatch.setenv("DATABASE_URL", "postgresql://user:pass@localhost/testdb")
     captured = {}
@@ -681,14 +682,24 @@ def test_finished_web_game_hands_game_history_a_replay_that_reproduces_it(runnin
 
     room = web_server._rooms[room_code]
     deadline = time.time() + 30
-    while time.time() < deadline and "replay" not in captured:
+    while time.time() < deadline and "actions" not in captured:
         threading.Event().wait(0.2)
     player.close()
 
-    replay = json.loads(json.dumps(captured["replay"]))  # what a JSONB round trip hands back
-    assert replay["seed"] == 7
-    assert {p["kind"] for p in replay["players"]} == {"human", "greedy", "capped"}
-    replay_game(replay)
+    assert captured["seed"] == 7
+    stored = json.loads(json.dumps(captured, default=str))  # what a database round trip hands back
+    seat_of = {p["game_username"]: p["seat"] for p in stored["participants"]}
+    seat_rows = [(p["seat"], p["username"] or p["name"], p["name"], p["is_bot"], None, p["points"],
+                  p["money_left"], p["is_winner"], p["eliminated"]) for p in stored["participants"]]
+    round_rows = [(r["round_number"], r["card"]["type"], r["card"]["value"],
+                   seat_of.get(r["recipient"]) if r["recipient"] else None,
+                   r["money_spent"].get(r["recipient"]) if r["recipient"] and r["auction_type"] == "normal" else None)
+                  for r in stored["auction_rounds"]]
+    action_rows = [(a["seq"], a["round"], a["seat"], a["action"].upper(), a["amount"], a["cards"], a["think_ms"],
+                    a["reason"], a["timestamp"]) for a in stored["actions"]]
+    record = game_history.assemble_game_record(stored["seed"], seat_rows, round_rows, action_rows)
+    assert {s["kind"] for s in record["seats"]} == {"human", "bot"}
+    replay_record(record)
     assert room.state == "finished"
 
 

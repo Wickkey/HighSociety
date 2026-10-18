@@ -397,6 +397,9 @@ def _record_game_history(room: "GameRoom", game: PlayGame, started_at: datetime.
             # events/recipients (which always name the real username) back
             # to a resolved player_id; never itself persisted.
             "game_username": player.username,
+            # Turn order -- keys this seat's game_actions rows (see
+            # game_history.record_finished_game's `actions`).
+            "seat": game.players.index(player),
         })
     auction_rounds = game.get_auction_history()
     achievement_unlocks = achievements.detect_per_game_achievements(
@@ -421,7 +424,8 @@ def _record_game_history(room: "GameRoom", game: PlayGame, started_at: datetime.
         started_at=started_at,
         achievement_unlocks=achievement_unlocks,
         auction_rounds=auction_rounds,
-        replay=game.replay_log.to_dict(),
+        seed=game.seed,
+        actions=game.action_log,
         finished_at=datetime.datetime.now(datetime.timezone.utc),
         participants=participants,
         host_username=room.host_username,
