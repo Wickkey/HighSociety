@@ -249,6 +249,20 @@
 .account-elo-hero { display: flex; align-items: baseline; gap: 0.4rem; margin-top: 0.15rem; }
 .account-elo-value { font-size: 1.8rem; font-weight: 800; color: var(--accent-strong); line-height: 1; }
 .account-elo-label { font-size: 0.78rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+/* A bot profile's fixed difficulty ("Easy bot"), right under its name --
+   see playerProfile.js. Same quiet pill weight as the accent-soft chips
+   elsewhere, so it reads as a label, not a button. */
+.profile-bot-tag {
+  display: inline-block;
+  margin-top: 0.2rem;
+  padding: 0.15rem 0.55rem;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+}
 /* "Player since" / "Last played" -- see get_player_profile_stats' own
    created_at/last_seen_at. Shown as a quiet inline pair rather than two
    more stat cards -- this is context about the account, not a

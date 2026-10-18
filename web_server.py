@@ -35,7 +35,7 @@ from flask_sock import Sock
 from highsociety.code.ai import BOT_TYPES, create_bot_players, create_tutorial_bots
 from highsociety.code.ai.mcts import decision_service
 from highsociety.code.ai.mcts.worker_pool_decision_service import WorkerPoolBotDecisionService
-from highsociety.code.common import achievements, matchmaking
+from highsociety.code.common import achievements, bot_roster, matchmaking
 from highsociety.code.common.db import game_history
 from highsociety.code.common.guest_username import generate_guest_username
 from highsociety.code.common.logger_module.logger.logging_manager import LoggingManager, LogType
@@ -250,7 +250,11 @@ class GameRoom:
 
     def joined_summary(self) -> list[dict]:
         return [
-            {"username": p.username, "name": p.name, "is_bot": not isinstance(p, NetworkPlayer)}
+            # difficulty: "easy"/"medium"/"hard" for a difficulty-preset
+            # bot (each name has a fixed one, see common/bot_roster.py),
+            # None for a human or a heuristic bot.
+            {"username": p.username, "name": p.name, "is_bot": not isinstance(p, NetworkPlayer),
+             "difficulty": getattr(p, "difficulty", None)}
             for p in self.players
         ]
 
@@ -393,6 +397,9 @@ def _record_game_history(room: "GameRoom", game: PlayGame, started_at: datetime.
             # events/recipients (which always name the real username) back
             # to a resolved player_id; never itself persisted.
             "game_username": player.username,
+            # Turn order -- keys this seat's game_actions rows (see
+            # game_history.record_finished_game's `actions`).
+            "seat": game.players.index(player),
         })
     auction_rounds = game.get_auction_history()
     achievement_unlocks = achievements.detect_per_game_achievements(
@@ -417,6 +424,8 @@ def _record_game_history(room: "GameRoom", game: PlayGame, started_at: datetime.
         started_at=started_at,
         achievement_unlocks=achievement_unlocks,
         auction_rounds=auction_rounds,
+        seed=game.seed,
+        actions=game.action_log,
         finished_at=datetime.datetime.now(datetime.timezone.utc),
         participants=participants,
         host_username=room.host_username,
@@ -873,31 +882,38 @@ def api_achievements():
 
 
 
-# The 3 reserved per-difficulty bot identities (see game_history.py's own
-# schema comment for `players`/`bots`) get a public profile too -- real
-# aggregate stats already exist for them (bots are real rated
-# participants, see record_finished_game's docstring), they just need a
-# friendlier display name than the internal "__bot_easy__" username and
-# a bit of flavor text in place of the "player since"/"last played" meta
-# a human profile shows (both would just read as "since the schema was
-# created", which is meaningless for a shared identity that never
-# actually "joined"). Deliberately presentation-only content, kept here
-# rather than in game_history.py, which stays a plain persistence layer
-# with no opinion on bio copy.
+# Bot identities get a public profile too -- real aggregate stats already
+# exist for them (bots are real rated participants, see
+# record_finished_game's docstring), they just need a friendlier display
+# name than the internal "__bot_ziggy__" username and a bit of flavor text
+# in place of the "player since"/"last played" meta a human profile shows
+# (both would just read as "since the schema was created", which is
+# meaningless for a bot that never actually "joined"). Every named bot
+# comes from common/bot_roster.py (its own bio, fixed difficulty); the 3
+# legacy per-difficulty identities hold the games recorded before bots had
+# names, and are labeled as such.
 BOT_PROFILES = {
+    bot_roster.roster_username(b): {"display_name": b.name, "bio": b.bio, "difficulty": b.difficulty,
+                                    "legacy": False}
+    for b in bot_roster.BOT_ROSTER
+}
+BOT_PROFILES.update({
     "__bot_easy__": {
         "display_name": "Easy Bot",
-        "bio": "Bids first, thinks never. A creature of pure impulse and modest budgets.",
+        "bio": "Every Easy bot's games from before bots had their own names.",
+        "difficulty": "easy", "legacy": True,
     },
     "__bot_medium__": {
         "display_name": "Medium Bot",
-        "bio": "Reads the table, mostly. Occasionally overpays for a Painting out of spite.",
+        "bio": "Every Medium bot's games from before bots had their own names.",
+        "difficulty": "medium", "legacy": True,
     },
     "__bot_hard__": {
         "display_name": "Hard Bot",
-        "bio": "Counts your money better than you do. Shows no mercy and even less small talk.",
+        "bio": "Every Hard bot's games from before bots had their own names.",
+        "difficulty": "hard", "legacy": True,
     },
-}
+})
 
 
 @app.route("/api/profile/<username>")
@@ -907,9 +923,9 @@ def api_profile(username):
     get_player_profile_stats's own docstring): it's just a factual record
     of games already played under this exact username, visible to anyone,
     matching the user's own "should be publicly visible" ask. Also
-    answers for the 3 reserved bot identities (see BOT_PROFILES above) --
-    same shape, plus is_bot/display_name/bio so the client can render a
-    bot's profile distinctly from a human's."""
+    answers for every bot identity (see BOT_PROFILES above) -- same shape,
+    plus is_bot/display_name/bio/bot_difficulty/bot_legacy so the client
+    can render a bot's profile distinctly from a human's."""
     stats = game_history.get_player_profile_stats(username)
     if stats is None:
         return jsonify({"error": "No games recorded for that username yet."}), 404
@@ -928,6 +944,8 @@ def api_profile(username):
         "is_bot": bot_profile is not None,
         "display_name": bot_profile["display_name"] if bot_profile else username,
         "bio": bot_profile["bio"] if bot_profile else None,
+        "bot_difficulty": bot_profile["difficulty"] if bot_profile else None,
+        "bot_legacy": bot_profile["legacy"] if bot_profile else False,
     })
 
 

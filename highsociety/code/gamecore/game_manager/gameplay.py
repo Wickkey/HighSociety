@@ -54,12 +54,31 @@ class PlayGame():
     def __init__(self, players: list[BasePlayer], spectators: list[NetworkSpectator] = None, mode = 'cli', game_id: str = None,
                  disgrace_settlement: DisgraceAuctionSettlement = None, seed: Optional[int] = None,
                  turn_duration: Optional[float] = _TURN_DURATION_UNSET,
-                 auction_history: Optional[AuctionHistory] = None):
+                 auction_history: Optional[AuctionHistory] = None, pace_events: bool = True,
+                 preseated: bool = False):
         """
-        seed: if given, seeds the RNG before anything random happens (deck
-        shuffle here, then player shuffle / starting-player pick in
-        play_game()), making the entire game 100% reproducible — same seed +
-        same sequence of player decisions always produces the same game.
+        seed: seeds this game's own RNG (self.rng), the only randomness the
+        engine itself uses (deck shuffle here, then player shuffle /
+        starting-player pick in play_game()) — same seed + same sequence of
+        player decisions always produces the same game. A private
+        random.Random instance rather than the global `random` module: the
+        web server runs many rooms in one process, and a seeded global RNG
+        could be advanced by any other thread (another room's shuffle, a
+        room code, a bot name) during this game's 3-second countdown,
+        silently changing the seat order a seed was supposed to pin down.
+        None picks a fresh seed (drawn from the global `random`, so a test
+        that seeds that is still deterministic) and records it in
+        self.seed either way -- with self.action_log, that's everything a
+        finished game needs to be rebuilt (see recording/game_replay.py).
+
+        pace_events: False skips the countdown's and toast pacing's real
+        sleeps — for bulk bot-vs-bot simulation nobody is watching (see
+        selfplay_job.py and recording/game_replay.py's replayer).
+
+        preseated: `players` is already in final turn order -- keep it
+        instead of shuffling. The RNG still advances exactly as a shuffle
+        would, so the starting player and everything after it match the
+        original game. Only the replayer uses this.
 
         turn_duration: seconds each player gets per move, or None for no
         limit. Defaults to HSConfig.json's game_settings.rules.time_per_move
@@ -77,10 +96,34 @@ class PlayGame():
         self.spectators = spectators
         self.game_id = game_id
         self.num_players= len(players)
+        if seed is None:
+            seed = random.randrange(2 ** 31)
         self.seed = seed
+        self.rng = random.Random(seed)
+        self._pace_events = pace_events
+        self._preseated = preseated
 
-        if seed is not None:
-            random.seed(seed)
+        # Every action of the game, in order: bids, passes, quits, Faux Pas
+        # discards, and disconnects/reconnects -- one dict per action, the
+        # exact rows game_history.py writes to game_actions. With the seed,
+        # this is the whole game (see recording/game_replay.py). See
+        # _log_action.
+        self.action_log = []
+        # The engine's own view of who's connected (id(player) -> bool).
+        # A NetworkPlayer's .active flips from other threads at any moment;
+        # game logic reads only this snapshot, updated at fixed points by
+        # _sync_liveness, which also logs each change as an action. That
+        # makes a disconnect land at a reproducible point in the game
+        # rather than wherever a thread happened to race the game loop.
+        self._liveness = {id(p): True for p in players}
+        self._liveness_check = 0
+        # Round number stamped on each logged action: the auction running
+        # now, or the one that just ended (a Faux Pas discard, the final
+        # tally). 0 before the first auction.
+        self._round = 0
+        # (think_ms, reason) for the decision _handle_player_turn just
+        # returned -- see that method.
+        self._last_turn = (None, None)
 
         self.game_state = "initialized"
         self.auction_rounds = []
@@ -99,7 +142,7 @@ class PlayGame():
         # re-deriving the tie/elimination logic itself.
         self.winners = None
         self.final_standings = []
-        self.status_card_manager = StatusCardManager()
+        self.status_card_manager = StatusCardManager(rng=self.rng)
         self.disgrace_settlement = disgrace_settlement or ForfeitSettlement()
 
         # Give every player/bot live access to auction history via
@@ -149,6 +192,84 @@ class PlayGame():
         for the *same* decision) -- see self._move_sequence's own comment."""
         self._move_sequence += 1
         return self._move_sequence
+
+    @property
+    def green_card_limit(self) -> int:
+        return self.__green_card_limit
+
+    def _is_active(self, player: BasePlayer) -> bool:
+        """The engine's snapshot of whether `player` is still in the game --
+        see self._liveness. Game logic reads this, never player.active."""
+        return self._liveness[id(player)]
+
+    def _sync_liveness(self, check: Optional[int] = None) -> int:
+        """
+        Refreshes the liveness snapshot from each player's real connection
+        state, logging every change as an action ("disconnect", "resign",
+        or "reconnect") whose `amount` is this check's number. Called at
+        fixed points of the game (each auction step, each turn, each Faux
+        Pas prompt, the final tally), so the n-th check is the same moment
+        in the original game and in its replay. One turn is one check, no
+        matter how many times its wait loop calls this -- the loop's
+        iteration count depends on rejected bids and polling, which a
+        replay doesn't reproduce.
+
+        A replay seat reports its connection state per check number
+        (`replay_liveness`) instead of a live .active flag.
+        """
+        if check is None:
+            self._liveness_check += 1
+            check = self._liveness_check
+        for player in self.players:
+            reader = getattr(player, "replay_liveness", None)
+            live = reader(check) if reader is not None else bool(player.active)
+            if live == self._liveness[id(player)]:
+                continue
+            self._liveness[id(player)] = live
+            if live:
+                action = "reconnect"
+            elif getattr(player, "resigned", False):
+                action = "resign"
+            else:
+                action = "disconnect"
+            self._log_action(player, action, amount=check)
+        return check
+
+    def _set_inactive(self, player: BasePlayer) -> None:
+        """A player leaving through the engine itself (their own "quit")."""
+        player.active = False
+        self._liveness[id(player)] = False
+
+    def _log_action(self, player: BasePlayer, action: str, amount: Optional[int] = None,
+                    cards: Optional[list] = None, think_ms: Optional[int] = None,
+                    reason: Optional[str] = None, record: Optional[AuctionRecord] = None) -> None:
+        """
+        Appends one action to self.action_log (see its comment) and, when
+        it's part of an auction, to that auction's AuctionRecord too (the
+        history bots read).
+
+        amount: a bid's new total, a discarded painting's value, or for a
+                disconnect/resign/reconnect the _sync_liveness check number.
+        cards:  a bid's money cards committed so far this auction.
+        think_ms: how long the player took to decide (None when nobody was
+                asked, e.g. a disconnect).
+        reason: why a pass/quit happened without the player choosing it --
+                "timeout" or "disconnected". None for a real decision.
+        """
+        if record is not None:
+            record.add_event(player.username, action, amount, cards=cards)
+        self.action_log.append({
+            "seq": len(self.action_log) + 1,
+            "round": self._round,
+            "seat": self.players.index(player),
+            "username": player.username,
+            "action": action,
+            "amount": amount,
+            "cards": list(cards) if cards is not None else None,
+            "think_ms": think_ms,
+            "reason": reason,
+            "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        })
 
     @property
     def turn_duration(self) -> Optional[float]:
@@ -202,17 +323,22 @@ class PlayGame():
         # order -- already fully deterministic, since create_bot_players()
         # builds them in bot_mix's own fixed order at room-creation time,
         # before any human has even joined.
-        self.players.sort(key=lambda p: (
-            isinstance(p, (CLIPlayer, NetworkPlayer)),
-            p.username if isinstance(p, (CLIPlayer, NetworkPlayer)) else "",
-        ))
-        random.shuffle(self.players)
+        if self._preseated:
+            # Same randomness consumed as the real shuffle (see __init__'s
+            # `preseated`), order left as given.
+            self.rng.shuffle(list(range(len(self.players))))
+        else:
+            self.players.sort(key=lambda p: (
+                isinstance(p, (CLIPlayer, NetworkPlayer)),
+                p.username if isinstance(p, (CLIPlayer, NetworkPlayer)) else "",
+            ))
+            self.rng.shuffle(self.players)
         LoggingManager.info("Shuffled players")
         return self.players
 
 
     def _count_active_auction_players(self) -> int:
-        return sum(1 for p in self.players if p.active and p.current_participation_in_auction)
+        return sum(1 for p in self.players if self._is_active(p) and p.current_participation_in_auction)
 
 
     def _get_auction_winner(self) -> int:
@@ -220,7 +346,7 @@ class PlayGame():
         Returns the id of the auction winner.
         """
         for idx, player in enumerate(self.players):
-            if player.current_participation_in_auction and player.active:
+            if player.current_participation_in_auction and self._is_active(player):
                 return idx
         return -1
 
@@ -342,6 +468,8 @@ class PlayGame():
         a pacing slot for nothing, forcing the *next* real broadcast to eat
         an extra, unearned wait it never should have needed.
         """
+        if not self._pace_events:
+            return
         now = time.time()
         wait = self._last_toast_broadcast_at + self.MIN_TOAST_GAP_SECONDS - now
         if wait > 0:
@@ -452,18 +580,29 @@ class PlayGame():
         player.send_message(f"You have {self.__TURN_DURATION}s to make a move.", message_type="PLAYER_INFO")
         clock = TurnClock(self.__TURN_DURATION)
         clock.start()
+        # The whole turn is one liveness check (see _sync_liveness), and
+        # think_ms runs from the prompt to the accepted decision -- rejected
+        # bids and re-prompts included. Callers read both from
+        # self._last_turn when they log the action this returns.
+        check = self._sync_liveness()
+        started = time.monotonic()
+
+        def _finish(result, reason=None):
+            self._last_turn = (int((time.monotonic() - started) * 1000), reason)
+            return result
 
         while True:
+            self._sync_liveness(check)
             remaining_time = clock.remaining()
             if remaining_time is not None and remaining_time <= 0:
                 player.send_message(f"⏳ Time up! Auto pass.", message_type = "PLAYER_INFO")
                 player.withdraw_bid()
-                return "pass"
+                return _finish("pass", "timeout")
 
             # Check if player is still active before getting bid
-            if not player.active:
+            if not self._is_active(player):
                 player.withdraw_bid()
-                return "pass"
+                return _finish("pass", "disconnected")
             
             bids = player.get_bid(timeout=remaining_time)
 
@@ -475,7 +614,7 @@ class PlayGame():
                 cmd = bids.lower()
                 if cmd in ["pass", "fold", "quit"]:
                     player.withdraw_bid()
-                    return cmd
+                    return _finish(cmd)
                 else: # shouldn't need this ideally as it will be handled by get_bid function.
                     player.send_message("⚠️ Invalid command. Try again.", message_type = "INPUT_ERROR")
                     continue
@@ -491,7 +630,7 @@ class PlayGame():
 
             # Place bid
             placed_value = player.place_bid(bids)
-            return placed_value
+            return _finish(placed_value)
 
 
     def normal_card_auction(self, status_card: StatusCard, starting_player_id: int) -> int:
@@ -507,6 +646,7 @@ class PlayGame():
             starting_money={p.username: p.money_left() for p in self.players},
         )
 
+        self._sync_liveness()
         num_players_in_auction = self._count_active_auction_players()
         current_player_id = starting_player_id
         max_bid = 0
@@ -520,13 +660,14 @@ class PlayGame():
         # went inactive mid-loop" (see the skip branch below, which needs
         # exactly this distinction).
         counted_player_ids = {i for i, p in enumerate(self.players)
-                               if p.active and p.current_participation_in_auction}
+                               if self._is_active(p) and p.current_participation_in_auction}
 
         while (num_players_in_auction > 1):
+            self._sync_liveness()
             player = self.players[current_player_id]
 
-            if player.active == False or player.current_participation_in_auction == False:
-                if player.active == False and current_player_id in counted_player_ids:
+            if not self._is_active(player) or player.current_participation_in_auction == False:
+                if not self._is_active(player) and current_player_id in counted_player_ids:
                     # Went inactive asynchronously since the count above was
                     # taken (e.g. an out-of-turn resign — see web_server.py's
                     # on_resign — or a mid-auction disconnect), rather than
@@ -551,7 +692,8 @@ class PlayGame():
                 # Handle result types
                 if action_result in ["pass", "fold"]:
                     num_players_in_auction -= 1
-                    record.add_event(player.username, action_result)
+                    think_ms, reason = self._last_turn
+                    self._log_action(player, action_result, think_ms=think_ms, reason=reason, record=record)
                     self.host.send_message(f"⚪ {player.username} passed.\n")
                     # Passing/folding refunds whatever this player had
                     # already committed this auction (see
@@ -568,16 +710,17 @@ class PlayGame():
                     self._broadcast_auction_update(action_result, status_card, player=player.username, max_bid=max_bid)
 
                 elif action_result == "quit":
-                    player.active = False
+                    self._set_inactive(player)
                     num_players_in_auction -= 1
-                    record.add_event(player.username, "quit")
+                    self._log_action(player, "quit", think_ms=self._last_turn[0], record=record)
                     self.host.send_message(f"❌ {player.username} quit the game.\n")
                     self._broadcast_auction_update("quit", status_card, player=player.username, max_bid=max_bid)
 
                 elif isinstance(action_result, int) and action_result > max_bid:
                     max_bid = action_result
-                    record.add_event(player.username, "bid", max_bid,
-                                      cards=[c.value for c in player.current_money_card_bids])
+                    self._log_action(player, "bid", max_bid,
+                                     cards=[c.value for c in player.current_money_card_bids],
+                                     think_ms=self._last_turn[0], record=record)
                     self.host.send_message(f"💰 {player.username} raised to {max_bid}.\n")
                     # See the pass/fold branch above for why this goes
                     # before the (self-pacing) broadcast, not after.
@@ -639,6 +782,7 @@ class PlayGame():
             starting_money={p.username: p.money_left() for p in self.players},
         )
 
+        self._sync_liveness()
         num_players_in_auction = self._count_active_auction_players()
         if num_players_in_auction == 0:
             self.host.send_message("⚠️ No active players for disgrace auction.")
@@ -658,7 +802,7 @@ class PlayGame():
         # inactive mid-loop" — reset_auction_attributes() blindly sets it
         # back to True for everyone, active or not, ahead of every auction).
         counted_player_ids = {i for i, p in enumerate(self.players)
-                               if p.active and p.current_participation_in_auction}
+                               if self._is_active(p) and p.current_participation_in_auction}
 
         self.host.send_message(f"\n💀 Disgrace Auction started for: {status_card}: {status_card.description}")
         self.host.send_message("Each turn, you must bid higher than the previous bid. First to pass takes the disgrace card.")
@@ -669,10 +813,11 @@ class PlayGame():
 
         # loop until someone passes (they lose)
         while True:
+            self._sync_liveness()
             player = self.players[current_player_id]
 
             # skip inactive players
-            if not player.active:
+            if not self._is_active(player):
                 if current_player_id in counted_player_ids:
                     # Went inactive asynchronously (e.g. an out-of-turn
                     # resign — see web_server.py's on_resign — or a
@@ -685,7 +830,7 @@ class PlayGame():
                     # left would keep being asked to bid against no one.
                     counted_player_ids.discard(current_player_id)
                     loser_id = current_player_id
-                    record.add_event(player.username, "quit")
+                    self._log_action(player, "quit", reason="disconnected", record=record)
                     self.host.send_message(f"❌ {player.username} quit.")
                     self._broadcast_auction_update("quit", status_card, player=player.username, max_bid=max_bid)
                     self._record_auction_history_snapshot()
@@ -702,16 +847,17 @@ class PlayGame():
                 if cmd in ["pass", "fold"]:
                     # player passes -> they lose and take the disgrace card
                     loser_id = current_player_id
-                    record.add_event(player.username, cmd)
+                    think_ms, reason = self._last_turn
+                    self._log_action(player, cmd, think_ms=think_ms, reason=reason, record=record)
                     self.host.send_message(f"💢 {player.username} passed and takes the disgrace card!")
                     self._broadcast_auction_update(cmd, status_card, player=player.username, max_bid=max_bid)
                     self._record_auction_history_snapshot()
                     break
                 elif cmd == "quit":
                     # quitting also makes them lose the disgrace card (treated same as pass)
-                    player.active = False
+                    self._set_inactive(player)
                     loser_id = current_player_id
-                    record.add_event(player.username, "quit")
+                    self._log_action(player, "quit", think_ms=self._last_turn[0], record=record)
                     self.host.send_message(f"❌ {player.username} quit.")
                     self._broadcast_auction_update("quit", status_card, player=player.username, max_bid=max_bid)
                     self._record_auction_history_snapshot()
@@ -725,8 +871,9 @@ class PlayGame():
             elif isinstance(action, int):
                 # update max and continue to next player in order
                 max_bid = action
-                record.add_event(player.username, "bid", max_bid,
-                                  cards=[c.value for c in player.current_money_card_bids])
+                self._log_action(player, "bid", max_bid,
+                                 cards=[c.value for c in player.current_money_card_bids],
+                                 think_ms=self._last_turn[0], record=record)
                 self.host.send_message(f"💰 {player.username} bid now {max_bid}.")
                 self._broadcast_auction_update("bid", status_card, player=player.username, max_bid=max_bid,
                                                 cards=[c.value for c in player.current_money_card_bids])
@@ -766,7 +913,7 @@ class PlayGame():
         # forfeiting under the default ForfeitSettlement). Refresh everyone
         # rather than trying to know which settlement strategy touched whom.
         for p in self.players:
-            if p.active:
+            if self._is_active(p):
                 self._send_player_state(p)
 
         # See the comment in normal_card_auction: current_bid_value read here,
@@ -809,8 +956,9 @@ class PlayGame():
         Returns True if discarded.
         False if player doesn't have paintings and hence hasn't discarded yet.
         """
+        self._sync_liveness()
         player = self.players[player_id]
-        if not player.active:
+        if not self._is_active(player):
             # Gone for good (resigned out of turn — see web_server.py's
             # on_resign — or disconnected) — nothing left to ask them, and
             # this gets called again every remaining round for as long as
@@ -824,11 +972,14 @@ class PlayGame():
 
         if paintings:
             player._current_move_seq = self._next_move_sequence()
+            started = time.monotonic()
             chosen = player.choose_painting_to_discard()
             if chosen is None:
                 # Player disconnected or otherwise failed to choose; retry on the next opportunity.
                 return False
             player.discard_painting_card(chosen.value)
+            self._log_action(player, "discard", chosen.value,
+                             think_ms=int((time.monotonic() - started) * 1000))
             self._pace_toast_event()
             self.host.send_message(
                 f"🎨 {player.username} discarded a painting due to Faux Pas.",
@@ -843,6 +994,7 @@ class PlayGame():
     def determine_winner(self):
         """Determine the final winner(s) of the game."""
         LoggingManager.info("Determining the winner...")
+        self._sync_liveness()
 
         winner_candidates = [True] * len(self.players)
         player_points = []
@@ -850,7 +1002,7 @@ class PlayGame():
 
         # Collect player info
         for idx, player in enumerate(self.players):
-            if not player.active:
+            if not self._is_active(player):
                 winner_candidates[idx] = False
 
             pts = player.points
@@ -868,7 +1020,7 @@ class PlayGame():
             self.winners = []
             self.final_standings = [
                 {"username": p.username, "points": player_points[i], "money_left": player_money_left[i],
-                 "active": p.active, "eliminated": False}
+                 "active": self._is_active(p), "eliminated": False}
                 for i, p in enumerate(self.players)
             ]
             return None
@@ -903,13 +1055,13 @@ class PlayGame():
         # Step 5: Announce results
         self.final_standings = [
             {"username": p.username, "points": player_points[idx], "money_left": player_money_left[idx],
-             "active": p.active, "eliminated": idx == eliminated_idx}
+             "active": self._is_active(p), "eliminated": idx == eliminated_idx}
             for idx, p in enumerate(self.players)
         ]
         self.winners = winners
         self.host.send_message("\n🏁 Final Standings:", data={"event": "final_standings", "standings": self.final_standings})
         for idx, player in enumerate(self.players):
-            if player.active:
+            if self._is_active(player):
                 self.host.send_message(f" - {player.username}: Points={player_points[idx]}, Money Left={player_money_left[idx]}")
             else:
                 self.host.send_message(f" - {player.username}: Inactive : (Points={player_points[idx]}, Money Left={player_money_left[idx]})")
@@ -931,7 +1083,8 @@ class PlayGame():
         for remaining in range(countdown, 0, -1):
             self.host.send_message(f"⏳  Game starting in {remaining}...",
                                     data={"event": "countdown", "seconds_left": remaining})
-            time.sleep(1)
+            if self._pace_events:
+                time.sleep(1)
 
         # final message:
         self.host.send_message(f"🚀 Game Started!", data={"event": "countdown_finished"})
@@ -967,11 +1120,12 @@ class PlayGame():
         self._record_auction_history_snapshot()
 
         num_green_cards = 0
-        starting_player_id = random.randint(0, len(self.players) - 1) # random starting player id
+        starting_player_id = self.rng.randint(0, len(self.players) - 1) # random starting player id
         faux_pas_holder_id = None
 
         while (not self.status_card_manager.is_empty()):
-
+            self._round = len(self.auction_rounds) + 1
+            self._sync_liveness()
             num_players_in_auction = self._count_active_auction_players()
 
             status_card = self.status_card_manager.remove_top_card()

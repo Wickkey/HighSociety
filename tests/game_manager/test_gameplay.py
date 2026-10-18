@@ -19,6 +19,7 @@ class TestAuctionHelpers:
         p1, p2, p3 = make_player("P1"), make_player("P2"), make_player("P3")
         p3.active = False
         game = make_game([p1, p2, p3])
+        game._sync_liveness()  # game logic reads the engine's snapshot, taken at fixed points
         assert game._count_active_auction_players() == 2
 
     def test_get_next_player_id_wraps_around(self, make_player):
@@ -37,6 +38,7 @@ class TestAuctionHelpers:
         p1.active = False
         p2.active = False
         game = make_game([p1, p2])
+        game._sync_liveness()
         assert game._get_auction_winner() == -1
 
 

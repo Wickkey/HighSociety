@@ -1,0 +1,31 @@
+# Render Blueprint for the RL self-play data job only (see SELFPLAY.md).
+# The website itself is still configured in Render's dashboard, not here --
+# a Blueprint only manages the services it declares, so syncing this file
+# creates/updates the cron job below and leaves the web service untouched.
+services:
+  - type: cron
+    name: highsociety-selfplay
+    runtime: python
+    # Each run plays for up to SELFPLAY_MAX_RUNTIME_SECONDS (11h, under
+    # Render's 12h cap per cron run) and the next hourly run resumes from
+    # whatever's already stored. Once the target is reached every run exits
+    # in seconds -- suspend the job then (or delete it).
+    schedule: "0 * * * *"
+    plan: pro  # 2 CPUs -- keep SELFPLAY_WORKERS equal to the plan's CPU count
+    buildCommand: pip install -r requirements.txt
+    startCommand: python selfplay_job.py
+    envVars:
+      - key: DATABASE_URL
+        sync: false  # set in the dashboard: same Supabase URL the web service uses
+      - key: SELFPLAY_TARGET_GAMES
+        value: "10000"
+      - key: SELFPLAY_BATCH
+        value: rl-v1
+      - key: SELFPLAY_BOT_POOL
+        value: easy,medium,hard
+      - key: SELFPLAY_PLAYERS
+        value: "5"
+      - key: SELFPLAY_WORKERS
+        value: "2"
+      - key: PYTHONUNBUFFERED
+        value: "1"

@@ -55,6 +55,7 @@ export function showPlayerProfileScreen(username, returnTo = 'leaderboard') {
   $('player-profile-avatar').textContent = username.charAt(0).toUpperCase();
   $('player-profile-name').textContent = username;
   hide($('player-profile-bio'));
+  hide($('player-profile-bot-tag'));
   hide($('player-profile-meta-row'));
   hide($('player-profile-elo-hero'));
   $('player-profile-stats-row').classList.add('loading');
@@ -102,6 +103,15 @@ async function loadPlayerProfileStats(username) {
     // takes that slot instead (see BOT_PROFILES' own comment).
     $('player-profile-bio').textContent = stats.bio;
     show($('player-profile-bio'));
+    // Every bot has one fixed difficulty (see common/bot_roster.py); the 3
+    // legacy accounts hold games from before bots had names.
+    if (stats.bot_difficulty) {
+      const difficulty = `${stats.bot_difficulty.charAt(0).toUpperCase()}${stats.bot_difficulty.slice(1)}`;
+      const tag = $('player-profile-bot-tag');
+      tag.textContent = stats.bot_legacy ? `${difficulty} bot · legacy` : `${difficulty} bot`;
+      tag.dataset.difficulty = stats.bot_difficulty;
+      show(tag);
+    }
   } else {
     $('player-profile-since').textContent = dateLabel(stats.created_at);
     $('player-profile-last-played').textContent = stats.last_played_at ? timeAgo(stats.last_played_at) : '—';

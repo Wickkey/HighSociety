@@ -210,6 +210,7 @@ class LoggingManager:
             Parameters:
                 level       - type of log level (DEBUG, INFO, ERROR, etc.)
         """
+        cls._ensure_initialized()
         try:
             level = logging._nameToLevel[level.upper()]
         except KeyError:

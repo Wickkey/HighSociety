@@ -11,6 +11,7 @@ from highsociety.code.ai.tutorial_bot import TutorialBot
 from highsociety.code.common import matchmaking
 from highsociety.code.common.db import game_history
 from highsociety.code.gamecore.card_manager.money_card_manager import MoneyCardManager
+from highsociety.code.gamecore.recording.game_replay import replay_record
 
 # CLI/socket play has zero third-party dependencies (see README.md); only the
 # web path needs flask/flask-sock installed (requirements.txt). Skip this
@@ -658,6 +659,48 @@ def test_finished_game_is_recorded_when_a_database_is_configured(running_web_ser
     assert player_ids == [False, True]
 
     player.close()
+
+
+def test_a_finished_web_game_is_replayable_from_what_game_history_stores(running_web_server, monkeypatch):
+    """game_actions is the source of truth: a real room (a human over a real
+    WebSocket + bots) must hand game_history exactly the rows -- seed,
+    seats, rounds, actions -- that rebuild the identical game with nothing
+    else. Assembled here the same way fetch_game_records reads them back."""
+    port = running_web_server
+    monkeypatch.setenv("DATABASE_URL", "postgresql://user:pass@localhost/testdb")
+    captured = {}
+    monkeypatch.setattr(game_history, "record_finished_game_async",
+                        lambda on_complete=None, **kwargs: captured.update(kwargs))
+
+    resp = web_server.app.test_client().post(
+        "/api/create_game", json={"seats": 3, "bot_mix": ["greedy", "capped"], "seed": 7, "bot_think_time": 0}
+    )
+    room_code = resp.get_json()["room_code"]
+    player = ScriptedWSClient(_ws_url(port, f"/ws?room={room_code}"), "alice")
+    player.handshake()
+    player.start()
+
+    room = web_server._rooms[room_code]
+    deadline = time.time() + 30
+    while time.time() < deadline and "actions" not in captured:
+        threading.Event().wait(0.2)
+    player.close()
+
+    assert captured["seed"] == 7
+    stored = json.loads(json.dumps(captured, default=str))  # what a database round trip hands back
+    seat_of = {p["game_username"]: p["seat"] for p in stored["participants"]}
+    seat_rows = [(p["seat"], p["username"] or p["name"], p["name"], p["is_bot"], None, p["points"],
+                  p["money_left"], p["is_winner"], p["eliminated"]) for p in stored["participants"]]
+    round_rows = [(r["round_number"], r["card"]["type"], r["card"]["value"],
+                   seat_of.get(r["recipient"]) if r["recipient"] else None,
+                   r["money_spent"].get(r["recipient"]) if r["recipient"] and r["auction_type"] == "normal" else None)
+                  for r in stored["auction_rounds"]]
+    action_rows = [(a["seq"], a["round"], a["seat"], a["action"].upper(), a["amount"], a["cards"], a["think_ms"],
+                    a["reason"], a["timestamp"]) for a in stored["actions"]]
+    record = game_history.assemble_game_record(stored["seed"], seat_rows, round_rows, action_rows)
+    assert {s["kind"] for s in record["seats"]} == {"human", "bot"}
+    replay_record(record)
+    assert room.state == "finished"
 
 
 def test_status_payload_exposes_elo_changes_once_the_async_write_completes(running_web_server, monkeypatch):
@@ -1605,6 +1648,23 @@ def test_single_player_rematch_reuses_the_connection_for_a_fresh_game(running_we
     # (see GameRoom.run_game) — the connection must still be usable here.
     assert alice.client.connected
 
+    # Snapshot alice's state the instant the rematch's game is launched --
+    # after the in-place reset, before game 2 can play a single round. The
+    # new game plays on its own thread, so reading alice's state any later
+    # races it: by the time a poll notices room.game changed, game 2 may
+    # already be several rounds in, and whether alice has won anything yet
+    # depends on the rematch's (randomly re-rolled) seed.
+    at_rematch_start = {}
+    original_run_game = room.run_game
+
+    def _snapshot_then_run_game():
+        player = next(p for p in room.players if p.username == "alice")
+        at_rematch_start.update(player=player, points=player.points, status_cards=player.status_cards,
+                                money=sorted(c.value for c in player.money_cards))
+        original_run_game()
+
+    room.run_game = _snapshot_then_run_game
+
     alice._send({"message_type": "REMATCH_REQUEST", "data": {"bot_mix": ["greedy"]}})
 
     deadline = time.time() + 10
@@ -1623,10 +1683,11 @@ def test_single_player_rematch_reuses_the_connection_for_a_fresh_game(running_we
         threading.Event().wait(0.1)
     new_game_alice = next(p for p in room.game.players if p.username == "alice")
     assert new_game_alice is alice_player, "rematch should reuse the same player object, not a fresh one"
-    assert alice_player.points == 0, "points must reset for a rematch, not carry over from the last game"
-    assert alice_player.status_cards == (), "status cards must reset for a rematch"
+    assert at_rematch_start["player"] is alice_player
+    assert at_rematch_start["points"] == 0, "points must reset for a rematch, not carry over from the last game"
+    assert at_rematch_start["status_cards"] == (), "status cards must reset for a rematch"
     full_hand = sorted(c.value for c in MoneyCardManager().cards)
-    assert sorted(c.value for c in alice_player.money_cards) == full_hand, \
+    assert at_rematch_start["money"] == full_hand, \
         "money cards must reset to a fresh full hand for a rematch"
 
     deadline = time.time() + 30
@@ -2107,6 +2168,7 @@ def test_profile_endpoint_returns_stats_and_elo(monkeypatch):
         "avg_placement": 1.5, "avg_points": 12.0, "avg_money_remaining": 6.0, "elo": 1032,
         "created_at": "2025-06-01T00:00:00+00:00", "last_played_at": "2026-03-15T00:00:00+00:00",
         "is_bot": False, "display_name": "alice", "bio": None,
+        "bot_difficulty": None, "bot_legacy": False,
     }
 
 
@@ -2126,6 +2188,29 @@ def test_profile_endpoint_flags_the_reserved_bot_identities(monkeypatch):
     assert body["is_bot"] is True
     assert body["display_name"] == "Hard Bot"
     assert isinstance(body["bio"], str) and len(body["bio"]) > 0
+    assert body["bot_difficulty"] == "hard"
+    assert body["bot_legacy"] is True  # holds only games from before bots had names
+
+
+def test_profile_endpoint_serves_a_named_bot_with_its_own_bio_and_fixed_difficulty(monkeypatch):
+    monkeypatch.setattr(game_history, "get_player_profile_stats", lambda username: {
+        "games_played": 12, "wins": 2, "win_rate": 2 / 12, "elo": 960,
+        "avg_placement": 3.1, "avg_points": 9.0, "avg_money_remaining": 4.0,
+        "created_at": "2026-10-18T00:00:00+00:00", "last_played_at": "2026-10-18T00:00:00+00:00",
+    })
+    body = web_server.app.test_client().get("/api/profile/__bot_ziggy__").get_json()
+    assert body["is_bot"] is True
+    assert body["display_name"] == "Ziggy bot"
+    assert body["bot_difficulty"] == "easy"
+    assert body["bot_legacy"] is False
+    assert body["bio"]
+
+
+def test_every_roster_bot_has_a_profile():
+    from highsociety.code.common import bot_roster
+    for b in bot_roster.BOT_ROSTER:
+        profile = web_server.BOT_PROFILES[bot_roster.roster_username(b)]
+        assert profile == {"display_name": b.name, "bio": b.bio, "difficulty": b.difficulty, "legacy": False}
 
 
 def test_global_stats_endpoint_returns_204_when_unavailable(monkeypatch):
