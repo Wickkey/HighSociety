@@ -64,6 +64,9 @@ Everything can be set as an environment variable on the job:
 | `SELFPLAY_PLAYERS` | `5` | |
 | `SELFPLAY_WORKERS` | CPU count | **set this to the plan's CPU count**. A container can report the host's CPUs. |
 | `SELFPLAY_MAX_RUNTIME_SECONDS` | `39600` | |
+| `SELFPLAY_NOTIFY_EVERY` | `1000` | email a progress update every N stored games (`0` = off); also emails when done or if a run aborts |
+| `NOTIFY_SMTP_USER` / `NOTIFY_SMTP_PASSWORD` | — | Gmail address + its [App password](https://myaccount.google.com/apppasswords); unset = no emails |
+| `NOTIFY_EMAIL_TO` | sender | recipient |
 
 ### How long it takes
 

@@ -105,3 +105,37 @@ def test_an_occasional_failure_is_skipped_and_replaced(monkeypatch):
 def test_parse_args_rejects_an_out_of_range_seat_count():
     with pytest.raises(SystemExit):
         selfplay_job.parse_args(["--players", "1"])
+
+
+def _capture_emails(monkeypatch):
+    sent = []
+    monkeypatch.setattr(selfplay_job.notify, "send_email", lambda subject, body: sent.append(subject) or True)
+    return sent
+
+
+def test_progress_emails_fire_once_per_milestone_crossed_including_across_restarts(monkeypatch):
+    sent = _capture_emails(monkeypatch)
+    _fake_store(monkeypatch, already=3)  # resuming mid-batch: 3 already stored
+    args = selfplay_job.parse_args(["--target-games", "12", "--bot-pool", "greedy", "--workers", "1",
+                                    "--flush-every", "2", "--notify-every", "4"])
+    assert selfplay_job.run(args) == 0
+    # 4 and 8 are progress milestones; 12 is the target, announced as done instead.
+    assert sent == ["Self-play: 4 / 12 games", "Self-play: 8 / 12 games", "Self-play done: 12 games"]
+
+
+def test_no_email_when_a_run_finds_the_target_already_reached(monkeypatch):
+    sent = _capture_emails(monkeypatch)
+    _fake_store(monkeypatch, already=10)
+    assert selfplay_job.run(selfplay_job.parse_args(["--target-games", "10", "--bot-pool", "greedy"])) == 0
+    assert sent == []
+
+
+def test_an_aborted_run_sends_an_alert(monkeypatch):
+    sent = _capture_emails(monkeypatch)
+    _fake_store(monkeypatch, already=0)
+    monkeypatch.setattr(selfplay_job, "ProcessPoolExecutor", _InlineExecutor)
+    monkeypatch.setattr(selfplay_job, "_MAX_FAILURES_ABSOLUTE", 3)
+    monkeypatch.setattr(selfplay_job, "play_one_game", lambda *a: (_ for _ in ()).throw(RuntimeError("x")))
+    args = selfplay_job.parse_args(["--target-games", "50", "--bot-pool", "greedy", "--workers", "1"])
+    assert selfplay_job.run(args) == 1
+    assert len(sent) == 1 and sent[0].startswith("Self-play run ABORTED")
