@@ -11,6 +11,7 @@ from highsociety.code.ai.tutorial_bot import TutorialBot
 from highsociety.code.common import matchmaking
 from highsociety.code.common.db import game_history
 from highsociety.code.gamecore.card_manager.money_card_manager import MoneyCardManager
+from highsociety.code.gamecore.recording.game_replay import replay_game
 
 # CLI/socket play has zero third-party dependencies (see README.md); only the
 # web path needs flask/flask-sock installed (requirements.txt). Skip this
@@ -658,6 +659,37 @@ def test_finished_game_is_recorded_when_a_database_is_configured(running_web_ser
     assert player_ids == [False, True]
 
     player.close()
+
+
+def test_finished_web_game_hands_game_history_a_replay_that_reproduces_it(running_web_server, monkeypatch):
+    """The whole point of game_replays: a real room (a human over a real
+    WebSocket + a bot) must produce a log that rebuilds the identical game
+    with nothing else -- checked here by actually replaying it."""
+    port = running_web_server
+    monkeypatch.setenv("DATABASE_URL", "postgresql://user:pass@localhost/testdb")
+    captured = {}
+    monkeypatch.setattr(game_history, "record_finished_game_async",
+                        lambda on_complete=None, **kwargs: captured.update(kwargs))
+
+    resp = web_server.app.test_client().post(
+        "/api/create_game", json={"seats": 3, "bot_mix": ["greedy", "capped"], "seed": 7, "bot_think_time": 0}
+    )
+    room_code = resp.get_json()["room_code"]
+    player = ScriptedWSClient(_ws_url(port, f"/ws?room={room_code}"), "alice")
+    player.handshake()
+    player.start()
+
+    room = web_server._rooms[room_code]
+    deadline = time.time() + 30
+    while time.time() < deadline and "replay" not in captured:
+        threading.Event().wait(0.2)
+    player.close()
+
+    replay = json.loads(json.dumps(captured["replay"]))  # what a JSONB round trip hands back
+    assert replay["seed"] == 7
+    assert {p["kind"] for p in replay["players"]} == {"human", "greedy", "capped"}
+    replay_game(replay)
+    assert room.state == "finished"
 
 
 def test_status_payload_exposes_elo_changes_once_the_async_write_completes(running_web_server, monkeypatch):
@@ -1605,6 +1637,23 @@ def test_single_player_rematch_reuses_the_connection_for_a_fresh_game(running_we
     # (see GameRoom.run_game) — the connection must still be usable here.
     assert alice.client.connected
 
+    # Snapshot alice's state the instant the rematch's game is launched --
+    # after the in-place reset, before game 2 can play a single round. The
+    # new game plays on its own thread, so reading alice's state any later
+    # races it: by the time a poll notices room.game changed, game 2 may
+    # already be several rounds in, and whether alice has won anything yet
+    # depends on the rematch's (randomly re-rolled) seed.
+    at_rematch_start = {}
+    original_run_game = room.run_game
+
+    def _snapshot_then_run_game():
+        player = next(p for p in room.players if p.username == "alice")
+        at_rematch_start.update(player=player, points=player.points, status_cards=player.status_cards,
+                                money=sorted(c.value for c in player.money_cards))
+        original_run_game()
+
+    room.run_game = _snapshot_then_run_game
+
     alice._send({"message_type": "REMATCH_REQUEST", "data": {"bot_mix": ["greedy"]}})
 
     deadline = time.time() + 10
@@ -1623,10 +1672,11 @@ def test_single_player_rematch_reuses_the_connection_for_a_fresh_game(running_we
         threading.Event().wait(0.1)
     new_game_alice = next(p for p in room.game.players if p.username == "alice")
     assert new_game_alice is alice_player, "rematch should reuse the same player object, not a fresh one"
-    assert alice_player.points == 0, "points must reset for a rematch, not carry over from the last game"
-    assert alice_player.status_cards == (), "status cards must reset for a rematch"
+    assert at_rematch_start["player"] is alice_player
+    assert at_rematch_start["points"] == 0, "points must reset for a rematch, not carry over from the last game"
+    assert at_rematch_start["status_cards"] == (), "status cards must reset for a rematch"
     full_hand = sorted(c.value for c in MoneyCardManager().cards)
-    assert sorted(c.value for c in alice_player.money_cards) == full_hand, \
+    assert at_rematch_start["money"] == full_hand, \
         "money cards must reset to a fresh full hand for a rematch"
 
     deadline = time.time() + 30

@@ -23,8 +23,16 @@ class StatusCardManager:
         Attributes:
             None
     """
-    def __init__(self):
+    def __init__(self, rng: random.Random = None):
+        """
+        rng: the Random instance to shuffle with -- PlayGame passes its own
+        per-game instance so a seed reproduces the deck regardless of what
+        any other thread does to the global `random` module in between.
+        None falls back to the global module (the original behavior, still
+        what inspect_seed.py and the tests rely on).
+        """
         self.__cards = []
+        self.__rng = rng or random
         self.__initialize_status_cards()
         self.__shuffle_cards()
 
@@ -69,7 +77,7 @@ class StatusCardManager:
 
     def __shuffle_cards(self) -> None:
         """Shuffle the cards randomly."""
-        random.shuffle(self.__cards)
+        self.__rng.shuffle(self.__cards)
         LoggingManager.info("Cards shuffled")
 
     def remove_top_card(self) -> StatusCard:
@@ -83,6 +91,12 @@ class StatusCardManager:
         return removed_card
         
     
+    def remaining_cards(self) -> tuple[StatusCard, ...]:
+        """Every card still in the deck, top first -- read-only (a tuple
+        copy), for recording the realized draw order (see
+        recording/game_replay.py) without exposing the deck to mutation."""
+        return tuple(self.__cards)
+
     def get_card_count(self) -> int:
         """Get the number of cards in the deck."""
         return len(self.__cards)

@@ -417,6 +417,7 @@ def _record_game_history(room: "GameRoom", game: PlayGame, started_at: datetime.
         started_at=started_at,
         achievement_unlocks=achievement_unlocks,
         auction_rounds=auction_rounds,
+        replay=game.replay_log.to_dict(),
         finished_at=datetime.datetime.now(datetime.timezone.utc),
         participants=participants,
         host_username=room.host_username,

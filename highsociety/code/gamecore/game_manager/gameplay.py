@@ -17,6 +17,7 @@ from highsociety.code.gamecore.game_manager.disgrace_settlement import DisgraceA
 from highsociety.code.gamecore.game_manager.auction_information import AuctionRecord, summarize_card
 from highsociety.code.gamecore.game_manager.auction_history import AuctionHistory
 from highsociety.code.gamecore.game_manager.turn_clock import TurnClock
+from highsociety.code.gamecore.recording.game_replay import GameReplayLog
 
 # Distinguishes "turn_duration not passed at all" (use HSConfig.json's
 # time_per_move, today null/no limit — the CLI/network_server.py behavior,
@@ -54,12 +55,24 @@ class PlayGame():
     def __init__(self, players: list[BasePlayer], spectators: list[NetworkSpectator] = None, mode = 'cli', game_id: str = None,
                  disgrace_settlement: DisgraceAuctionSettlement = None, seed: Optional[int] = None,
                  turn_duration: Optional[float] = _TURN_DURATION_UNSET,
-                 auction_history: Optional[AuctionHistory] = None):
+                 auction_history: Optional[AuctionHistory] = None, pace_events: bool = True):
         """
-        seed: if given, seeds the RNG before anything random happens (deck
-        shuffle here, then player shuffle / starting-player pick in
-        play_game()), making the entire game 100% reproducible — same seed +
-        same sequence of player decisions always produces the same game.
+        seed: seeds this game's own RNG (self.rng), the only randomness the
+        engine itself uses (deck shuffle here, then player shuffle /
+        starting-player pick in play_game()) — same seed + same sequence of
+        player decisions always produces the same game. A private
+        random.Random instance rather than the global `random` module: the
+        web server runs many rooms in one process, and a seeded global RNG
+        could be advanced by any other thread (another room's shuffle, a
+        room code, a bot name) during this game's 3-second countdown,
+        silently changing the seat order a seed was supposed to pin down.
+        None picks a fresh seed (drawn from the global `random`, so a test
+        that seeds that is still deterministic) and records it in
+        self.seed / self.replay_log either way.
+
+        pace_events: False skips the countdown's and toast pacing's real
+        sleeps — for bulk bot-vs-bot simulation nobody is watching (see
+        selfplay_job.py and recording/game_replay.py's replayer).
 
         turn_duration: seconds each player gets per move, or None for no
         limit. Defaults to HSConfig.json's game_settings.rules.time_per_move
@@ -77,10 +90,11 @@ class PlayGame():
         self.spectators = spectators
         self.game_id = game_id
         self.num_players= len(players)
+        if seed is None:
+            seed = random.randrange(2 ** 31)
         self.seed = seed
-
-        if seed is not None:
-            random.seed(seed)
+        self.rng = random.Random(seed)
+        self._pace_events = pace_events
 
         self.game_state = "initialized"
         self.auction_rounds = []
@@ -99,7 +113,7 @@ class PlayGame():
         # re-deriving the tie/elimination logic itself.
         self.winners = None
         self.final_standings = []
-        self.status_card_manager = StatusCardManager()
+        self.status_card_manager = StatusCardManager(rng=self.rng)
         self.disgrace_settlement = disgrace_settlement or ForfeitSettlement()
 
         # Give every player/bot live access to auction history via
@@ -123,6 +137,12 @@ class PlayGame():
         else:
             self.__TURN_DURATION = turn_duration
         self.__green_card_limit = self.__game_config.get("green_card_limit", 4)
+        # Everything needed to rebuild this exact game later from nothing
+        # but a database row -- see recording/game_replay.py.
+        self.replay_log = GameReplayLog(seed=seed, turn_duration=self.__TURN_DURATION,
+                                        green_card_limit=self.__green_card_limit,
+                                        settlement=type(self.disgrace_settlement).__name__)
+        self.replay_log.set_deck(self.status_card_manager.remaining_cards())
         self._last_toast_broadcast_at = 0.0
         # Monotonically increasing id for each distinct player decision
         # point (one per _handle_player_turn call, one per
@@ -206,7 +226,9 @@ class PlayGame():
             isinstance(p, (CLIPlayer, NetworkPlayer)),
             p.username if isinstance(p, (CLIPlayer, NetworkPlayer)) else "",
         ))
-        random.shuffle(self.players)
+        self.replay_log.set_pre_shuffle_order(self.players)
+        self.rng.shuffle(self.players)
+        self.replay_log.set_seats(self.players)
         LoggingManager.info("Shuffled players")
         return self.players
 
@@ -342,6 +364,8 @@ class PlayGame():
         a pacing slot for nothing, forcing the *next* real broadcast to eat
         an extra, unearned wait it never should have needed.
         """
+        if not self._pace_events:
+            return
         now = time.time()
         wait = self._last_toast_broadcast_at + self.MIN_TOAST_GAP_SECONDS - now
         if wait > 0:
@@ -458,11 +482,13 @@ class PlayGame():
             if remaining_time is not None and remaining_time <= 0:
                 player.send_message(f"⏳ Time up! Auto pass.", message_type = "PLAYER_INFO")
                 player.withdraw_bid()
+                self.replay_log.add_bid_decision(self.players.index(player), "pass", timed_out=True)
                 return "pass"
 
             # Check if player is still active before getting bid
             if not player.active:
                 player.withdraw_bid()
+                self.replay_log.add_inactive_turn(self.players.index(player))
                 return "pass"
             
             bids = player.get_bid(timeout=remaining_time)
@@ -470,6 +496,10 @@ class PlayGame():
             # If get_bid() returns None, treat as pass (shouldn't happen normally for active players)
             if bids is None:
                 continue
+            # Logged raw, before validation -- an invalid/insufficient bid
+            # the engine rejects below is still part of what happened, and
+            # replaying it reproduces the same rejection.
+            self.replay_log.add_bid_decision(self.players.index(player), bids)
 
             if isinstance(bids, str):
                 cmd = bids.lower()
@@ -825,6 +855,8 @@ class PlayGame():
         if paintings:
             player._current_move_seq = self._next_move_sequence()
             chosen = player.choose_painting_to_discard()
+            self.replay_log.add_discard_decision(player_id, chosen.value if chosen is not None else None,
+                                                 active_after=player.active)
             if chosen is None:
                 # Player disconnected or otherwise failed to choose; retry on the next opportunity.
                 return False
@@ -871,6 +903,7 @@ class PlayGame():
                  "active": p.active, "eliminated": False}
                 for i, p in enumerate(self.players)
             ]
+            self.replay_log.set_result(self.players, self.final_standings, self.winners, self.auction_rounds)
             return None
 
         # Step 2: Eliminate the active player with the least money, unless
@@ -907,6 +940,7 @@ class PlayGame():
             for idx, p in enumerate(self.players)
         ]
         self.winners = winners
+        self.replay_log.set_result(self.players, self.final_standings, self.winners, self.auction_rounds)
         self.host.send_message("\n🏁 Final Standings:", data={"event": "final_standings", "standings": self.final_standings})
         for idx, player in enumerate(self.players):
             if player.active:
@@ -931,7 +965,8 @@ class PlayGame():
         for remaining in range(countdown, 0, -1):
             self.host.send_message(f"⏳  Game starting in {remaining}...",
                                     data={"event": "countdown", "seconds_left": remaining})
-            time.sleep(1)
+            if self._pace_events:
+                time.sleep(1)
 
         # final message:
         self.host.send_message(f"🚀 Game Started!", data={"event": "countdown_finished"})
@@ -967,7 +1002,8 @@ class PlayGame():
         self._record_auction_history_snapshot()
 
         num_green_cards = 0
-        starting_player_id = random.randint(0, len(self.players) - 1) # random starting player id
+        starting_player_id = self.rng.randint(0, len(self.players) - 1) # random starting player id
+        self.replay_log.set_starting_seat(starting_player_id)
         faux_pas_holder_id = None
 
         while (not self.status_card_manager.is_empty()):

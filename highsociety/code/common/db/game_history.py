@@ -31,6 +31,7 @@ how those fit together):
                 have to be.
 """
 import datetime
+import json
 import os
 import threading
 import time
@@ -356,6 +357,53 @@ _SCHEMA_STATEMENTS = [
     )
     """,
     "CREATE INDEX IF NOT EXISTS idx_game_actions_game_id ON game_actions (game_id)",
+
+    # The one table that makes a finished game reproducible from the
+    # database alone -- see recording/game_replay.py's module docstring for
+    # the audit of why game_rounds/round_players/game_actions above can't
+    # (no seed, no seat order, same-difficulty bots sharing a player_id,
+    # bid amounts without the money cards behind them, no Faux Pas
+    # discards). One self-contained JSON document per game, keyed by seat;
+    # replay_game() rebuilds and verifies it.
+    """
+    CREATE TABLE IF NOT EXISTS game_replays (
+        game_id INTEGER PRIMARY KEY REFERENCES games(id) ON DELETE CASCADE,
+        format_version INTEGER NOT NULL,
+        seed BIGINT NOT NULL,
+        replay JSONB NOT NULL
+    )
+    """,
+
+    # Bot-vs-bot self-play episodes for RL training (see selfplay_job.py),
+    # deliberately NOT written into games/player_games/ratings: thousands of
+    # bot-only games there would swing the bots' own Elo, flood the
+    # leaderboard's/global stats' counts, and buy nothing an episode row
+    # doesn't already carry. `batch` names one generation run (bot pool,
+    # engine version, target count) so a future run with different settings
+    # never gets mixed into an earlier one's dataset.
+    """
+    CREATE TABLE IF NOT EXISTS selfplay_games (
+        id BIGSERIAL PRIMARY KEY,
+        batch TEXT NOT NULL,
+        seed BIGINT NOT NULL,
+        seat_kinds JSONB NOT NULL,
+        winner_seats JSONB NOT NULL,
+        num_rounds INTEGER NOT NULL,
+        num_decisions INTEGER NOT NULL,
+        duration_ms INTEGER NOT NULL,
+        engine_version TEXT,
+        format_version INTEGER NOT NULL,
+        replay JSONB NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_selfplay_games_batch ON selfplay_games (batch)",
+    """
+    INSERT INTO meta (table_name, description) VALUES
+        ('game_replays', 'One self-contained replay log per game (seed, realized deck/seat order, every decision by seat) -- enough to rebuild and verify the game from this row alone; see recording/game_replay.py.'),
+        ('selfplay_games', 'Bot-vs-bot self-play episodes for RL training, one replay log per row, grouped by generation batch -- kept out of games/ratings on purpose; see selfplay_job.py.')
+    ON CONFLICT (table_name) DO NOTHING
+    """,
 ]
 
 _schema_ready = False
@@ -1514,7 +1562,8 @@ def record_finished_game(*, room_code: str, seats: int, bot_mix: list,
                           participants: list, achievement_unlocks: Optional[dict] = None,
                           host_username: Optional[str] = None, time_control: Optional[int] = None,
                           is_finished_successfully: bool = True,
-                          auction_rounds: Optional[list] = None) -> dict:
+                          auction_rounds: Optional[list] = None,
+                          replay: Optional[dict] = None) -> dict:
     """
     Returns {rating_key: {"old_rating", "new_rating", "rating_change"}} for
     every participant whose rating actually changed this game (a human's
@@ -1592,6 +1641,10 @@ def record_finished_game(*, room_code: str, seats: int, bot_mix: list,
     round_players/game_actions. None/empty (the default, for any caller
     that predates this or a crashed game with no history) just skips that
     entirely; nothing else here depends on it.
+
+    `replay`: PlayGame.replay_log.to_dict() -- written to game_replays in
+    this same transaction, so a game row never exists without the replay
+    that makes it reproducible (or vice versa). None skips it.
     """
     elo_changes: dict = {}
     if not is_configured():
@@ -1626,6 +1679,12 @@ def record_finished_game(*, room_code: str, seats: int, bot_mix: list,
                  host_player_id, time_control, is_finished_successfully),
             )
             game_id = cur.fetchone()[0]
+
+            if replay is not None:
+                cur.execute(
+                    "INSERT INTO game_replays (game_id, format_version, seed, replay) VALUES (%s, %s, %s, %s::jsonb)",
+                    (game_id, replay["version"], replay["seed"], json.dumps(replay)),
+                )
 
             # Mirrors PlayGame's own win rule (gameplay.py's
             # final_standings/winners computation), NOT a plain points
@@ -1896,3 +1955,100 @@ def record_finished_game_async(on_complete: Optional[Callable[[dict], None]] = N
             on_complete(result)
 
     threading.Thread(target=_run, daemon=True, name="GameHistoryWrite").start()
+
+
+# ---------------------------------------------------------------------------
+# Self-play episodes (selfplay_job.py) and replay lookups (verify_replay.py).
+# Unlike everything above, these RAISE on failure instead of logging and
+# returning a fail-safe default: their callers are batch jobs, where a
+# silently-swallowed write error would quietly lose data (or make a job
+# believe it's further along than it is) -- exactly the failure mode this
+# module's live-game writers accept on purpose so a player never waits on
+# the database.
+# ---------------------------------------------------------------------------
+
+def _require_schema() -> None:
+    if not is_configured():
+        raise RuntimeError("DATABASE_URL is not set")
+    ensure_schema()
+    if not _schema_ready:
+        raise RuntimeError("game_history schema setup failed -- see the log line above")
+
+
+def count_selfplay_games(batch: str) -> int:
+    _require_schema()
+    conn = _connect()
+    try:
+        with conn, conn.cursor() as cur:
+            cur.execute("SELECT count(*) FROM selfplay_games WHERE batch = %s", (batch,))
+            return cur.fetchone()[0]
+    finally:
+        _release_connection(conn)
+
+
+def insert_selfplay_games(batch: str, episodes: list, engine_version: Optional[str] = None) -> None:
+    """One multi-row INSERT for a whole flush of finished episodes (each a
+    PlayGame.replay_log.to_dict() plus "duration_ms") -- see
+    _record_auction_rounds' docstring on why per-row round trips to
+    Supabase are worth avoiding."""
+    if not episodes:
+        return
+    _require_schema()
+    rows = []
+    for ep in episodes:
+        replay = ep["replay"]
+        kind_of = {p["username"]: p["kind"] for p in replay["players"]}
+        rows.append((batch, replay["seed"], json.dumps([kind_of[u] for u in replay["seats"]]),
+                     json.dumps(replay["result"]["winner_seats"]), len(replay["rounds"]),
+                     len(replay["decisions"]), ep["duration_ms"], engine_version, replay["version"],
+                     json.dumps(replay)))
+    row_placeholder = "(%s, %s, %s::jsonb, %s::jsonb, %s, %s, %s, %s, %s, %s::jsonb)"
+    conn = _connect()
+    try:
+        with conn, conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO selfplay_games (batch, seed, seat_kinds, winner_seats, num_rounds, num_decisions, "
+                "duration_ms, engine_version, format_version, replay) VALUES "
+                + ",".join([row_placeholder] * len(rows)),
+                _flatten(rows),
+            )
+    finally:
+        _release_connection(conn)
+
+
+def fetch_replays(source: str, ids: Optional[list] = None, batch: Optional[str] = None,
+                  sample: Optional[int] = None) -> list:
+    """
+    [(id, replay_dict), ...] straight from the database -- the source of
+    truth verify_replay.py checks against. `source` is "selfplay"
+    (selfplay_games.id) or "game" (game_replays.game_id). Either explicit
+    `ids`, or a random `sample` of that many rows (optionally within one
+    self-play `batch`).
+    """
+    _require_schema()
+    if source == "selfplay":
+        table, id_col = "selfplay_games", "id"
+    elif source == "game":
+        table, id_col = "game_replays", "game_id"
+    else:
+        raise ValueError(f"unknown replay source {source!r}")
+    where, params = [], []
+    if ids:
+        where.append(f"{id_col} = ANY(%s)")
+        params.append(list(ids))
+    if batch is not None and source == "selfplay":
+        where.append("batch = %s")
+        params.append(batch)
+    query = f"SELECT {id_col}, replay FROM {table}"
+    if where:
+        query += " WHERE " + " AND ".join(where)
+    query += " ORDER BY random() LIMIT %s" if sample else f" ORDER BY {id_col}"
+    if sample:
+        params.append(sample)
+    conn = _connect()
+    try:
+        with conn, conn.cursor() as cur:
+            cur.execute(query, params)
+            return cur.fetchall()
+    finally:
+        _release_connection(conn)

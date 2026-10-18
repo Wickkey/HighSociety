@@ -1,4 +1,5 @@
 import datetime
+import json
 import time
 from unittest.mock import MagicMock, patch
 
@@ -1623,3 +1624,84 @@ def test_get_rating_history_returns_rows_oldest_first(database_url):
         {"old_rating": 1000, "new_rating": 1016, "created_at": t1.isoformat()},
         {"old_rating": 1016, "new_rating": 1005, "created_at": t2.isoformat()},
     ]
+
+
+def test_record_finished_game_stores_the_replay_in_the_same_transaction(database_url, mock_release_connection):
+    game_history._schema_ready = True
+    conn, cursor = _fake_connection()
+    replay = {"version": 1, "seed": 42, "decisions": []}
+    with patch.object(game_history, "_connect", return_value=conn):
+        game_history.record_finished_game(
+            room_code="ABCDE", seats=2, bot_mix=[],
+            started_at=datetime.datetime.now(datetime.timezone.utc),
+            finished_at=datetime.datetime.now(datetime.timezone.utc),
+            participants=[], replay=replay,
+        )
+    replay_calls = [c for c in cursor.execute.call_args_list if "INSERT INTO game_replays" in c.args[0]]
+    assert len(replay_calls) == 1
+    game_id, version, seed, payload = replay_calls[0].args[1]
+    assert (game_id, version, seed) == (1, 1, 42)  # game_id: the games row's own RETURNING id
+    assert json.loads(payload) == replay
+
+
+def test_record_finished_game_without_a_replay_writes_no_replay_row(database_url, mock_release_connection):
+    game_history._schema_ready = True
+    conn, cursor = _fake_connection()
+    with patch.object(game_history, "_connect", return_value=conn):
+        game_history.record_finished_game(
+            room_code="ABCDE", seats=2, bot_mix=[],
+            started_at=datetime.datetime.now(datetime.timezone.utc),
+            finished_at=datetime.datetime.now(datetime.timezone.utc),
+            participants=[],
+        )
+    assert not any("game_replays" in c.args[0] for c in cursor.execute.call_args_list)
+
+
+def _episode(seed, winner_seats=(1,)):
+    return {"duration_ms": 1234, "replay": {
+        "version": 1, "seed": seed,
+        "players": [{"username": "a", "kind": "easy"}, {"username": "b", "kind": "hard"}],
+        "seats": ["b", "a"], "rounds": [{}, {}, {}], "decisions": [{}] * 7,
+        "result": {"winner_seats": list(winner_seats)},
+    }}
+
+
+def test_insert_selfplay_games_batches_every_episode_into_one_insert(database_url, mock_release_connection):
+    game_history._schema_ready = True
+    conn, cursor = _fake_connection()
+    with patch.object(game_history, "_connect", return_value=conn):
+        game_history.insert_selfplay_games("rl-v1", [_episode(1), _episode(2)], engine_version="abc")
+    (call,) = cursor.execute.call_args_list
+    assert call.args[0].startswith("INSERT INTO selfplay_games")
+    params = call.args[1]
+    assert len(params) == 20  # 2 rows x 10 columns
+    batch, seed, seat_kinds, winner_seats, num_rounds, num_decisions, duration_ms, engine, version, _ = params[:10]
+    # seat_kinds follows the realized seat order, not the pre-shuffle player list
+    assert (batch, seed, json.loads(seat_kinds), json.loads(winner_seats)) == ("rl-v1", 1, ["hard", "easy"], [1])
+    assert (num_rounds, num_decisions, duration_ms, engine, version) == (3, 7, 1234, "abc", 1)
+
+
+def test_insert_selfplay_games_raises_instead_of_swallowing_a_database_error(database_url, mock_release_connection):
+    game_history._schema_ready = True
+    conn, cursor = _fake_connection()
+    cursor.execute.side_effect = RuntimeError("connection reset")
+    with patch.object(game_history, "_connect", return_value=conn):
+        with pytest.raises(RuntimeError):
+            game_history.insert_selfplay_games("rl-v1", [_episode(1)])
+
+
+def test_selfplay_helpers_refuse_to_run_without_a_database(no_database_url):
+    with pytest.raises(RuntimeError):
+        game_history.count_selfplay_games("rl-v1")
+
+
+def test_fetch_replays_samples_within_a_batch(database_url, mock_release_connection):
+    game_history._schema_ready = True
+    conn, cursor = _fake_connection()
+    cursor.fetchall.return_value = [(3, {"version": 1})]
+    with patch.object(game_history, "_connect", return_value=conn):
+        rows = game_history.fetch_replays("selfplay", batch="rl-v1", sample=5)
+    assert rows == [(3, {"version": 1})]
+    query, params = cursor.execute.call_args.args
+    assert "FROM selfplay_games" in query and "batch = %s" in query and "random()" in query
+    assert params == ["rl-v1", 5]
