@@ -94,6 +94,35 @@ def no_real_email(monkeypatch):
     monkeypatch.setattr(smtplib, "SMTP", _refuse)
 
 
+@pytest.fixture(autouse=True)
+def close_leftover_websocket_clients(monkeypatch):
+    """Closes every simple_websocket.Client a test opened and left open.
+    Each client reads on its own non-daemon thread, and the test servers
+    run on daemon threads that never shut down, so one forgotten client
+    kept the whole pytest process alive after "N passed" -- holding its
+    ports, which then broke the next run's web-server tests."""
+    try:
+        import simple_websocket
+    except ImportError:
+        yield
+        return
+    opened = []
+    original_init = simple_websocket.Client.__init__
+
+    def tracking_init(self, *args, **kwargs):
+        opened.append(self)
+        original_init(self, *args, **kwargs)
+
+    monkeypatch.setattr(simple_websocket.Client, "__init__", tracking_init)
+    yield
+    for client in opened:
+        if client.connected:
+            try:
+                client.close()
+            except Exception:
+                pass  # already closing/closed from the other side
+
+
 class ScriptedPlayer(CLIPlayer):
     """
     A CLIPlayer whose bids/discards come from a pre-programmed queue instead
