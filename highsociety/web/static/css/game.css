@@ -11,7 +11,14 @@
   align-items: start;
 }
 @media (max-width: 800px) {
-  .table-layout { grid-template-columns: 1fr; }
+  /* One column: rather than stacking the whole side column (your panel,
+     the opponents) under the centre one -- which put it below the game
+     log and chat, out of sight while choosing a bid -- both columns
+     dissolve into one list, and the log and chat move to the end. Row
+     gap 0: each panel already brings its own margin-bottom. */
+  .table-layout { grid-template-columns: 1fr; row-gap: 0; }
+  .table-layout > .center-col, .table-layout > .side-col { display: contents; }
+  .table-layout .log-details, .table-layout .chat-panel { order: 1; }
 }
 
 .side-col .panel { --panel-tint: var(--panel-bg-alt); }
