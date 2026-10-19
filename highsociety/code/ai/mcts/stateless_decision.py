@@ -98,7 +98,7 @@ def decide_bid(auction_history: AuctionHistory, event_log: list[dict], live_stat
         faux_pas_holder=faux_pas_holder,
     )
 
-    action = run_search(state, me_idx, capped_greedy_policy, config)
+    action = run_search(state, me_idx, capped_greedy_policy, config, rng)
     return "pass" if action == "pass" else [action]
 
 

@@ -153,8 +153,10 @@ def _broke_game_facing_a_high_bid():
 
 
 def _rich_uncontested_game():
-    """Bot has its full starting hand; nobody has bid yet -- the only
-    sensible decision is a raise (a [value] list), never "pass"."""
+    """Bot has its full starting hand; nobody has bid yet. It may raise
+    with any card or pass (in a 2-player game the poorer player is
+    eliminated, so even passing is reasonable) -- see the test below for
+    how a mix-up is detected anyway."""
     bot = PassBot(name="BotB", username="bot_b")
     other = PassBot(name="OtherB", username="other_b")
     history = AuctionHistory()
@@ -169,9 +171,10 @@ class TestConcurrentGamesDontCrossContaminate:
     Two deliberately different, easily-distinguishable game states, decided
     concurrently (two real threads, sharing one pool) many times over --
     if the shared pool ever mixed up which response belongs to which
-    request, it would show up as an obviously wrong decision (the broke bot
-    "raising" with money it doesn't have, or the rich uncontested bot
-    inexplicably "passing"), not just a subtly-off one.
+    request, it would show up as a wrong decision: the broke bot "raising"
+    with money it doesn't have, or the rich bot's answers differing from the
+    ones the same seeds give when decided one at a time in-process (a
+    decision is fully determined by its state and rng seed).
     """
 
     def test_two_concurrent_games_each_get_their_own_correct_decision(self):
@@ -198,5 +201,9 @@ class TestConcurrentGamesDontCrossContaminate:
 
         assert results["broke"] == ["pass"] * 8, \
             f"broke bot should always pass -- got {results['broke']}"
-        assert all(isinstance(o, list) for o in results["rich"]), \
-            f"rich, uncontested bot should always raise, never pass -- got {results['rich']}"
+        expected_rich = []
+        for i in range(8):
+            history, live_state, username = _rich_uncontested_game()
+            expected_rich.append(decide_bid_direct(history, [], live_state, username, config, random.Random(i)))
+        assert results["rich"] == expected_rich, \
+            f"rich bot's pooled answers should match the same seeds decided in-process -- got {results['rich']}"
