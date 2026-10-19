@@ -11,6 +11,19 @@ import os
 _REPO_ROOT = Path(__file__).resolve().parents[5]
 
 
+class _CurrentStderrHandler(logging.StreamHandler):
+    """Writes to whatever sys.stderr is at the moment of each record, not
+    the stream it was at setup (same idea as logging's own last-resort
+    handler) -- so a later redirect of stderr is still honoured."""
+
+    def __init__(self):
+        logging.Handler.__init__(self)
+
+    @property
+    def stream(self):
+        return sys.stderr
+
+
 class LogType(Enum):
     GENERIC = 'GENERIC'
     SECURITY = 'SECURITY'
@@ -76,7 +89,7 @@ class LoggingManager:
         # wiped on every deploy and never shown anywhere, so a production
         # error (e.g. "Game thread crashed") used to be invisible. Render
         # shows a service's stdout/stderr, so warnings and up also go there.
-        console_handler = logging.StreamHandler(sys.stderr)
+        console_handler = _CurrentStderrHandler()
         console_handler.setLevel(config.get("logging").get("console_level", "WARNING").upper())
         console_handler.setFormatter(formatter)
         cls._generic_logger.addHandler(console_handler)
