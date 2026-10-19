@@ -2,7 +2,7 @@ from concurrent.futures import Future
 
 import pytest
 
-import selfplay_job
+from scripts import selfplay_job
 from highsociety.code.common.db import game_history
 from highsociety.code.gamecore.recording.game_replay import replay_record
 

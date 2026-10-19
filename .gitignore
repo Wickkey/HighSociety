@@ -171,3 +171,6 @@ Thumbs.db
 *~
 
 *.ipynb
+
+# Local RL workspace (notebooks, cached self-play data) -- never pushed
+.RL/

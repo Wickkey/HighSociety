@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-selfplay_job.py
+scripts/selfplay_job.py
 
 Plays bot-vs-bot games back to back and stores every one in Supabase
 (`selfplay_games`, see game_history.py) until a target count is reached --
 training data for an RL model. Built to run as a Render Cron Job (see
-render.yaml / SELFPLAY.md) but works the same anywhere with DATABASE_URL set.
+render.yaml / docs/SELFPLAY.md) but works the same anywhere with DATABASE_URL set.
 
 Resumable by design: each run counts how many games its batch already has
 and only plays the remainder, so a run killed mid-way (Render's run time
@@ -39,8 +39,8 @@ Configuration (env var, or the matching --flag, which wins):
                                      see highsociety/code/common/notify.py
 
 Usage:
-    python3 selfplay_job.py
-    python3 selfplay_job.py --target-games 50 --batch smoke-test --workers 4
+    python3 -m scripts.selfplay_job
+    python3 -m scripts.selfplay_job --target-games 50 --batch smoke-test --workers 4
 """
 import argparse
 import os

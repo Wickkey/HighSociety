@@ -2,6 +2,7 @@
 import { $, hide, show } from '../utils/dom.js';
 import { escapeHtml } from '../utils/formatting.js';
 import { fetchJSON } from '../lobby/lobby.js';
+import { readCache, swr, writeCache } from '../utils/swrCache.js';
 // Circular with gameHistory.js (which imports openGameDetailModal from
 // here) via playerProfile.js's own import of fetchGamesPage/renderIfChanged
 // from gameHistory.js -- safe by this project's own established
@@ -20,11 +21,14 @@ import { showPlayerProfileScreen } from '../lobby/playerProfile.js';
 // can't resign and click the home link in the same instant), so a single
 // pending resolver is enough; no stacking/queueing needed.
 let _confirmDialogResolve = null;
-export function confirmDialog(message, confirmLabel) {
+// tone: the confirm button's style -- 'danger' (the default, for
+// irreversible exits like Resign) or 'primary' for an ordinary go-ahead.
+export function confirmDialog(message, confirmLabel, { tone = 'danger' } = {}) {
   return new Promise((resolve) => {
     _confirmDialogResolve = resolve;
     $('confirm-modal-message').textContent = message;
     $('confirm-modal-confirm').textContent = confirmLabel;
+    $('confirm-modal-confirm').className = tone;
     show($('confirm-modal'));
   });
 }
@@ -48,16 +52,21 @@ export async function openProfileModal(username) {
   hide($('profile-view-stats-row'));
   hide($('profile-view-empty'));
   show($('profile-view-modal'));
-  try {
-    const stats = await fetchJSON(`/api/profile/${encodeURIComponent(username)}`);
+  // Same cache entry as account.js's profileStats -- painted at once if
+  // seen before, then refreshed.
+  const paint = (stats) => {
     $('profile-view-elo').textContent = stats.elo;
     show($('profile-view-elo-line'));
     $('profile-view-games').textContent = stats.games_played;
     $('profile-view-winrate').textContent = `${Math.round(stats.win_rate * 100)}%`;
     show($('profile-view-stats-row'));
-  } catch (e) {
-    show($('profile-view-empty'));
-  }
+  };
+  const { cached, freshPromise } = swr(`profile:${username}`, () =>
+    fetchJSON(`/api/profile/${encodeURIComponent(username)}`));
+  if (cached) paint(cached);
+  const fresh = await freshPromise;
+  if (fresh) paint(fresh);
+  else if (!cached) show($('profile-view-empty'));
 }
 export function closeProfileModal() { hide($('profile-view-modal')); }
 
@@ -80,7 +89,13 @@ export async function openGameDetailModal(gameId) {
   $('game-detail-date').textContent = '';
   show($('game-detail-modal'));
   try {
-    const detail = await fetchJSON(`/api/games/detail/${encodeURIComponent(gameId)}`);
+    // A finished game never changes, so a cached copy is final -- only a
+    // game this browser has never opened costs a round trip.
+    let detail = readCache(`game:${gameId}`);
+    if (!detail) {
+      detail = await fetchJSON(`/api/games/detail/${encodeURIComponent(gameId)}`);
+      writeCache(`game:${gameId}`, detail);
+    }
     $('game-detail-date').textContent = new Date(detail.finished_at).toLocaleDateString();
     body.innerHTML = detail.participants.map((p) => {
       // A human's own name is always a real, linkable username. A bot's

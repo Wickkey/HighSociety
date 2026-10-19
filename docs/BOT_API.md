@@ -11,7 +11,7 @@ Two ways to build a bot, depending on where it runs:
   reference, but `highsociety/code/ai/` (`pass_bot.py`, `greedy_bot.py`, `capped_greedy_bot.py`)
   are actual bots to read instead — see `dev_tools/simulate_bots.py` to watch them play live.
   Simplest option if your bot lives in this codebase.
-- **Remote** — connect over the network like any other player (`network_client.py`'s protocol),
+- **Remote** — connect over the network like any other player (`scripts/network_client.py`'s protocol),
   in any language. This is what you want for an external bot-building competition, since entrants
   don't need this repo at all — just a TCP socket and JSON.
 
@@ -20,7 +20,7 @@ don't already have example code for elsewhere in the repo.
 
 ## The wire protocol, from a bot's point of view
 
-Connect a TCP socket to the host/port `network_server.py` prints, then exchange newline-delimited
+Connect a TCP socket to the host/port `scripts/network_server.py` prints, then exchange newline-delimited
 JSON objects — each message is one `json.dumps(...) + "\n"`.
 
 ### 1. Handshake
@@ -237,7 +237,7 @@ which is exactly why `move_type` exists.
 
 ## Testing your bot without a real opponent
 
-`network_server.py --seed N` makes the whole game (deck order, turn order) reproducible, and
+`python3 -m scripts.network_server --seed N` makes the whole game (deck order, turn order) reproducible, and
 `python3 -m highsociety.code.gamecore.dev_tools.inspect_seed --seed N` shows you the exact card
 order a given seed deals before you even connect — useful for engineering a specific scenario to
 test your bot's logic against. See `PLAYING.md` for the full record/replay workflow, which also

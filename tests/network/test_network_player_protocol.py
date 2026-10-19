@@ -155,7 +155,7 @@ def test_get_bid_returns_quit_when_connection_closes_while_inactive(player_and_p
 
 
 def test_get_bid_with_no_disconnect_grace_configured_quits_almost_instantly(player_and_peer):
-    """Pins network_server.py's raw-socket default -- disconnect_grace_seconds
+    """Pins scripts/network_server.py's raw-socket default -- disconnect_grace_seconds
     is left unset there (see NetworkPlayer.__init__), since a plain socket
     client has no reconnect mechanism to ever recover through. A dropped
     connection must still resolve immediately, not wait, matching today's

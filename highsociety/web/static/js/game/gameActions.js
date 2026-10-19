@@ -131,7 +131,7 @@ export function onDiscardPainting() {
   answerMyPrompt();
 }
 
-export function onPlaceBid() {
+export async function onPlaceBid() {
   // A read-only check here (not answerMyPrompt() itself) -- the "select at
   // least one money card" validation below must be able to fail without
   // consuming the prompt, so the player can fix their selection and try
@@ -141,6 +141,21 @@ export function onPlaceBid() {
   hide($('move-error'));
   const values = [...game.selectedBid];
   if (values.length === 0) { showError($('move-error'), 'Select at least one money card.'); return; }
+  if (game.isTutorial && !game.tutorialCoachShown.no_change) {
+    // Tutorial only, once: the "no change" rule is invisible until it has
+    // already cost you -- say it before the first bid goes out, not after.
+    const prompt = game.myPrompt;
+    const adding = values.reduce((a, b) => a + b, 0);
+    const cards = values.length > 1 ? `${values.sort((a, b) => a - b).join(' + ')} = ${adding}` : `${adding}`;
+    const ok = await confirmDialog(`You're adding ${cards}, for a bid of ${game.myAuctionBid + adding}. `
+      + 'Money cards are paid whole: there\'s no change, so even if a smaller bid would have been enough, '
+      + 'all of it counts. Place this bid?', 'Place Bid', { tone: 'primary' });
+    if (!ok) return;
+    game.tutorialCoachShown.no_change = true;
+    // The dialog waited on the player; make sure it's still the same open
+    // decision before sending (no clock in the tutorial, but cheap to check).
+    if (game.myPrompt !== prompt || prompt.answered) return;
+  }
   // move_seq: see onDiscardPainting's identical comment -- this is the fix
   // for a real, previously-recurring bug where a bid sent right as this
   // player's own timer expired got silently applied to the *next* round's

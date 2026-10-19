@@ -13,7 +13,7 @@ class NetworkSpectator:
 
     Mostly send-only (the server drives game broadcasts to spectators
     without ever reading anything back), but does receive CHAT messages —
-    see network_server.py's per-spectator chat-relay thread, which is the
+    see scripts/network_server.py's per-spectator chat-relay thread, which is the
     only code that calls transport.receive() on a spectator's connection.
     """
     def __init__(self, transport: Transport, username: str, name: str, game_id: str):

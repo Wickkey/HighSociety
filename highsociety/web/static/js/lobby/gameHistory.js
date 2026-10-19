@@ -18,7 +18,8 @@ import { openGameDetailModal } from '../ui/modals.js';
 // touch the other's export inside a function body (loadHomeRecentGames
 // below; loadRecentActivity in account.js), never at this module's own
 // top-level evaluation, so load order never matters.
-import { getPrefetchedStats } from '../account/account.js';
+import { profileStats } from '../account/account.js';
+import { swr } from '../utils/swrCache.js';
 
 // Bot display names already end in "bot" (see ai/bot_names.py's naming
 // convention -- "Ziggy bot", "Milo bot") -- appending "(bot)" again read
@@ -109,7 +110,6 @@ export function renderIfChanged(container, games, myUsername) {
 // why not display it" -- they're now the same cache entry, not two
 // separate fetches for overlapping data.
 const PAGE_SIZE = 10;
-const gamesPageCache = new Map(); // key -> {games, has_more}
 
 // Returns {cached, freshPromise}: `cached` is last known good data for
 // this page (or null the very first time), paintable immediately with no
@@ -122,17 +122,12 @@ const gamesPageCache = new Map(); // key -> {games, has_more}
 // Account right after browsing Home (the overwhelmingly common order,
 // since Home is the app's own landing screen) costs zero extra network
 // wait for this data.
+//
+// Backed by utils/swrCache.js, so the cache now survives a page reload too.
 export function fetchGamesPage(username, offset) {
-  const key = `${username}:${offset}`;
-  const cached = gamesPageCache.get(key) || null;
-  const freshPromise = fetchJSON(`/api/games/${encodeURIComponent(username)}?limit=${PAGE_SIZE}&offset=${offset}`)
-    .then((result) => {
-      const page = { games: result.games || [], has_more: !!result.has_more };
-      gamesPageCache.set(key, page);
-      return page;
-    })
-    .catch(() => null);
-  return { cached, freshPromise };
+  return swr(`games:${username}:${offset}`, () =>
+    fetchJSON(`/api/games/${encodeURIComponent(username)}?limit=${PAGE_SIZE}&offset=${offset}`)
+      .then((result) => ({ games: result.games || [], has_more: !!result.has_more })));
 }
 
 // Home screen widget -- top 5 games for whoever's currently signed in,
@@ -160,14 +155,15 @@ export async function loadHomeRecentGames() {
 async function loadHomeEloBadge(profile) {
   const badge = $('home-recent-games-elo');
   if (!profile || !profile.google_id) { hide(badge); return; }
-  try {
-    const stats = await getPrefetchedStats(profile.username);
-    if (!stats) { hide(badge); return; }
+  const paint = (stats) => {
     $('home-recent-games-elo-value').textContent = stats.elo;
     show(badge);
-  } catch (e) {
-    hide(badge);
-  }
+  };
+  const { cached, freshPromise } = profileStats(profile.username);
+  if (cached) paint(cached);
+  const fresh = await freshPromise;
+  if (fresh) paint(fresh);
+  else if (!cached) hide(badge);
 }
 
 function paintHomeRecentGames(page, username, section) {

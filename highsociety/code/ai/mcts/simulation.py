@@ -36,8 +36,8 @@ for how the live game state gets turned into a SimState in the first place):
   how much they could still add this specific auction if they've already
   bid something this round, in exchange for not needing mid-auction
   structured broadcasts (AUCTION_UPDATE's `cards=` field), which are only
-  ever delivered in 'network' mode -- CLI-mode games (bot_evaluator.py,
-  main.py) would otherwise see this bot behave inconsistently by host type.
+  ever delivered in 'network' mode -- CLI-mode games (scripts/bot_evaluator.py,
+  scripts/play_cli.py) would otherwise see this bot behave inconsistently by host type.
 - Approximation: a Faux Pas discard obligation is only tracked for this
   bot's own seat (BasePlayer.holds_faux_pas/has_discarded_card are exact
   for "me"). An *opponent* holding an unresolved Faux Pas is not detected

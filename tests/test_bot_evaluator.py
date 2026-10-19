@@ -1,4 +1,4 @@
-from bot_evaluator import compute_ranks, ranked_rows, run_simulations
+from scripts.bot_evaluator import compute_ranks, ranked_rows, run_simulations
 
 
 def test_compute_ranks_orders_by_points_and_puts_eliminated_last():

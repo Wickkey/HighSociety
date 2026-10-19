@@ -250,7 +250,7 @@ def _spectator_chat_listener(spectator: NetworkSpectator, players: list, spectat
 
         target = "spectators" if msg.get("target") == "spectators" else "all"
         # The message's own JSON carries `to_user(s)` structurally (see
-        # protocol.py's _chat_payload), but network_spectator_client.py just
+        # protocol.py's _chat_payload), but scripts/network_spectator_client.py just
         # prints `prompt` verbatim — so a spectators-only message needs its
         # own tag baked into the text, or a receiving spectator has no way to
         # tell it apart from a message that also reached the players.
@@ -345,7 +345,7 @@ def start_server(host='0.0.0.0', port=8888, num_players=2, seed=None, record_pat
         seed: Seed the RNG for a fully reproducible game; auto-generated if not given
         record_path: If given, records every player decision to this path (see
             highsociety.code.gamecore.recording) so the game can be replayed
-            later with `python3 main.py --replay PATH` — no networking needed
+            later with `python3 -m scripts.play_cli --replay PATH` — no networking needed
             to replay, so this works the same whether the original game was
             played over CLI or network.
         bot_players: Bot instances (see highsociety/code/ai/) to pre-seed as
@@ -468,7 +468,7 @@ if __name__ == '__main__':
                        help='Seed the RNG for a fully reproducible game (deck order, player order, starting player)')
     parser.add_argument('--record', type=str, default=None, metavar='PATH',
                        help='Record every decision made this game to PATH. Replay it later with '
-                            '`python3 main.py --replay PATH` (no networking needed to replay).')
+                            '`python3 -m scripts.play_cli --replay PATH` (no networking needed to replay).')
     parser.add_argument('--bots', type=str, default=None,
                        help='Comma-separated bot types (see highsociety/code/ai/) to fill some of '
                             '--players seats with, e.g. --bots greedy,pass — the server then only '

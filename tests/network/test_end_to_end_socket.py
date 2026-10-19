@@ -1,4 +1,3 @@
-import itertools
 import json
 import socket
 import threading
@@ -6,21 +5,43 @@ import time
 
 import pytest
 
-from network_server import start_server, accept_players
+from scripts.network_server import start_server, accept_players
 from highsociety.code.common.utils.network_utility import send_json, receive_json
 from highsociety.code.ai.pass_bot import PassBot
 
-# NOTE: id(threading.current_thread()) is constant across the whole pytest
-# session (same main thread), so it can't be used to pick a fresh port when
-# a fixture is invoked more than once — every invocation would collide on
-# the same port. A real counter guarantees a never-reused port instead.
-_chat_test_port_counter = itertools.count(21000, 2)  # step by 2: each game also uses port+1 for spectators
+def _free_port_pair() -> int:
+    """
+    A port p where both p and p+1 are free right now (a game's server
+    listens on p for players and p+1 for spectators), picked by the OS
+    rather than a hard-coded range.
+
+    Hard-coded ranges were the cause of a flaky test: several tests used
+    `base + id(current_thread()) % 500` (bases 19100-20800) and leave their
+    listening socket open, while the spectator fixture counted up from
+    21000 -- overlapping ranges, colliding only on runs where the thread id
+    happened to land there. A collision is a silent hijack: start_server's
+    bind fails inside its own thread, and the test's clients connect to the
+    other test's leftover socket, which never starts a game.
+    """
+    for _ in range(50):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+            probe.bind(("127.0.0.1", 0))
+            port = probe.getsockname()[1]
+        if port >= 65535:
+            continue
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as second:
+                second.bind(("127.0.0.1", port + 1))
+        except OSError:
+            continue
+        return port
+    raise RuntimeError("no free port pair found")
 
 
 class ScriptedSocketClient:
     """
     Drives the real wire protocol over a real TCP socket, without needing a
-    terminal/stdin — used to exercise network_server.py + NetworkPlayer
+    terminal/stdin — used to exercise scripts/network_server.py + NetworkPlayer
     end-to-end. Always responds "pass" to every PLAYER_MOVE, so a whole game
     completes deterministically and quickly.
     """
@@ -174,7 +195,7 @@ class ScriptedSpectatorSocketClient:
 
 @pytest.fixture
 def running_server():
-    port = 19100 + (id(threading.current_thread()) % 500)
+    port = _free_port_pair()
     t = threading.Thread(
         target=start_server,
         kwargs={"host": "127.0.0.1", "port": port, "num_players": 2},
@@ -225,7 +246,7 @@ def test_a_bot_pre_seeded_into_start_server_fills_a_seat_without_a_socket():
     NetworkPlayer (receiver threads, heartbeat monitor, closing sockets) and
     would crash with AttributeError on a bot instead.
     """
-    port = next(_chat_test_port_counter)
+    port = _free_port_pair()
     bot = PassBot(name="Bot", username="bot")
     t = threading.Thread(
         target=start_server,
@@ -255,8 +276,8 @@ def test_a_bot_pre_seeded_into_start_server_fills_a_seat_without_a_socket():
 def test_recorded_network_game_replays_identically_via_a_plain_cli_replay(tmp_path):
     """
     Cross-mode record/replay: a game actually played over real sockets is
-    recorded with network_server.py's --record, then replayed purely through
-    PlayGame + ReplayPlayer (the same mechanism main.py --replay uses) with
+    recorded with scripts/network_server.py's --record, then replayed purely through
+    PlayGame + ReplayPlayer (the same mechanism scripts/play_cli.py --replay uses) with
     no networking involved at all — replay never needs a live connection,
     since ReplayPlayer's wrapped state-holder is a plain CLIPlayer regardless
     of how the original game was played.
@@ -266,7 +287,7 @@ def test_recorded_network_game_replays_identically_via_a_plain_cli_replay(tmp_pa
     from highsociety.code.gamecore.recording.session_recorder import SessionRecorder
     from highsociety.code.gamecore.recording.replay_player import ReplayPlayer
 
-    port = 19600 + (id(threading.current_thread()) % 500)
+    port = _free_port_pair()
     record_path = tmp_path / "network_session.json"
     t = threading.Thread(
         target=start_server,
@@ -314,7 +335,7 @@ def test_a_failed_handshake_does_not_permanently_steal_a_player_slot():
     — the server proceeded with fewer real players than requested instead
     of waiting for a replacement connection.
     """
-    port = 20700 + (id(threading.current_thread()) % 500)
+    port = _free_port_pair()
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     server_socket.bind(("127.0.0.1", port))
@@ -372,7 +393,7 @@ def test_handshake_rejects_a_mismatched_game_id_and_waits_for_a_replacement():
     this game — same "wait for a real replacement" behavior as a malformed
     handshake.
     """
-    port = 20800 + (id(threading.current_thread()) % 500)
+    port = _free_port_pair()
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     server_socket.bind(("127.0.0.1", port))
@@ -419,7 +440,7 @@ def test_handshake_rejects_a_mismatched_game_id_and_waits_for_a_replacement():
 @pytest.fixture
 def running_game_with_spectators():
     """A full server with 2 real players and 2 real spectators, all connected."""
-    port = next(_chat_test_port_counter)
+    port = _free_port_pair()
     t = threading.Thread(
         target=start_server,
         kwargs={"host": "127.0.0.1", "port": port, "num_players": 2},

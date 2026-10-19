@@ -84,7 +84,7 @@ def validate_player_count(num_players: int, rules: dict = None) -> str:
     Checks num_players against HSConfig.json's min_players/max_players (a
     dict from get_game_setting_configurations(), fetched automatically if
     not given). Returns an error message string if out of range, or None if
-    valid — shared by main.py and network_server.py so both entry points
+    valid — shared by scripts/play_cli.py and scripts/network_server.py so both entry points
     enforce the exact same rule instead of each hardcoding their own.
     """
     rules = rules if rules is not None else (get_game_setting_configurations() or {})
@@ -103,7 +103,7 @@ def generate_game_id() -> str:
     A short, URL/filename-safe random id for one game session — used as the
     `game_id` every player/spectator message carries (see network/protocol.py)
     so a stale or misdirected message can be told apart from this game's own.
-    Shared by network_server.py and web_server.py so both entry points mint
+    Shared by scripts/network_server.py and web_server.py so both entry points mint
     ids the same way.
     """
     raw = uuid.uuid4().bytes

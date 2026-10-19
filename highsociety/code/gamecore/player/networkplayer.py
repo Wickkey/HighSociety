@@ -13,7 +13,7 @@ from highsociety.code.common.logger_module.logger.logging_manager import Logging
 class NetworkPlayer(BasePlayer):
     """
     Remote player. Talks entirely through a Transport (today always a
-    SocketTransport, see network_server.py) using the shared player message
+    SocketTransport, see scripts/network_server.py) using the shared player message
     protocol (network/protocol.py) — this class has no socket/threading
     knowledge of its own, so a future transport (e.g. WebSockets for a
     browser client) plugs in here unchanged.
@@ -34,7 +34,7 @@ class NetworkPlayer(BasePlayer):
         # How long get_bid()/choose_painting_to_discard() will wait for a
         # dropped connection to reattach() before giving up and quitting that
         # one decision (see _wait_for_reconnect below) — None (the default,
-        # what network_server.py's raw-socket path leaves it at) means no
+        # what scripts/network_server.py's raw-socket path leaves it at) means no
         # wait at all, preserving the original instant-quit behavior for a
         # transport with no reconnect mechanism to ever recover through.
         # web_server.py computes and passes a real value per-room.
@@ -54,7 +54,7 @@ class NetworkPlayer(BasePlayer):
     def start_receiver_thread(self) -> None:
         """Begin receiving messages in the background. Kept as an explicit,
         separately-timed step (rather than starting in __init__) to match
-        network_server.py, which finishes accepting all players before
+        scripts/network_server.py, which finishes accepting all players before
         starting anyone's receiver."""
         self.transport.start()
 
@@ -124,7 +124,7 @@ class NetworkPlayer(BasePlayer):
         before the wait ran out; disconnect_grace_seconds=None (see
         __init__) skips the wait entirely and returns False immediately,
         which is what keeps a transport with no reconnect mechanism (plain
-        socket play via network_server.py) from ever hanging with no way to
+        socket play via scripts/network_server.py) from ever hanging with no way to
         recover.
         """
         if self.disconnect_grace_seconds is None:

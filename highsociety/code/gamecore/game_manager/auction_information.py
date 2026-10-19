@@ -6,7 +6,7 @@ with no further conversion, and `PlayGame.auction_rounds` /
 `PlayGame.get_auction_history()` are the two places to find these.
 
 See PlayGame.get_auction_history() for the local/embedded API, and
-BOT_API.md for how this same data arrives over the network as an
+docs/BOT_API.md for how this same data arrives over the network as an
 AUCTION_RESULT message for a remote bot.
 """
 import datetime

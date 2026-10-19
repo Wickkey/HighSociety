@@ -14,7 +14,7 @@ from highsociety.code.gamecore.game_manager.gameplay import PlayGame
 # layer has an extra dependency this test file otherwise avoids entirely).
 # If web_server.py's constant ever changes, update this to match and rerun
 # -- see inspect_seed.py's own module docstring for how to pick a new one.
-_TUTORIAL_SEED = 8
+_TUTORIAL_SEED = 765
 
 
 @pytest.fixture
@@ -144,6 +144,38 @@ class TestCuratedTutorialSeed:
         order, cutoff = order_and_cutoff
         assert cutoff < len(order)  # the 4th green card is actually reached, not left in the deck
         assert cutoff <= 10  # short enough to stay a "quick first game", not a marathon
+
+    def test_opens_with_plain_painting_auctions(self, order_and_cutoff):
+        """The basic "highest bid wins" auction comes first; the stranger
+        disgrace rules wait until the player has bid a few times."""
+        order, _ = order_and_cutoff
+        assert order[0].startswith("Painting(") and order[1].startswith("Painting(")
+
+    def test_every_disgrace_card_is_auctioned_after_a_green_card(self, order_and_cutoff):
+        order, cutoff = order_and_cutoff
+        played = order[:cutoff]
+        positions = {name: next(i for i, c in enumerate(played) if c.startswith(name + "("))
+                     for name in ("Passe", "FauxPas", "Scandale")}
+        first_green = next(i for i, c in enumerate(played) if "color=green" in c)
+        assert min(positions.values()) == positions["Passe"]  # the simplest one first
+        assert first_green < positions["Passe"]
+
+    def test_paintings_are_out_before_the_faux_pas(self, order_and_cutoff):
+        """Someone has a painting to throw away when the Faux Pas lands."""
+        order, _ = order_and_cutoff
+        faux_pas = next(i for i, c in enumerate(order) if c.startswith("FauxPas("))
+        assert sum(c.startswith("Painting(") for c in order[:faux_pas]) >= 3
+
+    def test_a_real_game_draws_the_same_order(self, order_and_cutoff):
+        """draw_order_for_seed seeds the global RNG; PlayGame uses its own
+        random.Random(seed). The two must agree or the curated order is fiction."""
+        order, _ = order_and_cutoff
+        game = PlayGame(players=create_tutorial_bots(0) + [TutorialBot(name="You", username="you")],
+                        mode="cli", seed=_TUTORIAL_SEED)
+        drawn = []
+        while not game.status_card_manager.is_empty():
+            drawn.append(repr(game.status_card_manager.remove_top_card()))
+        assert drawn == order
 
 
 def test_disgrace_backoff_lets_a_persistent_rival_dump_the_card_on_it(bot):

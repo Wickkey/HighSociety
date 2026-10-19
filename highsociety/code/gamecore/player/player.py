@@ -74,7 +74,7 @@ class BasePlayer(BotInterface):
         not included here — it's game-wide, not player-scoped, so it belongs
         on the game rather than duplicated per player. Use
         PlayGame.get_auction_history() instead (or, over the network, the
-        AUCTION_RESULT messages broadcast after each auction — see BOT_API.md).
+        AUCTION_RESULT messages broadcast after each auction — see docs/BOT_API.md).
         """
         player_info = {
             "name": self.__name,

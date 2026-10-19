@@ -73,7 +73,7 @@ class PlayGame():
 
         pace_events: False skips the countdown's and toast pacing's real
         sleeps — for bulk bot-vs-bot simulation nobody is watching (see
-        selfplay_job.py and recording/game_replay.py's replayer).
+        scripts/selfplay_job.py and recording/game_replay.py's replayer).
 
         preseated: `players` is already in final turn order -- keep it
         instead of shuffling. The RNG still advances exactly as a shuffle
@@ -83,7 +83,7 @@ class PlayGame():
         turn_duration: seconds each player gets per move, or None for no
         limit. Defaults to HSConfig.json's game_settings.rules.time_per_move
         (today null, i.e. no limit) when not given at all — this is what CLI
-        play and network_server.py get. Pass an explicit value (including
+        play and scripts/network_server.py get. Pass an explicit value (including
         None) to override that per-game, e.g. web_server.py letting a host
         pick a per-move timer from the lobby form.
 
@@ -284,7 +284,7 @@ class PlayGame():
         dicts (see AuctionRecord.to_dict()). This is the canonical way to read
         auction history for a locally-embedded bot using the Python API
         directly; a remote bot gets the same data pushed as an AUCTION_RESULT
-        message right after each auction concludes (see BOT_API.md).
+        message right after each auction concludes (see docs/BOT_API.md).
         """
         return [record.to_dict() for record in self.auction_rounds]
 
@@ -356,7 +356,7 @@ class PlayGame():
         Pushes the just-completed auction's full structured record to every
         player and spectator (network mode) as an AUCTION_RESULT message, so
         a remote bot has real-time access to auction history without needing
-        to poll for it — see BOT_API.md. In CLI mode this is a no-op for the
+        to poll for it — see docs/BOT_API.md. In CLI mode this is a no-op for the
         human-readable side (the win/loss line was already sent separately).
         """
         self._pace_toast_event()

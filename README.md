@@ -22,17 +22,17 @@ pip install -r tests/requirements.txt
 
 ## Playing
 
-See [PLAYING.md](PLAYING.md) for full instructions: local hot-seat CLI, networked multiplayer
+See [docs/PLAYING.md](docs/PLAYING.md) for full instructions: local hot-seat CLI, networked multiplayer
 (server + per-player clients + spectators), a browser-based lobby + web client, and how to
 record/replay a session (works identically regardless of which mode produced the recording).
 
 Quick start:
 
 ```
-python3 main.py                              # local, one terminal, hot-seat
-python3 network_server.py --players 2        # networked: host
-python3 network_client.py --host <ip> --port 8888   # networked: each player
-python3 web_server.py                        # browser: host, then everyone (including you) opens a page
+python3 -m scripts.play_cli                                  # local, one terminal, hot-seat
+python3 -m scripts.network_server --players 2                # networked: host
+python3 -m scripts.network_client --host <ip> --port 8888    # networked: each player
+python3 web_server.py                                        # browser: host, then everyone (including you) opens a page
 ```
 
 For planning specific test scenarios ahead of time (rather than recording a real session), see
@@ -44,13 +44,13 @@ For planning specific test scenarios ahead of time (rather than recording a real
 `highsociety/code/ai/` has three ready-made bots — `PassBot` (always passes), `GreedyBot` (always
 raises with the single cheapest card that beats the current bid), and `CappedGreedyBot` (like
 `GreedyBot`, but refuses to spend past a budget that depends on the card up for auction). Both
-`main.py` and `network_server.py` take a `--bots` flag: a comma-separated list of bot types
+`scripts/play_cli.py` and `scripts/network_server.py` take a `--bots` flag: a comma-separated list of bot types
 (`pass`, `greedy`, `capped`) that fills that many seats automatically, one bot per entry.
 
 **CLI:**
 
 ```
-python3 main.py --bots greedy,pass          # you fill the remaining seat(s) interactively
+python3 -m scripts.play_cli --bots greedy,pass    # you fill the remaining seat(s) interactively
 ```
 
 You're only prompted for whichever seats `--bots` didn't fill — if `--bots` names as many bots as
@@ -59,8 +59,8 @@ you asked for players, nobody is prompted at all and it's a bots-only game.
 **Networked:**
 
 ```
-python3 network_server.py --players 3 --bots greedy,pass    # server pre-fills 2 of 3 seats
-python3 network_client.py --host <ip> --port 8888            # the remaining human connects as usual
+python3 -m scripts.network_server --players 3 --bots greedy,pass    # server pre-fills 2 of 3 seats
+python3 -m scripts.network_client --host <ip> --port 8888           # the remaining human connects as usual
 ```
 
 `--players` is the *total* seat count, bots included — the server only waits for
@@ -80,9 +80,22 @@ python3 -m highsociety.code.gamecore.dev_tools.simulate_bots --bots greedy,greed
 See `highsociety/code/gamecore/dev_tools/simulate_bots.py --help` for `--seed` (reproducible
 games) and `--think-time` (pause between each bot's decision, so you can actually follow along).
 
-Writing your own bot: see [BOT_API.md](BOT_API.md)'s "Embedded" section — subclass `BasePlayer`,
+Writing your own bot: see [docs/BOT_API.md](docs/BOT_API.md)'s "Embedded" section — subclass `BasePlayer`,
 implement `get_bid`/`choose_painting_to_discard`/`send_message`, and it plugs into `--bots` the
 same way by adding it to the `BOT_TYPES` registry in `highsociety/code/ai/__init__.py`.
+
+## Repository layout
+
+```
+web_server.py      the website (Flask + WebSockets); Render starts it with gunicorn web_server:app
+highsociety/       the game engine, bots (ai/), database layer (common/db/), web client (web/)
+scripts/           every other entry point -- run from the repo root as `python3 -m scripts.<name>`:
+                   play_cli (local CLI game), network_server / network_client /
+                   network_spectator_client (socket play), bot_evaluator, selfplay_job, verify_replay
+docs/              PLAYING, BOT_API, SELFPLAY (RL self-play data job), ARCHITECTURE_NOTES
+tests/             pytest suite
+render.yaml        Render Blueprint for the self-play cron job (the website is set up in Render's dashboard)
+```
 
 ## Run tests
 
@@ -137,10 +150,10 @@ ordered action log. Each row records:
 - whether a timeout or a disconnect forced it (`reason`);
 - how long the player took to decide (`think_ms`).
 
-`python3 verify_replay.py --source game --sample 50` rebuilds stored games from those rows and
+`python3 -m scripts.verify_replay --source game --sample 50` rebuilds stored games from those rows and
 checks every action and result reproduces. See `highsociety/code/gamecore/recording/game_replay.py`.
 For bulk bot-vs-bot self-play data (RL training), stored in its own `selfplay_games` table in the
-same format and run as a Render cron job, see [SELFPLAY.md](SELFPLAY.md).
+same format and run as a Render cron job, see [docs/SELFPLAY.md](docs/SELFPLAY.md).
 
 ## Analytics (optional)
 
@@ -166,7 +179,7 @@ Remote play is itself layered so a new transport doesn't require touching player
 engine:
 
 - **`highsociety/code/gamecore/network/transport.py`** — `Transport`, an ABC for "send one JSON
-  message" / "receive the next one". `SocketTransport` (raw TCP, used by `network_server.py`) and
+  message" / "receive the next one". `SocketTransport` (raw TCP, used by `scripts/network_server.py`) and
   `WebSocketTransport` (a browser WebSocket via flask-sock/simple-websocket, used by
   `web_server.py`) are its two implementations.
 - **`highsociety/code/gamecore/network/protocol.py`** — the JSON message *shapes* (`PLAYER_MOVE`,
@@ -178,6 +191,6 @@ engine:
 `web_server.py` is the proof this layering works: it's a Flask app with an in-browser lobby
 (`GameRoom`) on top, but the only genuinely new engine-adjacent code is `WebSocketTransport` — 
 `NetworkPlayer`, `network/protocol.py`, and `PlayGame` itself are used completely unchanged from
-`network_server.py`'s socket-based path. The same seam is what a future multi-room/hosted-website
+`scripts/network_server.py`'s socket-based path. The same seam is what a future multi-room/hosted-website
 version would extend (a dict of `GameRoom`s instead of the current single global one), not a
 rewrite.

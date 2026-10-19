@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-bot_evaluator.py
+scripts/bot_evaluator.py
 
 Runs many full games between the embedded bots (see highsociety/code/ai/)
 and reports each bot's aggregate performance to a CSV: how many matches it
@@ -12,10 +12,10 @@ seats' results are pooled into that one bot's row, doubling its sample size
 per run without needing more simulations.
 
 Usage:
-    python3 bot_evaluator.py
-    python3 bot_evaluator.py --bots greedy,greedy,pass,capped --num-simulations 10
-    python3 bot_evaluator.py --bots greedy,pass --num-simulations 500 --output results.csv
-    python3 bot_evaluator.py --bots greedy,pass,capped --seed 42   # reproducible run
+    python3 -m scripts.bot_evaluator
+    python3 -m scripts.bot_evaluator --bots greedy,greedy,pass,capped --num-simulations 10
+    python3 -m scripts.bot_evaluator --bots greedy,pass --num-simulations 500 --output results.csv
+    python3 -m scripts.bot_evaluator --bots greedy,pass,capped --seed 42   # reproducible run
 """
 
 import argparse

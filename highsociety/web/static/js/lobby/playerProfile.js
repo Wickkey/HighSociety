@@ -7,9 +7,11 @@
 // (ui/modals.js), with no edit affordances at all.
 import { $, hide, show, showScreen, setScreenPath } from '../utils/dom.js';
 import { timeAgo } from '../utils/formatting.js';
-import { fetchJSON } from './lobby.js';
 import { fetchGamesPage, renderIfChanged } from './gameHistory.js';
 import { createEloChartController } from '../ui/eloChart.js';
+// Circular with account.js only in the established, safe way: used inside
+// a function body, never at module evaluation.
+import { profileStats } from '../account/account.js';
 
 // Same shared chart Account's own screen uses (see ui/eloChart.js), a
 // separate controller instance so this screen's chart state (fetched
@@ -80,18 +82,23 @@ export function showPlayerProfileScreen(username, returnTo = 'leaderboard') {
 }
 
 async function loadPlayerProfileStats(username) {
-  let stats;
-  try {
-    stats = await fetchJSON(`/api/profile/${encodeURIComponent(username)}`);
-  } catch (e) {
+  // Cached across reloads and shared with Account (account.js's
+  // profileStats): a profile seen before paints at once, then refreshes.
+  const { cached, freshPromise } = profileStats(username);
+  if (cached) paintPlayerProfileStats(cached);
+  const fresh = await freshPromise;
+  if (username !== profileUsername) return; // navigated to a different profile before this resolved
+  if (fresh) {
+    paintPlayerProfileStats(fresh);
+  } else if (!cached) {
     // No games recorded yet (a brand new guest, or a typo'd username) --
     // a real, honest outcome, not an error: leave the placeholder name/
     // avatar up and the stat cards at their "—" default.
-    if (username === profileUsername) $('player-profile-stats-row').classList.remove('loading');
-    return;
+    $('player-profile-stats-row').classList.remove('loading');
   }
-  if (username !== profileUsername) return; // navigated to a different profile before this resolved
+}
 
+function paintPlayerProfileStats(stats) {
   $('player-profile-avatar').textContent = stats.display_name.charAt(0).toUpperCase();
   $('player-profile-name').textContent = stats.display_name;
   $('player-profile-elo').textContent = stats.elo;

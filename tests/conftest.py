@@ -52,14 +52,46 @@ def no_real_database():
     itself, so it's unaffected by this stripping it back out for everyone
     else -- and being function-scoped, that monkeypatch reverts before this
     session-scoped fixture's own restore, so ordering is safe either way.
+
+    The same goes for every other credential a developer's .env may hold
+    (see _BLANKED_FOR_TESTS) -- a real, reported incident: once the
+    self-play job learned to email progress (NOTIFY_SMTP_*), the test
+    suite's own tiny practice batches sent real "Self-play done" emails to
+    the developer's inbox, because importing web_server.py loads .env.
     """
-    original = os.environ.get("DATABASE_URL")
-    os.environ["DATABASE_URL"] = ""
+    originals = {name: os.environ.get(name) for name in _BLANKED_FOR_TESTS}
+    for name in _BLANKED_FOR_TESTS:
+        os.environ[name] = ""
     yield
-    if original is not None:
-        os.environ["DATABASE_URL"] = original
-    else:
-        os.environ.pop("DATABASE_URL", None)
+    for name, original in originals.items():
+        if original is not None:
+            os.environ[name] = original
+        else:
+            os.environ.pop(name, None)
+
+
+# Real credentials that may sit in a developer's .env -- blanked (not
+# deleted, see no_real_database above) for the whole test session.
+_BLANKED_FOR_TESTS = (
+    "DATABASE_URL",
+    "NOTIFY_SMTP_USER", "NOTIFY_SMTP_PASSWORD", "NOTIFY_EMAIL_TO",
+    "RENDER_API_KEY",
+)
+
+
+@pytest.fixture(autouse=True)
+def no_real_email(monkeypatch):
+    """Belt and braces on top of blanking NOTIFY_SMTP_*: no test may open a
+    real mail connection. A test that exercises the sending path patches
+    smtplib.SMTP_SSL itself (see tests/common/test_notify.py), which takes
+    precedence over this."""
+    import smtplib
+
+    def _refuse(*args, **kwargs):
+        raise RuntimeError("tests must never send real email")
+
+    monkeypatch.setattr(smtplib, "SMTP_SSL", _refuse)
+    monkeypatch.setattr(smtplib, "SMTP", _refuse)
 
 
 class ScriptedPlayer(CLIPlayer):

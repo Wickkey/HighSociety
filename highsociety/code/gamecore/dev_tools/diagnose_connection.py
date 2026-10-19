@@ -179,7 +179,7 @@ def main():
         print("❌ Connection test FAILED")
         print("\n🔧 Troubleshooting Steps:")
         print("   1. ✅ Verify server is running:")
-        print("      python3 network_server.py --players 2")
+        print("      python3 -m scripts.network_server --players 2")
         print("\n   2. ✅ Check IP address is correct")
         print("      Server should show its IP when starting")
         print("\n   3. ✅ Ensure same network:")

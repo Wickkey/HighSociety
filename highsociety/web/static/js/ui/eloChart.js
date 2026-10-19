@@ -21,6 +21,14 @@
 // -- never removing the slot itself.
 import { $ } from '../utils/dom.js';
 import { fetchJSON } from '../lobby/lobby.js';
+import { swr } from '../utils/swrCache.js';
+
+// One player's rating history, cached across reloads (utils/swrCache.js)
+// and keyed by its URL -- shared by load() below and the login-time
+// prefetch (account.js's prefetchAccountStats).
+export function fetchRatingHistory(historyUrl) {
+  return swr(`url:${historyUrl}`, () => fetchJSON(historyUrl));
+}
 
 // Real axes/gridlines/tooltips via a real charting library, vendored
 // locally as a single UMD bundle (highsociety/web/static/js/vendor/
@@ -228,11 +236,18 @@ export function createEloChartController({ containerId, rangeToggleId }) {
   // this resolves (unlike Account, there's no login/logout gate slowing
   // that down), and without this a slow first fetch could paint stale
   // data into a screen that's since moved on to someone else entirely.
+  // Paints the cached history at once (if this browser has seen it), then
+  // the fresh one -- skipping the second draw when nothing changed, so a
+  // warm open never flickers.
   async function load(historyUrl, { isStillRelevant = () => true, emptyMessage = 'No rated games yet.' } = {}) {
-    try {
-      const result = await fetchJSON(historyUrl);
-      if (!isStillRelevant()) return;
-      fullHistory = result.history || [];
+    const { cached, freshPromise } = fetchRatingHistory(historyUrl);
+    let shown = null;
+    const show = async (result) => {
+      const history = result.history || [];
+      const signature = JSON.stringify(history);
+      if (signature === shown) return;
+      shown = signature;
+      fullHistory = history;
       if (fullHistory.length === 0) {
         setRangeToggleEnabled(false);
         renderMessage(emptyMessage);
@@ -248,6 +263,13 @@ export function createEloChartController({ containerId, rangeToggleId }) {
         b.classList.toggle('selected', b.dataset.range === 'all');
       });
       await render(fullHistory);
+    };
+    try {
+      if (cached && isStillRelevant()) await show(cached);
+      const fresh = await freshPromise;
+      if (!isStillRelevant()) return;
+      if (fresh) await show(fresh);
+      else if (!cached) { setRangeToggleEnabled(false); renderMessage("Couldn't load Elo history."); }
     } catch (e) {
       if (isStillRelevant()) { setRangeToggleEnabled(false); renderMessage("Couldn't load Elo history."); }
     }
