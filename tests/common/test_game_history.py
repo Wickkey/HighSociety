@@ -1810,6 +1810,24 @@ def test_fetch_selfplay_records_samples_within_a_batch(database_url, mock_releas
     assert params == ["rl-v1", 5]
 
 
+def test_fetch_selfplay_records_reads_a_whole_batch_in_id_pages(database_url, mock_release_connection, monkeypatch):
+    """A whole batch in one query ran past the statement timeout (rl-v1,
+    10,000 games) -- it's read in keyset pages on id instead."""
+    game_history._schema_ready = True
+    monkeypatch.setattr(game_history, "_SELFPLAY_FETCH_PAGE_SIZE", 2)
+    conn, cursor = _fake_connection()
+    pages = [[(1, {"g": 1}), (2, {"g": 2})], [(5, {"g": 5}), (7, {"g": 7})], [(9, {"g": 9})]]
+    cursor.fetchall.side_effect = pages
+    with patch.object(game_history, "_connect", return_value=conn):
+        rows = game_history.fetch_selfplay_records(batch="rl-v1")
+    assert rows == [row for page in pages for row in page]
+    calls = [c.args for c in cursor.execute.call_args_list]
+    assert len(calls) == 3
+    for query, _ in calls:
+        assert "batch = %s" in query and "id > %s" in query and "ORDER BY id LIMIT %s" in query
+    assert [params for _, params in calls] == [["rl-v1", 0, 2], ["rl-v1", 2, 2], ["rl-v1", 7, 2]]
+
+
 def test_the_leaderboard_cache_lives_three_months_because_writes_invalidate_it():
     assert game_history._LEADERBOARD_CACHE_TTL_SECONDS == 90 * 24 * 60 * 60
 
