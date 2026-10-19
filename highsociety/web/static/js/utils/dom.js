@@ -15,6 +15,21 @@ export function hide(el) { el.classList.add('hidden'); }
 export function show(el) { el.classList.remove('hidden'); }
 export function showError(el, text) { el.textContent = text; el.classList.remove('hidden'); }
 
+// setInterval for polls that only refresh what's on screen: ticks are
+// skipped while the tab is in the background (nothing to show them to --
+// an open home screen used to fetch the rooms list every 2s all day), and
+// one runs right away when the tab comes back so it isn't stale. Returns
+// a function that stops the poll.
+export function pollWhileVisible(fn, ms) {
+  const tick = () => { if (!document.hidden) fn(); };
+  const timer = setInterval(tick, ms);
+  document.addEventListener('visibilitychange', tick);
+  return () => {
+    clearInterval(timer);
+    document.removeEventListener('visibilitychange', tick);
+  };
+}
+
 // Gives the 7 static top-level screens (Play/Join/Host/Leaderboard/Rules/
 // Account/Achievements) a real, shareable/refreshable URL -- matching
 // Flask routes in web_server.py all serve the same index.html, and
