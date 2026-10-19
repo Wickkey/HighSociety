@@ -1,4 +1,5 @@
 import logging
+import sys
 import threading
 import traceback
 from enum import Enum
@@ -70,6 +71,16 @@ class LoggingManager:
         security_log_handler.setFormatter(formatter)
         cls._security_logger = logging.getLogger('security')
         cls._security_logger.addHandler(security_log_handler)
+
+        # The files above live on the host's own disk -- on Render that's
+        # wiped on every deploy and never shown anywhere, so a production
+        # error (e.g. "Game thread crashed") used to be invisible. Render
+        # shows a service's stdout/stderr, so warnings and up also go there.
+        console_handler = logging.StreamHandler(sys.stderr)
+        console_handler.setLevel(config.get("logging").get("console_level", "WARNING").upper())
+        console_handler.setFormatter(formatter)
+        cls._generic_logger.addHandler(console_handler)
+        cls._security_logger.addHandler(console_handler)
 
         LoggingManager.set_level(log_level)
         LoggingManager.info("Logger successfully initialized")
