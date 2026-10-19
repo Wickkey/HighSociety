@@ -962,6 +962,24 @@ def api_global_stats():
     return jsonify(stats)
 
 
+# Largest page /api/games/<username> and /api/leaderboard will return. The
+# client asks for 10 and 20; without a cap any ?limit= was accepted (and
+# every distinct (limit, offset) pair got its own leaderboard cache entry,
+# kept until the next rated game), and a negative offset reached the SQL.
+_MAX_PAGE_SIZE = 50
+
+
+def _paging_args(default_limit: int = 20):
+    """(limit, offset) from the query string, clamped to 1.._MAX_PAGE_SIZE
+    and >= 0 -- or None if either isn't an integer."""
+    try:
+        limit = int(request.args.get("limit", default_limit))
+        offset = int(request.args.get("offset", 0))
+    except (TypeError, ValueError):
+        return None
+    return min(max(limit, 1), _MAX_PAGE_SIZE), max(offset, 0)
+
+
 @app.route("/api/games/<username>")
 def api_recent_games(username):
     """'My Games' list (paginated -- see ?limit/?offset) + the home
@@ -969,11 +987,10 @@ def api_recent_games(username):
     limit). Same data, different caller. Always 200 with a (possibly
     empty) list, no 404: an empty list already means "nothing to show"
     to both callers."""
-    try:
-        limit = int(request.args.get("limit", 20))
-        offset = int(request.args.get("offset", 0))
-    except (TypeError, ValueError):
+    paging = _paging_args()
+    if paging is None:
         return jsonify({"error": "limit/offset must be integers"}), 400
+    limit, offset = paging
     return jsonify(game_history.get_recent_games(username, limit=limit, offset=offset))
 
 
@@ -996,11 +1013,10 @@ def api_leaderboard():
     docstring for why guests and bots are both excluded). The exact same
     data for every visitor, so get_leaderboard caches each page briefly
     -- this endpoint itself stays a thin pass-through."""
-    try:
-        limit = int(request.args.get("limit", 20))
-        offset = int(request.args.get("offset", 0))
-    except (TypeError, ValueError):
+    paging = _paging_args()
+    if paging is None:
         return jsonify({"error": "limit/offset must be integers"}), 400
+    limit, offset = paging
     result = game_history.get_leaderboard(limit=limit, offset=offset)
     return jsonify({"leaderboard": result["rows"], "has_more": result["has_more"]})
 
