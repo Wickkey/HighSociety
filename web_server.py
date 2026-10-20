@@ -654,8 +654,9 @@ def _identify(ws, game_id: str, first_prompt: str, second_prompt: str):
     Runs the two-step IDENTIFY -> IDENTIFY_ACK handshake scripts/network_server.py
     already uses (see accept_players/accept_spectators), just reusable for
     either prompt ordering (players: username then name; spectators: name
-    then username). Returns (first_answer, second_answer), or None if the
-    handshake failed/disconnected.
+    then username). Returns (first_answer, second_answer, login_token), or
+    None if the handshake failed/disconnected -- login_token is whatever
+    either ack carried alongside its answer (see _identity_rejected).
     """
     _send(ws, game_id, "IDENTIFY", first_prompt, requires_response=True)
     data = _recv_json(ws)
@@ -663,6 +664,7 @@ def _identify(ws, game_id: str, first_prompt: str, second_prompt: str):
         _send(ws, game_id, "IDENTIFY_ERROR", f"Expected: {first_prompt}")
         return None
     first = data["prompt"]
+    login_token = data.get("login_token")
 
     _send(ws, game_id, "IDENTIFY", second_prompt, requires_response=True)
     data = _recv_json(ws)
@@ -671,7 +673,7 @@ def _identify(ws, game_id: str, first_prompt: str, second_prompt: str):
         return None
     second = data["prompt"]
 
-    return first, second
+    return first, second, login_token or data.get("login_token")
 
 
 _MAX_USERNAME_LENGTH = 24
@@ -689,6 +691,18 @@ def _identity_error(username: str, name: str) -> Optional[str]:
     if not name.strip() or len(name) > _MAX_DISPLAY_NAME_LENGTH:
         return f"Name must be 1-{_MAX_DISPLAY_NAME_LENGTH} characters."
     return None
+
+
+def _identity_rejected(username: Optional[str], login_token: Optional[str]) -> bool:
+    """True when the database says `login_token` wasn't issued to
+    `username` (see game_history's player_logins table). Anything acting
+    as a specific player -- taking a seat, renaming, hosting -- checks
+    this. False with no database (local dev, the test suite) or when the
+    lookup itself fails, so a database blip doesn't lock everyone out."""
+    return game_history.login_token_matches(username, login_token) is False
+
+
+_SIGN_IN_AGAIN = "Please sign in again to continue."
 
 
 def _verify_google_id_token(token: str) -> Optional[dict]:
@@ -743,7 +757,7 @@ def api_auth_google():
 
     existing = game_history.find_player_by_google_id(claims["sub"])
     if existing:
-        return jsonify(existing)
+        return jsonify({**existing, "login_token": game_history.issue_login_token(existing["username"])})
     return jsonify({"needs_username": True, "suggested_display_name": claims.get("name") or ""})
 
 
@@ -778,7 +792,7 @@ def api_auth_google_claim_username():
     # this same account already owns.
     existing = game_history.find_player_by_google_id(claims["sub"])
     if existing:
-        return jsonify(existing)
+        return jsonify({**existing, "login_token": game_history.issue_login_token(existing["username"])})
 
     if game_history.username_is_taken(username):
         return jsonify({"error": "That username is already taken."}), 409
@@ -787,7 +801,8 @@ def api_auth_google_claim_username():
     if not ok:
         return jsonify({"error": "That username is already taken."}), 409
 
-    return jsonify({"username": username, "display_name": display_name})
+    return jsonify({"username": username, "display_name": display_name,
+                    "login_token": game_history.issue_login_token(username)})
 
 
 def _active_usernames() -> set[str]:
@@ -857,7 +872,27 @@ def api_auth_guest_claim():
     if not ok:
         return jsonify({"error": "That username is already taken."}), 409
 
-    return jsonify({"username": username})
+    return jsonify({"username": username, "login_token": game_history.issue_login_token(username)})
+
+
+@app.route("/api/auth/upgrade", methods=["POST"])
+def api_auth_upgrade():
+    """
+    One-time login token for a guest profile saved before tokens existed
+    (see game_history.issue_first_login_token for exactly who qualifies).
+    403 tells the browser to sign in again -- a Google-linked account, or
+    a guest name another device already holds.
+    """
+    body = request.get_json(silent=True) or {}
+    username = (body.get("username") or "").strip()
+    if not username or len(username) > _MAX_USERNAME_LENGTH:
+        return jsonify({"error": f"Username must be 1-{_MAX_USERNAME_LENGTH} characters"}), 400
+    if not game_history.is_configured():
+        return jsonify({"login_token": None})
+    token = game_history.issue_first_login_token(username)
+    if token is None:
+        return jsonify({"error": _SIGN_IN_AGAIN}), 403
+    return jsonify({"login_token": token})
 
 
 @app.route("/api/auth/username/change", methods=["POST"])
@@ -877,6 +912,9 @@ def api_auth_username_change():
 
     if not game_history.is_configured():
         return jsonify({"username": new_username})
+
+    if _identity_rejected(old_username, body.get("login_token")):
+        return jsonify({"error": _SIGN_IN_AGAIN}), 403
 
     ok = game_history.rename_player(old_username, new_username)
     if not ok:
@@ -1183,6 +1221,8 @@ def api_create_game():
         host_username = body.get("host_username")
         if host_username is not None and not isinstance(host_username, str):
             return jsonify({"error": "host_username must be a string"}), 400
+        if host_username is not None and _identity_rejected(host_username, body.get("login_token")):
+            return jsonify({"error": _SIGN_IN_AGAIN}), 403
         room = _create_room(
             seats=_TUTORIAL_SEATS, bot_mix=[], seed=_TUTORIAL_SEED,
             bot_think_time=_TUTORIAL_BOT_THINK_TIME, visibility="private",
@@ -1244,6 +1284,8 @@ def api_create_game():
     host_username = body.get("host_username")
     if host_username is not None and not isinstance(host_username, str):
         return jsonify({"error": "host_username must be a string"}), 400
+    if host_username is not None and _identity_rejected(host_username, body.get("login_token")):
+        return jsonify({"error": _SIGN_IN_AGAIN}), 403
 
     room = _create_room(seats=seats, bot_mix=bot_mix, seed=seed, bot_think_time=bot_think_time,
                          visibility=visibility, turn_time_limit=turn_time_limit,
@@ -1354,6 +1396,8 @@ def api_add_bot():
     bot_type = body.get("bot_type")
     if bot_type not in BOT_TYPES:
         return jsonify({"error": f"Unknown bot type; choose from {list(BOT_TYPES)}"}), 400
+    if room.host_username is not None and _identity_rejected(body.get("requester_username"), body.get("login_token")):
+        return jsonify({"error": _SIGN_IN_AGAIN}), 403
 
     with room.lock:
         if not _is_room_host(room, body.get("requester_username")):
@@ -1408,6 +1452,8 @@ def api_remove_seat():
     target_username = body.get("username")
     if not target_username:
         return jsonify({"error": "username is required."}), 400
+    if room.host_username is not None and _identity_rejected(body.get("requester_username"), body.get("login_token")):
+        return jsonify({"error": _SIGN_IN_AGAIN}), 403
 
     kicked_player = None
     with room.lock:
@@ -1935,10 +1981,13 @@ def ws_player(ws):
     identity = _identify(ws, game_id, "Enter your username", "Enter your display name")
     if identity is None:
         return
-    username, name = identity
+    username, name, login_token = identity
     error = _identity_error(username, name)
     if error:
         _send(ws, game_id, "IDENTIFY_ERROR", error)
+        return
+    if _identity_rejected(username, login_token):
+        _send(ws, game_id, "IDENTIFY_ERROR", _SIGN_IN_AGAIN)
         return
 
     with room.lock:
@@ -2033,7 +2082,7 @@ def ws_spectate(ws):
     identity = _identify(ws, game_id, "You are connected as a spectator. Enter your name:", "Enter your username:")
     if identity is None:
         return
-    name, username = identity
+    name, username, _login_token = identity  # spectating doesn't act as a player
     error = _identity_error(username, name)
     if error:
         _send(ws, game_id, "IDENTIFY_ERROR", error)

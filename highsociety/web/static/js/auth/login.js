@@ -143,7 +143,7 @@ export async function onLoginUsernameContinue() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id_token: token, username }),
       });
-      saveProfile(result.username, result.username, decodeJwtPayload(token).sub);
+      saveProfile(result.username, result.username, decodeJwtPayload(token).sub, result.login_token || null);
       _pendingGoogleIdToken = null;
       proceedPastLogin();
     } catch (e) {
@@ -161,7 +161,7 @@ export async function onLoginUsernameContinue() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ username }),
     });
-    saveProfile(result.username, result.username, null);
+    saveProfile(result.username, result.username, null, result.login_token || null);
     proceedPastLogin();
   } catch (e) {
     showError($('login-username-error'), e.message);
@@ -185,7 +185,7 @@ async function handleGoogleCredential(response) {
       _pendingGoogleIdToken = response.credential;
       showLoginUsernameForm(result.suggested_display_name, false);
     } else {
-      saveProfile(result.username, result.username, decodeJwtPayload(response.credential).sub);
+      saveProfile(result.username, result.username, decodeJwtPayload(response.credential).sub, result.login_token || null);
       proceedPastLogin();
     }
   } catch (e) {

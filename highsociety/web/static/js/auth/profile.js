@@ -38,10 +38,14 @@ export function loadProfile() {
 // (e.g. onAccountSaveClick editing just the display name shouldn't wipe
 // out "this profile came from a real Google account"); pass null
 // explicitly for a guest profile with no account behind it at all.
-export function saveProfile(username, name, googleId) {
+// loginToken: same omit-to-keep rule -- the server-issued proof that this
+// browser really is `username` (see web_server.py's _identity_rejected);
+// a rename keeps it, since it's tied to the account, not the name.
+export function saveProfile(username, name, googleId, loginToken) {
   const existing = loadProfile();
   const resolvedGoogleId = googleId !== undefined ? googleId : (existing ? existing.google_id : null) || null;
-  const value = JSON.stringify({ username, name, google_id: resolvedGoogleId });
+  const resolvedToken = loginToken !== undefined ? loginToken : (existing ? existing.login_token : null) || null;
+  const value = JSON.stringify({ username, name, google_id: resolvedGoogleId, login_token: resolvedToken });
   try { localStorage.setItem(PROFILE_STORAGE_KEY, value); } catch (e) { /* fall through to the cookie */ }
   writeCookie(PROFILE_STORAGE_KEY, value, 365);
 }
@@ -150,9 +154,50 @@ export function onProfileChipClick() {
 // out" of, only this browser's own cached association with it, exactly
 // mirroring how loadProfile/saveProfile never talked to the server for
 // a guest profile either.
-export function onLogout() {
+// Sent with every request that acts as this player (taking a seat,
+// hosting, renaming) -- null for a profile from before tokens existed,
+// until upgradeLegacyProfile below swaps one in.
+export function loginToken() {
+  const profile = loadProfile();
+  return (profile && profile.login_token) || null;
+}
+
+// A profile saved before login tokens existed has none. A guest gets one
+// on the spot; a Google-linked account (or a guest name some other device
+// already holds) has to sign in again -- resolves false in that case,
+// after clearing the stale profile. Network trouble resolves true and
+// leaves things as they are: the server lets a request without a valid
+// token through only when it can't check, so nothing is lost by waiting.
+export async function upgradeLegacyProfile() {
+  const profile = loadProfile();
+  if (!profile || profile.login_token) return true;
+  let res;
+  try {
+    res = await fetch('/api/auth/upgrade', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: profile.username }),
+    });
+  } catch (e) {
+    return true;
+  }
+  if (res.status === 403) {
+    clearSavedProfile();
+    return false;
+  }
+  if (!res.ok) return true;
+  const body = await res.json().catch(() => ({}));
+  if (body.login_token) saveProfile(profile.username, profile.name, undefined, body.login_token);
+  return true;
+}
+
+function clearSavedProfile() {
   try { localStorage.removeItem(PROFILE_STORAGE_KEY); } catch (e) { /* private mode, etc. */ }
   writeCookie(PROFILE_STORAGE_KEY, '', -1);
+}
+
+export function onLogout() {
+  clearSavedProfile();
   closeProfilePopover();
   renderProfileChip();
   clearCurrentRoomCode();

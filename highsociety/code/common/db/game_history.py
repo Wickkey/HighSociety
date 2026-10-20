@@ -30,8 +30,10 @@ how those fit together):
                 the legacy per-difficulty player_id instead.
 """
 import datetime
+import hashlib
 import json
 import os
+import secrets
 import threading
 import time
 from typing import Callable, Optional
@@ -444,6 +446,25 @@ _SCHEMA_STATEMENTS = [
     """
     INSERT INTO meta (table_name, description) VALUES
         ('selfplay_games', 'Bot-vs-bot self-play episodes for RL training, grouped by generation batch -- kept out of games/ratings on purpose. `replay` is the same game record (seed, seats, actions, rounds, standings) game_history.fetch_game_record assembles from game_actions; see recording/game_replay.py and scripts/selfplay_job.py.')
+    ON CONFLICT (table_name) DO NOTHING
+    """,
+
+    # Proof that a browser really is the player it claims to be. Identity
+    # used to be just a username in localStorage, so anyone could play as
+    # (or rename) any account, Google-linked leaderboard players included.
+    # Each sign-in now issues a random token to that device; only its
+    # SHA-256 is stored. Keyed to player_id, so a rename keeps it working.
+    """
+    CREATE TABLE IF NOT EXISTS player_logins (
+        token_hash TEXT PRIMARY KEY,
+        player_id INTEGER NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_player_logins_player ON player_logins (player_id)",
+    """
+    INSERT INTO meta (table_name, description) VALUES
+        ('player_logins', 'One row per signed-in device: SHA-256 of the login token it was issued, and whose it is. Required to play as, or rename, that player.')
     ON CONFLICT (table_name) DO NOTHING
     """,
 ]
@@ -1463,6 +1484,112 @@ def rename_player(old_username: str, new_username: str) -> bool:
     except Exception as e:  # noqa: BLE001 -- includes a uniqueness-constraint race, deliberately not special-cased
         LoggingManager.warning(f"game_history.rename_player failed: {e}")
         return False
+    finally:
+        if conn is not None:
+            _release_connection(conn)
+
+
+def _hash_login_token(token: str) -> str:
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
+def issue_login_token(username: str) -> Optional[str]:
+    """A fresh login token for `username`'s existing players row (see the
+    player_logins table), or None if there's no such row, no database, or
+    the write fails. The caller hands it to the browser once; only its hash
+    is kept."""
+    if not is_configured():
+        return None
+    ensure_schema()
+    if not _schema_ready:
+        return None
+    token = secrets.token_urlsafe(32)
+    conn = None
+    try:
+        conn = _connect()
+        with conn, conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO player_logins (token_hash, player_id) "
+                "SELECT %s, id FROM players WHERE username = %s",
+                (_hash_login_token(token), username),
+            )
+            if cur.rowcount == 0:
+                return None
+        return token
+    except Exception as e:  # noqa: BLE001
+        LoggingManager.warning(f"game_history.issue_login_token failed: {e}")
+        return None
+    finally:
+        if conn is not None:
+            _release_connection(conn)
+
+
+def login_token_matches(username: str, token: Optional[str]) -> Optional[bool]:
+    """Whether `token` was issued to `username`'s account. None when that
+    can't be determined (no database, or the lookup errors) -- callers let
+    the request through then, rather than locking everyone out of playing
+    during a database blip."""
+    if not is_configured():
+        return None
+    ensure_schema()
+    if not _schema_ready:
+        return None
+    if not isinstance(token, str) or not token:
+        return False
+    conn = None
+    try:
+        conn = _connect()
+        with conn, conn.cursor() as cur:
+            cur.execute(
+                "SELECT 1 FROM player_logins l JOIN players p ON p.id = l.player_id "
+                "WHERE l.token_hash = %s AND p.username = %s",
+                (_hash_login_token(token), username),
+            )
+            return cur.fetchone() is not None
+    except Exception as e:  # noqa: BLE001
+        LoggingManager.warning(f"game_history.login_token_matches failed: {e}")
+        return None
+    finally:
+        if conn is not None:
+            _release_connection(conn)
+
+
+def issue_first_login_token(username: str) -> Optional[str]:
+    """One-time upgrade for a guest profile saved before login tokens
+    existed: issues a token only if `username` is a guest (no google_id)
+    that has never been issued one -- once any device holds a token, the
+    name is claimed and this refuses. A Google-linked account never
+    qualifies; it signs in with Google again instead. A username with no
+    players row at all (reserved while the database was unreachable) is
+    reserved now. None means refused or failed."""
+    if not is_configured():
+        return None
+    ensure_schema()
+    if not _schema_ready:
+        return None
+    conn = None
+    try:
+        conn = _connect()
+        with conn, conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO players (username, display_name) VALUES (%s, %s) ON CONFLICT (username) DO NOTHING",
+                (username, username),
+            )
+            cur.execute(
+                "SELECT p.id FROM players p WHERE p.username = %s AND p.google_id IS NULL "
+                "AND NOT EXISTS (SELECT 1 FROM player_logins l WHERE l.player_id = p.id) FOR UPDATE",
+                (username,),
+            )
+            row = cur.fetchone()
+            if row is None:
+                return None
+            token = secrets.token_urlsafe(32)
+            cur.execute("INSERT INTO player_logins (token_hash, player_id) VALUES (%s, %s)",
+                        (_hash_login_token(token), row[0]))
+        return token
+    except Exception as e:  # noqa: BLE001
+        LoggingManager.warning(f"game_history.issue_first_login_token failed: {e}")
+        return None
     finally:
         if conn is not None:
             _release_connection(conn)

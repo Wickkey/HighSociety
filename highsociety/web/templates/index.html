@@ -215,6 +215,10 @@
     <section id="screen-login" class="screen hidden">
       <div class="card panel login-panel">
         <h2>Welcome to High Society</h2>
+        <!-- The first thing a visitor from a shared link sees -- says what
+             this is before asking them to pick a name. -->
+        <p class="login-tagline">The classic auction card game for 2–5 players. Outbid friends or bots for points, free, right in your browser.</p>
+        <p id="login-notice" class="login-notice hidden"></p>
 
         <div id="google-signin-container" class="google-signin-container"></div>
 
@@ -1354,7 +1358,7 @@
 
         <div id="join-form">
           <p id="join-as-label" class="hidden">Joining as <strong id="join-as-name"></strong>.
-            <button type="button" id="btn-change-join-identity" class="link-button">Not you?</button></p>
+            <button type="button" id="btn-change-join-identity" class="link-button hidden">Not you?</button></p>
           <div id="join-identity-fields">
             <label>Username <input type="text" id="join-username" placeholder="e.g. alex" autocomplete="off" maxlength="24"></label>
           </div>

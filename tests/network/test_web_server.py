@@ -138,6 +138,16 @@ class ReconnectingWSClient(ScriptedWSClient):
             self.received.append(welcome)
 
 
+@pytest.fixture(autouse=True)
+def login_checks_unavailable(monkeypatch):
+    """Several tests pretend a database is configured (is_configured ->
+    True) without one existing; the login-token check would then try to
+    reach it. Answer "can't tell" -- the same as no database -- unless a
+    test sets its own."""
+    monkeypatch.setattr(game_history, "login_token_matches", lambda username, token: None)
+    monkeypatch.setattr(game_history, "issue_login_token", lambda username: f"token-for-{username}")
+
+
 @pytest.fixture
 def running_web_server(monkeypatch):
     web_server._rooms.clear()  # each test starts from a clean slate
@@ -1841,7 +1851,7 @@ def test_auth_google_returns_the_existing_account_when_already_linked(monkeypatc
 
     resp = web_server.app.test_client().post("/api/auth/google", json={"id_token": "valid"})
     assert resp.status_code == 200
-    assert resp.get_json() == {"username": "alice", "display_name": "Alice"}
+    assert resp.get_json() == {"username": "alice", "display_name": "Alice", "login_token": "token-for-alice"}
 
 
 # --------------------------------------- /api/auth/google/claim_username --
@@ -1900,7 +1910,7 @@ def test_claim_username_creates_the_account_and_defaults_display_name_to_usernam
         "/api/auth/google/claim_username", json={"id_token": "valid", "username": "alice"}
     )
     assert resp.status_code == 200
-    assert resp.get_json() == {"username": "alice", "display_name": "alice"}
+    assert resp.get_json() == {"username": "alice", "display_name": "alice", "login_token": "token-for-alice"}
     assert created == {"google_id": "g-123", "email": "a@example.com", "username": "alice", "display_name": "alice"}
 
 
@@ -1919,7 +1929,7 @@ def test_claim_username_returns_the_existing_row_on_a_retry_by_the_same_account(
         "/api/auth/google/claim_username", json={"id_token": "valid", "username": "alice"}
     )
     assert resp.status_code == 200
-    assert resp.get_json() == {"username": "alice", "display_name": "Alice"}
+    assert resp.get_json() == {"username": "alice", "display_name": "Alice", "login_token": "token-for-alice"}
 
 
 def test_claim_username_handles_a_uniqueness_race_at_the_database_level(monkeypatch):
@@ -2012,7 +2022,7 @@ def test_guest_claim_creates_the_account(monkeypatch):
 
     resp = web_server.app.test_client().post("/api/auth/guest/claim", json={"username": "alice"})
     assert resp.status_code == 200
-    assert resp.get_json() == {"username": "alice"}
+    assert resp.get_json() == {"username": "alice", "login_token": "token-for-alice"}
     assert created == {"username": "alice"}
 
 
@@ -2465,3 +2475,83 @@ def test_an_edited_static_file_gets_a_new_version(tmp_path, monkeypatch):
     asset.write_text("b{}")
     os.utime(asset, (time.time() + 5, time.time() + 5))
     assert web_server._asset_version("x.css") != first
+
+
+# ------------------------------------------------------------ login tokens --
+
+def _only_token(good):
+    """login_token_matches as if the database knew exactly one valid token."""
+    return lambda username, token: token == good
+
+
+def test_a_seat_is_refused_without_the_players_login_token(running_web_server, monkeypatch):
+    monkeypatch.setattr(game_history, "login_token_matches", _only_token("alice-token"))
+    port = running_web_server
+    room_code = web_server.app.test_client().post(
+        "/api/create_game", json={"seats": 2, "bot_mix": ["pass"]}
+    ).get_json()["room_code"]
+
+    impostor = Client(_ws_url(port, f"/ws?room={room_code}"))
+    impostor.receive(timeout=5)  # "Enter your username"
+    impostor.send(json.dumps({"message_type": "IDENTIFY_ACK", "prompt": "alice", "login_token": "guess"}))
+    impostor.receive(timeout=5)  # "Enter your display name"
+    impostor.send(json.dumps({"message_type": "IDENTIFY_ACK", "prompt": "alice"}))
+    reply = json.loads(impostor.receive(timeout=5))
+    assert reply["message_type"] == "IDENTIFY_ERROR"
+    assert web_server._rooms[room_code].players[0].username != "alice"  # only the bot is seated
+
+    real = Client(_ws_url(port, f"/ws?room={room_code}"))
+    real.receive(timeout=5)
+    real.send(json.dumps({"message_type": "IDENTIFY_ACK", "prompt": "alice", "login_token": "alice-token"}))
+    real.receive(timeout=5)
+    real.send(json.dumps({"message_type": "IDENTIFY_ACK", "prompt": "alice"}))
+    assert json.loads(real.receive(timeout=5))["message_type"] == "IDENTIFY_SUCCESS"
+    real.close()
+
+
+def test_renaming_someone_else_is_refused(monkeypatch):
+    monkeypatch.setattr(game_history, "is_configured", lambda: True)
+    monkeypatch.setattr(game_history, "login_token_matches", _only_token("alice-token"))
+    renamed = []
+    monkeypatch.setattr(game_history, "rename_player", lambda old, new: renamed.append(new) or True)
+    client = web_server.app.test_client()
+
+    resp = client.post("/api/auth/username/change",
+                       json={"old_username": "alice", "new_username": "mallory", "login_token": "guess"})
+    assert resp.status_code == 403
+    assert renamed == []
+
+    resp = client.post("/api/auth/username/change",
+                       json={"old_username": "alice", "new_username": "alicia", "login_token": "alice-token"})
+    assert resp.status_code == 200
+    assert renamed == ["alicia"]
+
+
+def test_hosting_as_someone_else_is_refused(monkeypatch):
+    monkeypatch.setattr(game_history, "login_token_matches", _only_token("alice-token"))
+    client = web_server.app.test_client()
+    assert client.post("/api/create_game", json={
+        "seats": 2, "bot_mix": [], "host_username": "alice", "login_token": "guess"}).status_code == 403
+    assert client.post("/api/create_game", json={
+        "tutorial": True, "host_username": "alice"}).status_code == 403
+    room = client.post("/api/create_game", json={
+        "seats": 3, "bot_mix": [], "host_username": "alice", "login_token": "alice-token"}).get_json()
+
+    added = client.post("/api/add_bot", json={
+        "room": room["room_code"], "bot_type": "pass", "requester_username": "alice", "login_token": "guess"})
+    assert added.status_code == 403
+    added = client.post("/api/add_bot", json={
+        "room": room["room_code"], "bot_type": "pass", "requester_username": "alice", "login_token": "alice-token"})
+    assert added.status_code == 200
+
+
+def test_a_pre_token_guest_profile_can_upgrade_once(monkeypatch):
+    monkeypatch.setattr(game_history, "is_configured", lambda: True)
+    issued = iter(["fresh-token", None])
+    monkeypatch.setattr(game_history, "issue_first_login_token", lambda username: next(issued))
+    client = web_server.app.test_client()
+
+    first = client.post("/api/auth/upgrade", json={"username": "RoseErza750"})
+    assert first.status_code == 200 and first.get_json() == {"login_token": "fresh-token"}
+    second = client.post("/api/auth/upgrade", json={"username": "RoseErza750"})
+    assert second.status_code == 403

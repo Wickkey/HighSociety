@@ -18,7 +18,7 @@
 import { $, hide, show, showError, showScreen } from '../utils/dom.js';
 import { fetchJSON, currentRoomCode, applyJoinIdentityDefaults, resetCopyRoomLinkButton } from './lobby.js';
 import { takePendingIdentifyError } from '../network/messages.js';
-import { loadProfile } from '../auth/profile.js';
+import { loadProfile, loginToken } from '../auth/profile.js';
 import { confirmDialog } from '../ui/modals.js';
 import { escapeHtml } from '../utils/formatting.js';
 
@@ -280,6 +280,7 @@ async function addBot(botType) {
         room: currentRoomCode(),
         bot_type: botType,
         requester_username: loadProfile() ? loadProfile().username : null,
+        login_token: loginToken(),
       }),
     });
     // Paint the response's own fresh status immediately -- an action *you*
@@ -313,6 +314,7 @@ async function removeSeat(username, isBot, name, isSelf) {
         room: currentRoomCode(),
         username,
         requester_username: loadProfile() ? loadProfile().username : null,
+        login_token: loginToken(),
       }),
     });
     // Same immediate-paint reasoning as addBot above; a kicked human also

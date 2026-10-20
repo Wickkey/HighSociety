@@ -137,7 +137,12 @@
 }
 
 .login-panel { text-align: center; }
-.login-panel h2 { margin-bottom: 1.4rem; }
+.login-panel h2 { margin-bottom: 0.5rem; }
+.login-tagline { margin: 0 auto 1.4rem; max-width: 34ch; color: var(--muted); font-size: 0.95rem; line-height: 1.45; }
+.login-notice {
+  margin: -0.6rem 0 1.2rem; padding: 0.6rem 0.8rem; border-radius: 10px;
+  background: rgba(200, 160, 77, 0.16); color: inherit; font-size: 0.9rem;
+}
 
 .google-signin-container {
   display: flex;

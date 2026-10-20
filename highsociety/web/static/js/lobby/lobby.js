@@ -13,7 +13,9 @@
 // evaluation, so load order never matters.
 import { $, hide, show, showError, showScreen, setScreenPath, pollWhileVisible } from '../utils/dom.js';
 import { escapeHtml } from '../utils/formatting.js';
-import { ensureProfileSet, loadProfile, renderProfileChip, saveProfile, setSessionStatus } from '../auth/profile.js';
+import {
+  ensureProfileSet, loadProfile, loginToken, renderProfileChip, saveProfile, setSessionStatus,
+} from '../auth/profile.js';
 import { game, resetGameState, seedOpponents, applyRoomDisplaySettings } from '../game/gameState.js';
 import { renderOpponents } from '../game/gameRenderer.js';
 import { ws, closeSocket, attemptReconnect, connectPlayerSocket, connectSpectatorSocket } from '../network/websocket.js';
@@ -688,6 +690,7 @@ export async function onCreateGame() {
     // Purely informational (see game_history.py's games.host_player_id) --
     // ensureProfileSet() above already guarantees a profile exists here.
     host_username: profile ? profile.username : null,
+    login_token: loginToken(),
   };
   if (seedRaw) body.seed = parseInt(seedRaw, 10);
   try {
@@ -738,7 +741,7 @@ export async function onStartTutorial() {
     const status = await fetchJSON('/api/create_game', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ tutorial: true, host_username: profile ? profile.username : null }),
+      body: JSON.stringify({ tutorial: true, host_username: profile ? profile.username : null, login_token: loginToken() }),
     });
     stopRoomsPolling();
     joinIdentityOverridden = false;
@@ -858,10 +861,14 @@ export function resetCopyRoomLinkButton() {
 
 export function onJoin() {
   hide($('join-error'));
-  const username = $('join-username').value.trim();
+  // A signed-in browser always plays as itself: the seat is checked
+  // against this profile's login token (see web_server.py's
+  // _identity_rejected), so a typed-in different name couldn't sit anyway.
+  const profile = loadProfile();
+  const username = profile ? profile.username : $('join-username').value.trim();
   if (!username) { showError($('join-error'), 'Username is required.'); return; }
   setPendingJoin({ username, name: username });
-  saveProfile(username, username); // this device's identity going forward — see loadProfile
+  if (!profile) saveProfile(username, username); // this device's identity going forward — see loadProfile
   stopPolling();
   resetGameState(username, lastStatusValue);
   if (lastStatusValue) seedOpponents(lastStatusValue, username);
@@ -873,7 +880,9 @@ export function onSpectateJoin() {
   const username = $('spectate-username').value.trim();
   if (!username) { showError($('spectate-error'), 'Username is required.'); return; }
   setPendingSpectate({ username, name: username });
-  saveProfile(username, username); // this device's identity going forward — see loadProfile
+  // Only a browser with no profile yet adopts this name: watching under
+  // another name mustn't overwrite the signed-in identity (and its token).
+  if (!loadProfile()) saveProfile(username, username);
   stopPolling();
   resetGameState(null, lastStatusValue);
   // Seeds with whatever status this tab already knows (from the polling

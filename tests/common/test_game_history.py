@@ -1915,3 +1915,86 @@ def test_a_game_with_no_rating_change_still_clears_the_cached_leaderboard(databa
             participants=participants,
         )
     assert game_history._leaderboard_cache == {}
+
+
+# ------------------------------------------------------------ login tokens --
+
+def test_a_login_token_is_stored_only_as_its_hash(database_url):
+    game_history._schema_ready = True
+    conn, cursor = _fake_connection()
+    cursor.rowcount = 1
+    with patch.object(game_history, "_connect", return_value=conn):
+        token = game_history.issue_login_token("alice")
+    assert token and len(token) >= 40
+    query, params = cursor.execute.call_args.args
+    assert "INSERT INTO player_logins" in query
+    assert params == (game_history._hash_login_token(token), "alice")
+    assert token not in params
+
+
+def test_no_login_token_for_a_username_with_no_account(database_url):
+    game_history._schema_ready = True
+    conn, cursor = _fake_connection()
+    cursor.rowcount = 0
+    with patch.object(game_history, "_connect", return_value=conn):
+        assert game_history.issue_login_token("nobody") is None
+
+
+def test_login_token_matches_checks_the_hash_against_the_username(database_url):
+    game_history._schema_ready = True
+    conn, cursor = _fake_connection()
+    cursor.fetchone.side_effect = None
+    cursor.fetchone.return_value = (1,)
+    with patch.object(game_history, "_connect", return_value=conn):
+        assert game_history.login_token_matches("alice", "secret") is True
+    query, params = cursor.execute.call_args.args
+    assert params == (game_history._hash_login_token("secret"), "alice")
+
+    cursor.fetchone.return_value = None
+    with patch.object(game_history, "_connect", return_value=conn):
+        assert game_history.login_token_matches("alice", "wrong") is False
+
+
+def test_a_missing_login_token_never_matches(database_url):
+    game_history._schema_ready = True
+    with patch.object(game_history, "_connect", side_effect=AssertionError("no query needed")):
+        assert game_history.login_token_matches("alice", None) is False
+        assert game_history.login_token_matches("alice", "") is False
+
+
+def test_login_token_matches_is_unknown_when_the_database_errors(database_url):
+    """None, not False: a database blip mustn't lock every player out."""
+    game_history._schema_ready = True
+    with patch.object(game_history, "_connect", side_effect=RuntimeError("down")):
+        assert game_history.login_token_matches("alice", "secret") is None
+
+
+def test_login_token_matches_is_unknown_without_a_database(no_database_url):
+    assert game_history.login_token_matches("alice", "secret") is None
+
+
+def test_first_login_token_is_refused_once_the_name_is_claimed(database_url):
+    """The SELECT only finds a guest with no tokens yet; nothing found means
+    a Google account, or a name another device already holds."""
+    game_history._schema_ready = True
+    conn, cursor = _fake_connection()
+    cursor.fetchone.side_effect = None
+    cursor.fetchone.return_value = None
+    with patch.object(game_history, "_connect", return_value=conn):
+        assert game_history.issue_first_login_token("alice") is None
+    assert not any("INSERT INTO player_logins" in c.args[0] for c in cursor.execute.call_args_list)
+
+
+def test_first_login_token_for_an_unclaimed_guest(database_url):
+    game_history._schema_ready = True
+    conn, cursor = _fake_connection()
+    cursor.fetchone.side_effect = None
+    cursor.fetchone.return_value = (42,)
+    with patch.object(game_history, "_connect", return_value=conn):
+        token = game_history.issue_first_login_token("alice")
+    assert token
+    select = next(c.args[0] for c in cursor.execute.call_args_list if c.args[0].lstrip().startswith("SELECT"))
+    assert "google_id IS NULL" in select and "NOT EXISTS" in select
+    insert_query, insert_params = cursor.execute.call_args.args
+    assert "INSERT INTO player_logins" in insert_query
+    assert insert_params == (game_history._hash_login_token(token), 42)
