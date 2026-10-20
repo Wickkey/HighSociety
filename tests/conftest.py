@@ -116,7 +116,7 @@ def close_leftover_websocket_clients(monkeypatch):
     monkeypatch.setattr(simple_websocket.Client, "__init__", tracking_init)
     yield
     for client in opened:
-        if client.connected:
+        if getattr(client, "connected", False):  # unset if connecting failed
             try:
                 client.close()
             except Exception:

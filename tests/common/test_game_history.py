@@ -7,6 +7,7 @@ import pytest
 
 from highsociety.code.common import elo
 from highsociety.code.common.db import game_history
+from fake_db import queries as _queries, rows as _rows, save_connection as _save_connection
 
 
 @pytest.fixture(autouse=True)
@@ -200,13 +201,10 @@ def test_record_finished_game_async_calls_on_complete_with_the_real_result(datab
 
 def _fake_connection():
     """A MagicMock standing in for a psycopg2 connection whose cursor's
-    fetchone() always returns a fresh, incrementing id -- enough to exercise
-    ensure_schema/record_finished_game's real SQL-issuing logic without a
-    real Postgres server. The second/third columns (None, 1000) stand in
-    for google_id/elo -- harmless for callers that only read
-    fetchone()[0] (the games-table insert), and match "guest, no linked
-    account, default rating" as the default for _upsert_player's
-    RETURNING id, google_id, elo."""
+    fetchone() always returns a fresh, incrementing id -- enough for
+    ensure_schema and the simple single-query readers without a real
+    Postgres server. record_finished_game's batched writes need
+    _save_connection below instead."""
     conn = MagicMock()
     cursor = MagicMock()
     ids = iter(range(1, 1000))
@@ -214,6 +212,13 @@ def _fake_connection():
     conn.cursor.return_value.__enter__.return_value = cursor
     conn.__enter__.return_value = conn
     return conn, cursor
+
+
+@pytest.fixture(autouse=True)
+def reset_card_id_cache():
+    game_history._card_id_cache = None
+    yield
+    game_history._card_id_cache = None
 
 
 def test_ensure_schema_runs_every_ddl_statement_once(database_url, mock_release_connection):
@@ -233,7 +238,7 @@ def test_ensure_schema_failure_is_caught_and_leaves_schema_not_ready(database_ur
 
 def test_record_finished_game_writes_one_row_per_human_and_bot_participant(database_url, mock_release_connection):
     game_history._schema_ready = True  # skip ensure_schema's own DDL round-trip for this test
-    conn, cursor = _fake_connection()
+    conn, cursor = _save_connection()
     participants = [
         {"is_bot": False, "username": "alice", "name": "Alice",
          "points": 12, "money_left": 3, "is_winner": True, "eliminated": False},
@@ -248,17 +253,15 @@ def test_record_finished_game_writes_one_row_per_human_and_bot_participant(datab
             participants=participants,
         )
 
-    queries = [call.args[0] for call in cursor.execute.call_args_list]
-    assert sum("INSERT INTO games" in q for q in queries) == 1
-    assert sum("INSERT INTO players" in q for q in queries) == 1  # only alice, not the bot
-    assert sum("INSERT INTO player_games" in q for q in queries) == 2  # one per participant
+    assert len(_queries(cursor, "INSERT INTO games")) == 1
+    assert [row[0] for row in _rows(cursor, "INSERT INTO players", 4)] == ["alice"]  # not the bot
+    assert len(_queries(cursor, "INSERT INTO player_games")) == 1  # one batched statement...
+    player_games = _rows(cursor, "INSERT INTO player_games", 9)
+    assert len(player_games) == 2  # ...with one row per participant
 
     # The bot's row must carry a bot_name with no player_id (see the
     # player_xor_bot CHECK constraint in the schema).
-    player_games_calls = [call for call in cursor.execute.call_args_list
-                           if "INSERT INTO player_games" in call.args[0]]
-    bot_row_params = player_games_calls[1].args[1]
-    game_id, player_id, bot_name = bot_row_params[0], bot_row_params[1], bot_row_params[2]
+    _game_id, player_id, bot_name = player_games[1][:3]
     assert player_id is None
     assert bot_name == "Marble"
     mock_release_connection.assert_called_once_with(conn)
@@ -272,12 +275,7 @@ def test_record_finished_game_gives_a_named_bot_its_own_player_id(database_url):
     test_record_finished_game_writes_one_row_per_human_and_bot_participant,
     unchanged)."""
     game_history._schema_ready = True
-    conn, cursor = _fake_connection()
-    cursor.fetchone.side_effect = iter([
-        (1,),               # INSERT INTO games ... RETURNING id
-        (10, None, 1000),   # _upsert_player(alice) -- guest, no google_id
-        (55, 1000),         # SELECT b.player_id, p.elo FROM bots b JOIN players p ... WHERE bot_key = 'wagon'
-    ])
+    conn, cursor = _save_connection(bots={"wagon": (55, 1000)})
     participants = [
         {"is_bot": False, "username": "alice", "name": "Alice",
          "points": 12, "money_left": 3, "is_winner": True, "eliminated": False},
@@ -292,19 +290,11 @@ def test_record_finished_game_gives_a_named_bot_its_own_player_id(database_url):
             participants=participants,
         )
 
-    queries_and_params = [(call.args[0], call.args[1]) for call in cursor.execute.call_args_list]
-    bot_lookups = [(q, p) for q, p in queries_and_params if "FROM bots" in q]
-    assert bot_lookups == [
-        ("SELECT b.player_id, p.elo FROM bots b JOIN players p ON p.id = b.player_id WHERE b.bot_key = %s",
-         ("wagon",)),
-    ]
-
-    player_games_inserts = [p for q, p in queries_and_params if "INSERT INTO player_games" in q]
-    bot_row = player_games_inserts[1]
+    assert [call.args[1] for call in _queries(cursor, "FROM bots b JOIN")] == [(["wagon"],)]
+    bot_row = _rows(cursor, "INSERT INTO player_games", 9)[1]
     assert bot_row[1] == 55  # player_id -- Wagon's own identity, not None
     assert bot_row[2] == "Wagon bot"  # bot_name -- the flavor label, untouched
-    game_results_inserts = [p for q, p in queries_and_params if "INSERT INTO game_results" in q]
-    assert any(p[1] == 55 for p in game_results_inserts)  # bot gets a game_results row too now
+    assert any(row[1] == 55 for row in _rows(cursor, "INSERT INTO game_results", 6))  # a game_results row too
 
 
 def test_two_same_difficulty_named_bots_are_two_separate_identities(database_url):
@@ -312,13 +302,7 @@ def test_two_same_difficulty_named_bots_are_two_separate_identities(database_url
     different player_ids, so their seats, rounds, actions and ratings are
     never merged."""
     game_history._schema_ready = True
-    conn, cursor = _fake_connection()
-    cursor.fetchone.side_effect = iter([
-        (1,),               # INSERT INTO games ... RETURNING id
-        (10, None, 1000),   # _upsert_player(alice)
-        (61, 1000),         # bots lookup for Milo
-        (62, 1000),         # bots lookup for Juno
-    ])
+    conn, cursor = _save_connection(bots={"milo": (61, 1000), "juno": (62, 1000)})
     participants = [
         {"is_bot": False, "username": "alice", "name": "Alice", "game_username": "alice",
          "points": 8, "money_left": 62, "is_winner": False, "eliminated": False},
@@ -334,11 +318,10 @@ def test_two_same_difficulty_named_bots_are_two_separate_identities(database_url
             finished_at=datetime.datetime.now(datetime.timezone.utc),
             participants=participants,
         )
-    calls = [(call.args[0], call.args[1]) for call in cursor.execute.call_args_list]
-    assert [p for q, p in calls if "FROM bots b JOIN" in q] == [("milo",), ("juno",)]
-    seat_ids = {row[2]: row[1] for q, row in calls if "INSERT INTO player_games" in q}
+    assert [call.args[1] for call in _queries(cursor, "FROM bots b JOIN")] == [(["juno", "milo"],)]  # one lookup
+    seat_ids = {row[2]: row[1] for row in _rows(cursor, "INSERT INTO player_games", 9)}
     assert seat_ids == {None: 10, "Milo bot": 61, "Juno bot": 62}
-    rated_ids = {row[0] for q, row in calls if "INSERT INTO ratings" in q}
+    rated_ids = {row[0] for row in _rows(cursor, "INSERT INTO ratings", 5)}
     assert {61, 62} <= rated_ids  # one ratings row each, not one shared
 
 
@@ -351,8 +334,7 @@ def test_a_bot_without_a_matching_roster_identity_gets_no_player_id(database_url
     """Never falls back to the legacy per-difficulty rows: those are frozen
     history, and a mismatched name must not borrow another bot's stats."""
     game_history._schema_ready = True
-    conn, cursor = _fake_connection()
-    cursor.fetchone.side_effect = iter([(1,), (10, None, 1000)])
+    conn, cursor = _save_connection()
     participants = [
         {"is_bot": False, "username": "alice", "name": "Alice", "game_username": "alice",
          "points": 8, "money_left": 62, "is_winner": True, "eliminated": False},
@@ -366,9 +348,8 @@ def test_a_bot_without_a_matching_roster_identity_gets_no_player_id(database_url
             finished_at=datetime.datetime.now(datetime.timezone.utc),
             participants=participants,
         )
-    calls = [(call.args[0], call.args[1]) for call in cursor.execute.call_args_list]
-    assert not any("FROM bots b JOIN" in q for q, _ in calls)
-    bot_row = [row for q, row in calls if "INSERT INTO player_games" in q][1]
+    assert not _queries(cursor, "FROM bots b JOIN")
+    bot_row = _rows(cursor, "INSERT INTO player_games", 9)[1]
     assert bot_row[1] is None and bot_row[2] == name
 
 
@@ -386,11 +367,7 @@ def test_schema_seeds_one_players_and_bots_row_per_roster_bot():
 
 def test_record_finished_game_resolves_host_username_to_host_player_id(database_url):
     game_history._schema_ready = True
-    conn, cursor = _fake_connection()
-    cursor.fetchone.side_effect = iter([
-        (99, None, 1000),  # _upsert_player(host) -- resolved before the games INSERT
-        (1,),               # INSERT INTO games ... RETURNING id
-    ])
+    conn, cursor = _save_connection(players={"hosty": (99, None, 1000)})
     with patch.object(game_history, "_connect", return_value=conn):
         game_history.record_finished_game(
             room_code="ABCDE", seats=2, bot_mix=[],
@@ -398,17 +375,38 @@ def test_record_finished_game_resolves_host_username_to_host_player_id(database_
             finished_at=datetime.datetime.now(datetime.timezone.utc),
             participants=[], host_username="hosty",
         )
-    games_insert = next(call for call in cursor.execute.call_args_list if "INSERT INTO games" in call.args[0])
-    # (room_code, seats, started_at, finished_at, host_player_id, time_control, is_finished_successfully)
+    games_insert = _queries(cursor, "INSERT INTO games")[0]
+    # (room_code, seats, started_at, finished_at, host_player_id, ...)
     assert games_insert.args[1][4] == 99
+    # A host who isn't seated is upserted, but this game isn't counted for them.
+    assert _rows(cursor, "INSERT INTO players", 4) == [("hosty", "hosty", 0, 0)]
+
+
+def test_a_seated_host_is_upserted_once_with_their_seat_name(database_url):
+    """The host and their seat share one upsert row (Postgres rejects an
+    upsert that touches the same row twice), keeping the seat's display
+    name and counting the game once."""
+    game_history._schema_ready = True
+    conn, cursor = _save_connection()
+    participants = [
+        {"is_bot": False, "username": "alice", "name": "Alice", "game_username": "alice",
+         "points": 8, "money_left": 62, "is_winner": True, "eliminated": False},
+    ]
+    with patch.object(game_history, "_connect", return_value=conn):
+        game_history.record_finished_game(
+            room_code="ABCDE", seats=1, bot_mix=[],
+            started_at=datetime.datetime.now(datetime.timezone.utc),
+            finished_at=datetime.datetime.now(datetime.timezone.utc),
+            participants=participants, host_username="alice",
+        )
+    assert _rows(cursor, "INSERT INTO players", 4) == [("alice", "Alice", 1, 1)]
 
 
 def test_record_finished_game_can_mark_a_crashed_game_as_unsuccessful(database_url):
     """See web_server.py's run_game crash path -- a game that never
     reached final_standings still gets a row, just one that says so."""
     game_history._schema_ready = True
-    conn, cursor = _fake_connection()
-    cursor.fetchone.side_effect = iter([(1,)])  # just the games insert -- no participants
+    conn, cursor = _save_connection()
     with patch.object(game_history, "_connect", return_value=conn):
         game_history.record_finished_game(
             room_code="ABCDE", seats=2, bot_mix=[],
@@ -416,16 +414,17 @@ def test_record_finished_game_can_mark_a_crashed_game_as_unsuccessful(database_u
             finished_at=datetime.datetime.now(datetime.timezone.utc),
             participants=[], is_finished_successfully=False,
         )
-    games_insert = next(call for call in cursor.execute.call_args_list if "INSERT INTO games" in call.args[0])
-    assert games_insert.args[1][-2] is False  # is_finished_successfully (seed follows it)
+    games_insert = _queries(cursor, "INSERT INTO games")[0]
+    # (room_code, seats, started_at, finished_at, host_player_id, time_control, is_finished_successfully, ...)
+    assert games_insert.args[1][6] is False
 
 
 def test_record_finished_game_increments_games_played_and_won_for_every_human(database_url):
     """Unlike achievements/elo, these aren't gated to a google_id -- every
     human participant counts, matching get_player_profile_stats' own
-    (already ungated) COUNT query."""
+    (already ungated) COUNT query. Done by the players upsert itself."""
     game_history._schema_ready = True
-    conn, cursor = _fake_connection()  # default fixture: google_id=None for every upsert
+    conn, cursor = _save_connection()  # every upsert is a guest (google_id None)
     participants = [
         {"is_bot": False, "username": "alice", "name": "Alice",
          "points": 12, "money_left": 3, "is_winner": True, "eliminated": False},
@@ -439,10 +438,11 @@ def test_record_finished_game_increments_games_played_and_won_for_every_human(da
             finished_at=datetime.datetime.now(datetime.timezone.utc),
             participants=participants,
         )
-    updates = [call.args[1] for call in cursor.execute.call_args_list
-               if call.args[0].startswith("UPDATE players SET games_played")]
-    assert len(updates) == 2  # one per human, none for a bot
-    assert sorted(params[0] for params in updates) == [0, 1]  # one winner (+1), one loser (+0)
+    # (username, display_name, games_played increment, games_won increment) -- none for a bot
+    assert _rows(cursor, "INSERT INTO players", 4) == [("alice", "Alice", 1, 1), ("bob", "Bob", 1, 0)]
+    upsert = _queries(cursor, "INSERT INTO players")[0].args[0]
+    assert "games_played = players.games_played + EXCLUDED.games_played" in upsert
+    assert "games_won = players.games_won + EXCLUDED.games_won" in upsert
 
 
 def test_record_finished_game_placement_reflects_is_winner_not_raw_points(database_url):
@@ -452,7 +452,7 @@ def test_record_finished_game_placement_reflects_is_winner_not_raw_points(databa
     naive points sort (which would have ranked the eliminated bot below
     first despite its higher score)."""
     game_history._schema_ready = True
-    conn, cursor = _fake_connection()
+    conn, cursor = _save_connection()
     participants = [
         {"is_bot": True, "username": None, "name": "Juno bot",
          "points": 164, "money_left": 1, "is_winner": False, "eliminated": True},
@@ -466,16 +466,15 @@ def test_record_finished_game_placement_reflects_is_winner_not_raw_points(databa
             finished_at=datetime.datetime.now(datetime.timezone.utc),
             participants=participants,
         )
-    game_results_inserts = [call.args[1] for call in cursor.execute.call_args_list
-                             if "INSERT INTO game_results" in call.args[0]]
-    placement_by_user = {p[1]: p[5] for p in game_results_inserts}
-    alice_id = next(p[1] for p in game_results_inserts if p[4] == -3)
+    game_results = _rows(cursor, "INSERT INTO game_results", 6)
+    placement_by_user = {row[1]: row[5] for row in game_results}
+    alice_id = next(row[1] for row in game_results if row[4] == -3)
     assert placement_by_user[alice_id] == 1  # the actual winner, despite fewer points
 
 
 def test_record_finished_game_writes_seat_columns_and_winner_id(database_url):
     game_history._schema_ready = True
-    conn, cursor = _fake_connection()
+    conn, cursor = _save_connection()
     participants = [
         {"is_bot": False, "username": "alice", "name": "Alice",
          "points": 12, "money_left": 3, "is_winner": True, "eliminated": False},
@@ -489,9 +488,10 @@ def test_record_finished_game_writes_seat_columns_and_winner_id(database_url):
             finished_at=datetime.datetime.now(datetime.timezone.utc),
             participants=participants,
         )
-    seat_update = next(call for call in cursor.execute.call_args_list
-                        if call.args[0].strip().startswith("UPDATE games SET winner_id"))
-    winner_id, p1, p2, p3, p4, p5, game_id = seat_update.args[1]
+    # Known before the games row is written, so it goes in with them --
+    # no follow-up UPDATE.
+    assert not _queries(cursor, "UPDATE games")
+    winner_id, p1, p2, p3, p4, p5 = _queries(cursor, "INSERT INTO games")[0].args[1][8:]
     assert p1 is not None and winner_id == p1  # alice, seat 1, also the winner
     assert p2 is None  # the bot -- no difficulty info, so no resolvable player_id
     assert p3 is None and p4 is None and p5 is None  # only 2 seats were ever filled
@@ -499,13 +499,7 @@ def test_record_finished_game_writes_seat_columns_and_winner_id(database_url):
 
 def test_record_finished_game_writes_a_ratings_row_per_rated_participant(database_url):
     game_history._schema_ready = True
-    conn, cursor = _fake_connection()
-    cursor.fetchone.side_effect = iter([
-        (1,),                    # INSERT INTO games ... RETURNING id
-        (10, "g-alice", 1000),   # _upsert_player(alice) RETURNING id, google_id, elo
-        (1,),                    # win-count SELECT for alice (her 1st win)
-        (11, "g-bob", 1000),     # _upsert_player(bob) RETURNING id, google_id, elo
-    ])
+    conn, cursor = _save_connection(players={"alice": (10, "g-alice", 1000), "bob": (11, "g-bob", 1000)})
     participants = [
         {"is_bot": False, "username": "alice", "name": "Alice",
          "points": 15, "money_left": 5, "is_winner": True, "eliminated": False},
@@ -519,10 +513,10 @@ def test_record_finished_game_writes_a_ratings_row_per_rated_participant(databas
             finished_at=datetime.datetime.now(datetime.timezone.utc),
             participants=participants,
         )
-    ratings_inserts = [call.args[1] for call in cursor.execute.call_args_list
-                       if "INSERT INTO ratings" in call.args[0]]
-    assert len(ratings_inserts) == 2
-    by_player = {row[0]: row for row in ratings_inserts}  # user_id -> (user_id, game_id, old, new, change)
+    ratings = _rows(cursor, "INSERT INTO ratings", 5)
+    assert len(ratings) == 2
+    assert len(_queries(cursor, "INSERT INTO ratings")) == 1  # both rows in one statement
+    by_player = {row[0]: row for row in ratings}  # user_id -> (user_id, game_id, old, new, change)
     assert by_player[10][2] == 1000  # old_rating
     assert by_player[10][3] == by_player[10][2] + by_player[10][4]  # new_rating == old + change
     assert by_player[10][4] > 0  # alice (winner) gains
@@ -545,15 +539,11 @@ def test_record_finished_game_averages_elo_deltas_for_same_difficulty_bot_seats(
     occupying N seats gets exactly one rating change, worth 1/N of the
     naive sum, backed by exactly one ratings row. Named bots each have
     their own player_id now, so this only guards against a bad bots row
-    (faked here by returning the same id for both seats)."""
+    (faked here by giving both bot keys the same id)."""
     game_history._schema_ready = True
-    conn, cursor = _fake_connection()
-    cursor.fetchone.side_effect = iter([
-        (1,),                    # INSERT INTO games ... RETURNING id
-        (10, "g-alice", 1000),   # _upsert_player(alice)
-        (55, 900),                # bots lookup for Milo -- deliberately not 1000 (see below)
-        (55, 900),                # bots lookup for Juno -- same player_id (a bad bots row)
-    ])
+    # Bots deliberately at 900, not 1000 -- see below.
+    conn, cursor = _save_connection(players={"alice": (10, "g-alice", 1000)},
+                                    bots={"milo": (55, 900), "juno": (55, 900)})
     participants = [
         {"is_bot": False, "username": "alice", "name": "Alice", "game_username": "alice",
          "points": 8, "money_left": 62, "is_winner": False, "eliminated": False},
@@ -592,17 +582,13 @@ def test_record_finished_game_averages_elo_deltas_for_same_difficulty_bot_seats(
         (expected_seat_deltas["milo bot"] + expected_seat_deltas["juno bot"]) / 2
     )
 
-    ratings_inserts = [call.args[1] for call in cursor.execute.call_args_list
-                       if "INSERT INTO ratings" in call.args[0]]
-    by_player = {row[0]: row for row in ratings_inserts}
+    by_player = {row[0]: row for row in _rows(cursor, "INSERT INTO ratings", 5)}
     assert set(by_player) == {10, 55}  # exactly one ratings row per real identity, not per seat
     assert by_player[55][4] == expected_bot_delta  # averaged, not summed
     assert by_player[10][4] == expected_seat_deltas["alice"]  # a solo seat is unaffected
 
-    elo_updates = [call.args[1] for call in cursor.execute.call_args_list
-                   if call.args[0].startswith("UPDATE players SET elo")]
-    bot_elo_update = next(p for p in elo_updates if p[1] == 55)
-    assert bot_elo_update[0] == expected_bot_delta  # applied exactly once, not twice
+    elo_updates = _rows(cursor, "UPDATE players SET elo", 2)  # (player_id, change)
+    assert [change for player_id, change in elo_updates if player_id == 55] == [expected_bot_delta]  # once
 
     # Both bot seats' rating_keys resolve to the same, correct combined
     # change in the return value too (each one only matters if a future
@@ -622,12 +608,7 @@ def test_record_finished_game_rates_bot_games_but_never_gives_bots_achievements(
     to players anywhere), but must never unlock an achievement, even when
     they win."""
     game_history._schema_ready = True
-    conn, cursor = _fake_connection()
-    cursor.fetchone.side_effect = iter([
-        (1,),                    # INSERT INTO games ... RETURNING id
-        (10, "g-alice", 1000),   # _upsert_player(alice) RETURNING id, google_id, elo
-        (99, 1000),              # SELECT b.player_id, p.elo FROM bots ... WHERE bot_key = 'niel'
-    ])
+    conn, cursor = _save_connection(players={"alice": (10, "g-alice", 1000)}, bots={"niel": (99, 1000)})
     participants = [
         {"is_bot": False, "username": "alice", "name": "Alice", "game_username": "alice",
          "points": 5, "money_left": 0, "is_winner": False, "eliminated": False},
@@ -642,17 +623,13 @@ def test_record_finished_game_rates_bot_games_but_never_gives_bots_achievements(
             participants=participants,
         )
 
-    queries_and_params = [(call.args[0], call.args[1]) for call in cursor.execute.call_args_list]
-    ratings_inserts = [p for q, p in queries_and_params if "INSERT INTO ratings" in q]
-    assert len(ratings_inserts) == 2  # both alice AND the bot get rated
-    by_player = {row[0]: row for row in ratings_inserts}  # user_id -> (user_id, game_id, old, new, change)
+    by_player = {row[0]: row for row in _rows(cursor, "INSERT INTO ratings", 5)}
+    assert set(by_player) == {10, 99}  # both alice AND the bot get rated
     assert by_player[10][4] < 0  # alice (lost to the bot) loses rating
     assert by_player[99][4] > 0  # the bot (won) gains rating
 
-    elo_updates = [p for q, p in queries_and_params if q.startswith("UPDATE players SET elo")]
-    assert {p[1] for p in elo_updates} == {10, 99}  # both players' elo actually updated
-
-    assert not any("INSERT INTO player_achievements" in q for q, _ in queries_and_params)
+    assert {player_id for player_id, _ in _rows(cursor, "UPDATE players SET elo", 2)} == {10, 99}
+    assert not _queries(cursor, "INSERT INTO player_achievements")
 
 
 def test_record_finished_game_does_not_rate_a_bot_with_unknown_difficulty(database_url):
@@ -685,7 +662,7 @@ def _action(seq, seat, action, amount=None, cards=None, round_number=1, reason=N
 
 def test_record_finished_game_populates_game_rounds_round_players_and_game_actions(database_url):
     game_history._schema_ready = True
-    conn, cursor = _fake_connection()
+    conn, cursor = _save_connection()
     participants = [
         {"is_bot": False, "username": "alice", "name": "Alice", "game_username": "alice", "seat": 0,
          "points": 10, "money_left": 5, "is_winner": True, "eliminated": False},
@@ -718,43 +695,59 @@ def test_record_finished_game_populates_game_rounds_round_players_and_game_actio
             participants=participants, auction_rounds=auction_rounds, seed=77, actions=actions,
         )
 
-    queries_and_params = [(call.args[0], call.args[1]) for call in cursor.execute.call_args_list]
+    games_params = _queries(cursor, "INSERT INTO games")[0].args[1]
+    assert games_params[7] == 77  # the seed -- with game_actions, all a replay needs
+    assert [row[8] for row in _rows(cursor, "INSERT INTO player_games", 9)] == [0, 1]  # seats
 
-    games_params = next(p for q, p in queries_and_params if "INSERT INTO games" in q)
-    assert games_params[-1] == 77  # the seed -- with game_actions, all a replay needs
-    seats = [p[8] for q, p in queries_and_params if "INSERT INTO player_games" in q]
-    assert seats == [0, 1]
-
-    card_lookup = [(q, p) for q, p in queries_and_params if "SELECT card_id FROM cards" in q]
-    assert card_lookup == [("SELECT card_id FROM cards WHERE type = %s AND value = %s LIMIT 1", ("Painting", 5))]
-
-    game_id, round_number, card_id, winner_id, winning_bid, started_at, ended_at, winner_seat = next(
-        p for q, p in queries_and_params if "INSERT INTO game_rounds" in q)
+    game_id, round_number, card_id, winner_id, winning_bid, started_at, ended_at, winner_seat = \
+        _rows(cursor, "INSERT INTO game_rounds", 8)[0]
+    assert card_id == 105  # Painting 5, from the cards table
     assert round_number == 1
     assert winning_bid == 5
     assert winner_id is not None  # alice's resolved player_id
     assert winner_seat == 0
 
-    # round_players/game_actions are now written as one batched multi-row
-    # INSERT each (see _record_auction_rounds's own docstring on why),
-    # rather than one execute() call per row -- unflatten the single
-    # call's flat params list back into per-row tuples to check the same
-    # things as before.
-    round_players_params, = [p for q, p in queries_and_params if "INSERT INTO round_players" in q]
-    round_players_rows = [round_players_params[i:i + 7] for i in range(0, len(round_players_params), 7)]
+    # round_players/game_actions are written as one batched multi-row
+    # INSERT each (see _record_auction_rounds's own docstring on why).
+    round_players_rows = _rows(cursor, "INSERT INTO round_players", 7)
     assert len(round_players_rows) == 2
-    results = sorted(row[6] for row in round_players_rows)  # (..., result) -- index 6
-    assert results == ["lost", "won"]
+    assert sorted(row[6] for row in round_players_rows) == ["lost", "won"]  # (..., result) -- index 6
 
     # One row per action_log entry, not derived from the auction events:
     # (game_id, seq, seat, player_id, action_type, amount, cards, think_ms, reason, round, timestamp)
-    game_actions_params, = [p for q, p in queries_and_params if "INSERT INTO game_actions" in q]
-    rows = [game_actions_params[i:i + 11] for i in range(0, len(game_actions_params), 11)]
+    rows = _rows(cursor, "INSERT INTO game_actions", 11)
     assert [(r[1], r[2], r[4], r[5], r[6], r[7]) for r in rows] == [
         (1, 0, "BID", 5, [5], 900), (2, 1, "PASS", None, None, 900), (3, 0, "DISCARD", 3, None, 900),
     ]
     alice_id = rows[0][3]
     assert alice_id is not None and rows[2][3] == alice_id and rows[1][3] not in (None, alice_id)
+
+
+def test_card_ids_are_read_once_per_process_not_once_per_round(database_url):
+    """`cards` never changes after the schema seeds it, so one read serves
+    every round of every later game -- it used to be one SELECT per
+    auction round, each a full round trip to the database."""
+    game_history._schema_ready = True
+    rounds = [{
+        "round_number": n, "auction_type": "normal",
+        "card": {"type": "Painting", "value": n, "multiplier": 1, "is_green": False, "description": "x"},
+        "events": [], "recipient": None, "money_spent": {}, "cards_spent": {},
+        "started_at": "2026-01-01T00:00:00+00:00", "ended_at": "2026-01-01T00:00:01+00:00",
+        "starting_money": {}, "ending_money": {},
+    } for n in range(1, 4)]
+    card_reads = 0
+    for _ in range(2):
+        conn, cursor = _save_connection()
+        with patch.object(game_history, "_connect", return_value=conn):
+            game_history.record_finished_game(
+                room_code="ABCDE", seats=1, bot_mix=[],
+                started_at=datetime.datetime.now(datetime.timezone.utc),
+                finished_at=datetime.datetime.now(datetime.timezone.utc),
+                participants=[], auction_rounds=rounds,
+            )
+        card_reads += len(_queries(cursor, "FROM cards"))
+        assert [row[2] for row in _rows(cursor, "INSERT INTO game_rounds", 8)] == [101, 102, 103]
+    assert card_reads == 1  # two games, three rounds each
 
 
 def test_actions_of_a_seat_with_no_players_row_are_still_written_by_seat(database_url):
@@ -785,7 +778,7 @@ def test_record_finished_game_batches_round_players_and_game_actions_into_one_ca
     round_players calls and 10 game_actions calls; the fix must produce
     exactly one of each regardless of how many rounds the game had."""
     game_history._schema_ready = True
-    conn, cursor = _fake_connection()
+    conn, cursor = _save_connection()
     participants = [
         {"is_bot": False, "username": "alice", "name": "Alice", "game_username": "alice", "seat": 0,
          "points": 10, "money_left": 5, "is_winner": True, "eliminated": False},
@@ -847,15 +840,7 @@ def test_record_finished_game_does_not_crash_when_two_same_difficulty_bots_share
     Named bots each have their own player_id now, so this only guards
     against a bad bots row (faked here)."""
     game_history._schema_ready = True
-    conn, cursor = _fake_connection()
-    cursor.fetchone.side_effect = iter([
-        (1,),              # INSERT INTO games ... RETURNING id
-        (10, None, 1000),  # _upsert_player(alice)
-        (55, 1000),        # bots lookup for Milo
-        (55, 1000),        # bots lookup for Juno -- same player_id (a bad bots row)
-        (99,),             # SELECT card_id FROM cards ...
-        (777,),            # INSERT INTO game_rounds ... RETURNING id
-    ])
+    conn, cursor = _save_connection(bots={"milo": (55, 1000), "juno": (55, 1000)})
     participants = [
         {"is_bot": False, "username": "alice", "name": "Alice", "game_username": "alice",
          "points": 12, "money_left": 3, "is_winner": True, "eliminated": False},
@@ -882,19 +867,15 @@ def test_record_finished_game_does_not_crash_when_two_same_difficulty_bots_share
             participants=participants, auction_rounds=auction_rounds,
         )
 
-    # One batched call for all three seats' rows (see
-    # _record_auction_rounds's own docstring) -- unflatten it back into
-    # per-row tuples to check the same things the one-call-per-row version
-    # used to check directly.
-    round_players_calls = [call for call in cursor.execute.call_args_list
-                            if "INSERT INTO round_players" in call.args[0]]
+    round_players_calls = _queries(cursor, "INSERT INTO round_players")
     assert len(round_players_calls) == 1
     assert "ON CONFLICT (round_id, player_id) DO NOTHING" in round_players_calls[0].args[0]
-    flat_params = round_players_calls[0].args[1]
-    round_players_rows = [flat_params[i:i + 7] for i in range(0, len(flat_params), 7)]
+    round_players_rows = _rows(cursor, "INSERT INTO round_players", 7)
     assert len(round_players_rows) == 3  # alice + both bot seats, despite the shared player_id
     bot_player_ids = {row[2] for row in round_players_rows} - {10}  # exclude alice's player_id
     assert bot_player_ids == {55}  # both bot seats resolved to the same shared player_id
+    # game_results is keyed (game_id, user_id): the shared id gets one row, from the first seat.
+    assert [row[1] for row in _rows(cursor, "INSERT INTO game_results", 6)] == [10, 55]
 
 
 def test_record_finished_game_leaves_winning_bid_null_for_a_disgrace_card(database_url):
@@ -902,7 +883,7 @@ def test_record_finished_game_leaves_winning_bid_null_for_a_disgrace_card(databa
     first and got stuck with it -- their money_spent is always 0 by
     AuctionRecord's own design, which isn't a real winning bid."""
     game_history._schema_ready = True
-    conn, cursor = _fake_connection()
+    conn, cursor = _save_connection()
     participants = [
         {"is_bot": False, "username": "alice", "name": "Alice", "game_username": "alice",
          "points": 0, "money_left": 20, "is_winner": True, "eliminated": False},
@@ -922,10 +903,9 @@ def test_record_finished_game_leaves_winning_bid_null_for_a_disgrace_card(databa
             finished_at=datetime.datetime.now(datetime.timezone.utc),
             participants=participants, auction_rounds=auction_rounds,
         )
-    game_rounds_insert = next(call.args[1] for call in cursor.execute.call_args_list
-                               if "INSERT INTO game_rounds" in call.args[0])
-    winning_bid = game_rounds_insert[4]
-    assert winning_bid is None
+    game_round = _rows(cursor, "INSERT INTO game_rounds", 8)[0]
+    assert game_round[2] == 112  # FauxPas card_id
+    assert game_round[4] is None  # winning_bid
 
 
 def test_record_finished_game_skips_round_players_and_actions_for_an_unresolvable_bot(database_url):
@@ -1099,16 +1079,14 @@ def test_record_finished_game_refreshes_an_already_cached_elo(database_url):
     without needing a fresh read to notice the change."""
     game_history._schema_ready = True
     game_history._player_sessions["alice"] = game_history.PlayerSession(player_id=10, elo=1000)
-    conn, cursor = _fake_connection()
+    conn, cursor = _save_connection(players={"alice": (10, "google-alice", 1000), "bob": (11, "google-bob", 1000)})
     participants = [
         {"is_bot": False, "username": "alice", "name": "Alice", "game_username": "alice",
          "points": 10, "money_left": 5, "is_winner": True, "eliminated": False},
         {"is_bot": False, "username": "bob", "name": "Bob", "game_username": "bob",
          "points": 0, "money_left": 20, "is_winner": False, "eliminated": False},
     ]
-    with patch.object(game_history, "_connect", return_value=conn), \
-         patch.object(game_history, "_upsert_player",
-                      side_effect=[(10, "google-alice", 1000), (11, "google-bob", 1000)]):
+    with patch.object(game_history, "_connect", return_value=conn):
         game_history.record_finished_game(
             room_code="ABCDE", seats=2, bot_mix=[],
             started_at=datetime.datetime.now(datetime.timezone.utc),
@@ -1126,7 +1104,7 @@ def test_record_finished_game_does_not_refresh_the_cache_if_the_transaction_fail
     record_finished_game's own comment on cache_refreshes)."""
     game_history._schema_ready = True
     game_history._player_sessions["alice"] = game_history.PlayerSession(player_id=10, elo=1000)
-    conn, cursor = _fake_connection()
+    conn, cursor = _save_connection(players={"alice": (10, "google-alice", 1000), "bob": (11, "google-bob", 1000)})
     participants = [
         {"is_bot": False, "username": "alice", "name": "Alice", "game_username": "alice",
          "points": 10, "money_left": 5, "is_winner": True, "eliminated": False},
@@ -1134,8 +1112,6 @@ def test_record_finished_game_does_not_refresh_the_cache_if_the_transaction_fail
          "points": 0, "money_left": 20, "is_winner": False, "eliminated": False},
     ]
     with patch.object(game_history, "_connect", return_value=conn), \
-         patch.object(game_history, "_upsert_player",
-                      side_effect=[(10, "google-alice", 1000), (11, "google-bob", 1000)]), \
          patch.object(game_history, "_record_auction_rounds", side_effect=RuntimeError("boom")):
         result = game_history.record_finished_game(
             room_code="ABCDE", seats=2, bot_mix=[],
@@ -1257,13 +1233,8 @@ def test_rename_player_returns_false_instead_of_raising_on_a_uniqueness_race(dat
 
 def test_record_finished_game_writes_achievements_and_elo_for_linked_participants(database_url):
     game_history._schema_ready = True
-    conn, cursor = _fake_connection()
-    cursor.fetchone.side_effect = iter([
-        (1,),                    # INSERT INTO games ... RETURNING id
-        (10, "g-alice", 1000),   # _upsert_player(alice) RETURNING id, google_id, elo
-        (1,),                    # win-count SELECT for alice (this is her 1st win)
-        (11, "g-bob", 1000),     # _upsert_player(bob) RETURNING id, google_id, elo
-    ])
+    conn, cursor = _save_connection(players={"alice": (10, "g-alice", 1000), "bob": (11, "g-bob", 1000)},
+                                    win_counts={10: 1})  # alice's 1st win
     participants = [
         {"is_bot": False, "username": "alice", "name": "Alice",
          "points": 15, "money_left": 5, "is_winner": True, "eliminated": False},
@@ -1279,14 +1250,19 @@ def test_record_finished_game_writes_achievements_and_elo_for_linked_participant
             achievement_unlocks={"alice": {"sniper"}},
         )
 
-    queries_and_params = [(call.args[0], call.args[1]) for call in cursor.execute.call_args_list]
-    achievement_inserts = [p for q, p in queries_and_params if "INSERT INTO player_achievements" in q]
+    # Only winners are counted, and only after this game's own rows are in.
+    win_count = _queries(cursor, "count(*) FROM player_games")
+    assert [call.args[1] for call in win_count] == [([10],)]
+    assert cursor.execute.call_args_list.index(win_count[0]) > \
+        cursor.execute.call_args_list.index(_queries(cursor, "INSERT INTO player_games")[0])
+    achievements = _rows(cursor, "INSERT INTO player_achievements", 2)
+    assert len(_queries(cursor, "INSERT INTO player_achievements")) == 1
     # first_win (win count 1) + the per-game "sniper" unlock passed in.
-    assert (10, "first_win") in achievement_inserts
-    assert (10, "sniper") in achievement_inserts
-    assert not any(pid == 11 for pid, _ in achievement_inserts)  # bob didn't win, earned nothing
+    assert (10, "first_win") in achievements
+    assert (10, "sniper") in achievements
+    assert not any(player_id == 11 for player_id, _ in achievements)  # bob didn't win, earned nothing
 
-    elo_updates = {params[1]: params[0] for q, params in queries_and_params if q.startswith("UPDATE players SET elo")}
+    elo_updates = dict(_rows(cursor, "UPDATE players SET elo", 2))  # player_id -> change
     assert elo_updates[10] > 0   # alice (winner) gains
     assert elo_updates[11] < 0   # bob (loser) loses
 
@@ -1587,13 +1563,7 @@ def test_record_finished_game_gives_distinct_placements_to_same_difficulty_bot_s
     (game_id, user_id)) is a separate, deliberately-deduplicated table
     and is not what get_game_detail reads placement from any more."""
     game_history._schema_ready = True
-    conn, cursor = _fake_connection()
-    cursor.fetchone.side_effect = iter([
-        (1,),              # INSERT INTO games ... RETURNING id
-        (10, None, 1000),  # _upsert_player(alice)
-        (55, 1000),        # bots lookup for the winning medium bot
-        (55, 1000),        # bots lookup for the eliminated medium bot -- same player_id
-    ])
+    conn, cursor = _save_connection(bots={"milo": (55, 1000), "juno": (55, 1000)})
     participants = [
         {"is_bot": False, "username": "alice", "name": "Alice", "game_username": "alice",
          "points": 8, "money_left": 62, "is_winner": False, "eliminated": False},
@@ -1610,10 +1580,8 @@ def test_record_finished_game_gives_distinct_placements_to_same_difficulty_bot_s
             participants=participants,
         )
 
-    player_games_inserts = [call.args[1] for call in cursor.execute.call_args_list
-                             if "INSERT INTO player_games" in call.args[0]]
-    # (game_id, player_id, bot_name, points, money_left, is_winner, eliminated, placement)
-    placements_by_name = {row[2] or "alice": row[7] for row in player_games_inserts}
+    # (game_id, player_id, bot_name, points, money_left, is_winner, eliminated, placement, seat)
+    placements_by_name = {row[2] or "alice": row[7] for row in _rows(cursor, "INSERT INTO player_games", 9)}
     assert placements_by_name == {"alice": 2, "Milo bot": 1, "Juno bot": 3}
 
 
@@ -1683,20 +1651,15 @@ def test_record_finished_game_invalidates_the_leaderboard_cache(database_url, mo
     game_history._schema_ready = True
     game_history._leaderboard_cache[(20, 0)] = (time.monotonic(), {"rows": ["stale"], "has_more": False})
     game_history._leaderboard_cache[(20, 20)] = (time.monotonic(), {"rows": ["stale-page-2"], "has_more": False})
-    conn, cursor = _fake_connection()
-    # record_finished_game itself never calls fetchall() (only fetchone(),
-    # for its own RETURNING-id upserts) -- this return_value is only ever
-    # actually consumed by _warm_leaderboard_cache's own leaderboard query.
-    cursor.fetchall = MagicMock(return_value=[("alice", 1016, 1, 1)])
+    conn, cursor = _save_connection(players={"alice": (10, "google-alice", 1000), "bob": (11, "google-bob", 1000)},
+                                    leaderboard_rows=[("alice", 1016, 1, 1)])
     participants = [
         {"is_bot": False, "username": "alice", "name": "Alice", "game_username": "alice",
          "points": 10, "money_left": 5, "is_winner": True, "eliminated": False},
         {"is_bot": False, "username": "bob", "name": "Bob", "game_username": "bob",
          "points": 0, "money_left": 20, "is_winner": False, "eliminated": False},
     ]
-    with patch.object(game_history, "_connect", return_value=conn), \
-         patch.object(game_history, "_upsert_player",
-                      side_effect=[(10, "google-alice", 1000), (11, "google-bob", 1000)]):
+    with patch.object(game_history, "_connect", return_value=conn):
         game_history.record_finished_game(
             room_code="ABCDE", seats=2, bot_mix=[],
             started_at=datetime.datetime.now(datetime.timezone.utc),
@@ -1711,6 +1674,38 @@ def test_record_finished_game_invalidates_the_leaderboard_cache(database_url, mo
     _, warmed = game_history._leaderboard_cache[(20, 0)]
     assert warmed == {"rows": [{"username": "alice", "elo": 1016, "games_played": 1, "games_won": 1}],
                        "has_more": False}
+
+
+def test_async_save_hands_over_the_elo_result_before_rewarming_the_leaderboard(database_url):
+    """The finished screen polls for these numbers; re-fetching the
+    leaderboard is one more trip to the database, so it waits until
+    on_complete has the result."""
+    game_history._schema_ready = True
+    conn, _cursor = _save_connection(players={"alice": (10, "google-alice", 1000), "bob": (11, "google-bob", 1000)})
+    order = []
+    done = __import__("threading").Event()
+    participants = [
+        {"is_bot": False, "username": "alice", "name": "Alice", "game_username": "alice",
+         "points": 10, "money_left": 5, "is_winner": True, "eliminated": False},
+        {"is_bot": False, "username": "bob", "name": "Bob", "game_username": "bob",
+         "points": 0, "money_left": 20, "is_winner": False, "eliminated": False},
+    ]
+
+    def warm():
+        order.append("rewarm")
+        done.set()
+
+    with patch.object(game_history, "_connect", return_value=conn), \
+         patch.object(game_history, "_warm_leaderboard_cache", side_effect=warm):
+        game_history.record_finished_game_async(
+            on_complete=lambda result: order.append(("elo", sorted(result))),
+            room_code="ABCDE", seats=2, bot_mix=[],
+            started_at=datetime.datetime.now(datetime.timezone.utc),
+            finished_at=datetime.datetime.now(datetime.timezone.utc),
+            participants=participants,
+        )
+        assert done.wait(5)
+    assert order == [("elo", ["alice", "bob"]), "rewarm"]
 
 
 def test_warm_leaderboard_cache_leaves_it_clear_on_a_fetch_failure(database_url):
@@ -1850,7 +1845,7 @@ def test_a_game_with_no_rating_change_still_clears_the_cached_leaderboard(databa
     nobody's Elo does (a guest-only game here)."""
     game_history._schema_ready = True
     game_history._leaderboard_cache[(20, 0)] = (time.monotonic(), {"rows": ["stale"], "has_more": False})
-    conn, cursor = _fake_connection()
+    conn, cursor = _save_connection()
     participants = [
         {"is_bot": False, "username": "alice", "name": "Alice", "game_username": "alice", "seat": 0,
          "points": 5, "money_left": 3, "is_winner": True, "eliminated": False},

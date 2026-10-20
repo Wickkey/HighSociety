@@ -1925,9 +1925,6 @@ def ws_spectate(ws):
 
     transport = WebSocketTransport(ws, label=f"{username}@web-spectator")
     spectator = NetworkSpectator(transport=transport, name=name, username=username, game_id=game_id)
-    room.spectators.append(spectator)
-    _broadcast_spectator_count(room)
-
     # Wording matches what's actually true right now -- "watching live" was
     # shown even for a room still sitting in its lobby with nobody playing
     # yet (see JS's own onSpectateJoin, which now renders a waiting view
@@ -1938,6 +1935,13 @@ def ws_spectate(ws):
         else f"Welcome {name}! You are now watching the game live."
     )
     _send(ws, game_id, "IDENTIFY_SUCCESS", welcome)
+    # Registered only after the welcome is out: once in room.spectators,
+    # live broadcasts reach this socket, and one landing first used to
+    # arrive ahead of IDENTIFY_SUCCESS. The catch-up comes after
+    # registering so nothing between the snapshot and the first live
+    # event can slip through unseen.
+    room.spectators.append(spectator)
+    _broadcast_spectator_count(room)
     _send_spectator_catchup(spectator, room)
 
     chat_thread = threading.Thread(target=_spectator_chat_listener, args=(spectator, room),

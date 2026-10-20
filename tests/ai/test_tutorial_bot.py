@@ -127,7 +127,8 @@ class TestCuratedTutorialSeed:
     comment in web_server.py for why this specific seed was picked."""
 
     @pytest.fixture(scope="class")
-    def order_and_cutoff(self):
+    @classmethod
+    def order_and_cutoff(cls):
         order = draw_order_for_seed(_TUTORIAL_SEED)
         return order, find_green_cutoff(order)
 
