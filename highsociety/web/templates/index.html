@@ -728,16 +728,16 @@
         <div id="matchmaking-setup">
           <span class="matchmaking-suits" aria-hidden="true"><span>&#9824;</span><span>&#9829;</span><span>&#9827;</span></span>
           <h2>Play</h2>
-          <p class="muted">Find an opponent close to your rating.</p>
+          <p class="muted">Find opponents close to your rating.</p>
 
-          <!-- Segmented 2-5 picker (same .pill-choice-btn look as the host
+          <!-- Segmented 3-5 picker (same .pill-choice-btn look as the host
                form's seat/time pickers) writing into the hidden
                #matchmaking-seats input matchmaking.js's onFindMatch
-               already reads unchanged. -->
+               already reads unchanged. 3-5 to match Host's own picker --
+               the engine supports 2, but the site's tables are 3-5. -->
           <span class="matchmaking-field-label">Players</span>
           <div id="matchmaking-seats-buttons" class="pill-choice-grid">
             <div class="pill-choice-row">
-              <button type="button" class="pill-choice-btn" data-value="2">2</button>
               <button type="button" class="pill-choice-btn selected" data-value="3">3</button>
               <button type="button" class="pill-choice-btn" data-value="4">4</button>
               <button type="button" class="pill-choice-btn" data-value="5">5</button>

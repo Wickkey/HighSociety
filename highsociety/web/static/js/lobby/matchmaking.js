@@ -73,7 +73,7 @@ export async function onFindMatch() {
   stopQueueDepthPolling(); // leaving the setup screen -- the pre-join hint no longer applies
   hide($('matchmaking-setup'));
   hide($('matchmaking-timeout-options'));
-  $('matchmaking-status-text').textContent = 'Finding you an opponent…';
+  $('matchmaking-status-text').textContent = 'Finding you opponents…';
   show($('matchmaking-waiting'));
   try {
     const result = await fetchJSON('/api/matchmaking/join', {
@@ -137,8 +137,8 @@ async function pollMatchmakingStatus() {
     return;
   }
   $('matchmaking-status-text').textContent = status.waiting_count > 1
-    ? `Finding you an opponent… (${status.waiting_count} in queue)`
-    : 'Finding you an opponent…';
+    ? `Finding you opponents… (${status.waiting_count} in queue)`
+    : 'Finding you opponents…';
   $('matchmaking-timeout-options').classList.toggle('hidden', !status.timed_out);
 }
 
