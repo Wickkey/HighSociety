@@ -1,6 +1,7 @@
 import datetime
 import itertools
 import json
+import socket
 import threading
 import time
 from unittest.mock import MagicMock
@@ -136,16 +137,28 @@ class ReconnectingWSClient(ScriptedWSClient):
 
 
 @pytest.fixture
-def running_web_server():
+def running_web_server(monkeypatch):
     web_server._rooms.clear()  # each test starts from a clean slate
     port = next(_port_counter)
+    # http.server's server_bind reverse-resolves the host before listening;
+    # with some Python builds/networks that lookup of 127.0.0.1 goes to
+    # the LAN's DNS and takes ~35s, so connects in that window time out.
+    monkeypatch.setattr(socket, "getfqdn", lambda name="": name)
     thread = threading.Thread(
         target=web_server.app.run,
         kwargs={"host": "127.0.0.1", "port": port, "threaded": True, "use_reloader": False},
         daemon=True,
     )
     thread.start()
-    threading.Event().wait(0.3)  # let the dev server actually start listening
+    deadline = time.time() + 10
+    while True:  # until the dev server is actually listening
+        try:
+            socket.create_connection(("127.0.0.1", port), timeout=0.5).close()
+            break
+        except OSError:
+            if time.time() > deadline:
+                raise
+            threading.Event().wait(0.05)
     yield port
     web_server._rooms.clear()
 

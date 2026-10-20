@@ -81,8 +81,8 @@ target/
 profile_default/
 ipython_config.py
 
-# pyenv
-.python-version
+# pyenv: .python-version is tracked on purpose -- it pins the Python
+# version Render deploys with, so local and production match.
 
 # pipenv
 Pipfile.lock

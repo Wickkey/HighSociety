@@ -7,7 +7,7 @@ Free-tier hosting, so the first load after a period of inactivity can take ~30-6
 
 ## Requirements
 
-Python 3.9+. No third-party packages needed for CLI or socket play. Playing in a browser needs
+Python 3.14 (what production runs; pinned in `.python-version`, which Render also reads). No third-party packages needed for CLI or socket play. Playing in a browser needs
 `flask`/`flask-sock`:
 
 ```
