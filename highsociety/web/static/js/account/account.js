@@ -162,7 +162,7 @@ export function prefetchAccountStats() {
 // whole row was just `hidden` until the fetch finished, so the cards
 // appeared out of nowhere rather than looking like they were loading.
 // Stats aren't gated to Google-linked accounts (get_player_profile_stats
-// isn't either) -- a guest with no games yet just keeps the skeleton
+// isn't either) -- a guest with no games yet gets the "—" defaults
 // (the 404 case below), same as before.
 function renderAccountStats(stats, profile) {
   if (!stats) return;
@@ -210,9 +210,16 @@ async function loadAccountStats() {
   if (!profile) return;
   const { cached, freshPromise } = profileStats(profile.username);
   if (cached) renderAccountStats(cached, profile);
-  // null on a 404 (no games recorded yet) -- leave whatever's already
-  // rendered (or the skeleton).
-  renderAccountStats(await freshPromise, profile);
+  const fresh = await freshPromise;
+  if (fresh) {
+    renderAccountStats(fresh, profile);
+  } else if (!cached) {
+    // A 404 (no games finished yet -- the players row only appears once
+    // one does) or a failed fetch: settle into the cards' "—" defaults,
+    // the same as a Player Profile does, rather than pulsing forever.
+    row.classList.remove('loading');
+    $('account-meta-row').classList.remove('loading');
+  }
 }
 
 // ------------------------------------------------------------ Elo chart --
