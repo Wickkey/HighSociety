@@ -638,6 +638,23 @@ def _reap_stale_rooms() -> None:
 
 threading.Thread(target=_reap_stale_rooms, daemon=True, name="RoomReaper").start()
 
+# Supabase's Free plan pauses a project after 7 days without database
+# activity -- after which every page that reads the database fails until
+# someone un-pauses it in the dashboard. A quiet week after launch is
+# exactly when nobody would notice, so the server touches the database
+# itself every few hours whether or not anyone's playing.
+_DATABASE_PING_INTERVAL_SECONDS = 6 * 60 * 60
+
+
+def _keep_database_awake() -> None:
+    while True:
+        threading.Event().wait(_DATABASE_PING_INTERVAL_SECONDS)
+        game_history.ping()
+
+
+if game_history.is_configured():
+    threading.Thread(target=_keep_database_awake, daemon=True, name="DatabasePing").start()
+
 
 def _is_valid_identify_ack(data: dict, game_id: str) -> bool:
     """Same rule scripts/network_server.py's accept_players/accept_spectators use:
@@ -973,6 +990,8 @@ def api_matchmaking_join():
     username = (body.get("username") or "").strip()
     if not username:
         return jsonify({"error": "username is required"}), 400
+    if _identity_rejected(username, body.get("login_token")):
+        return jsonify({"error": _SIGN_IN_AGAIN}), 403
 
     try:
         seats = int(body.get("seats"))
@@ -1222,7 +1241,17 @@ def robots_txt():
     # content -- the room may not even exist anymore by the time a crawler
     # visits. Everything else (just the homepage, in practice) is fine to
     # crawl, so nothing else needs an explicit Disallow.
-    return Response("User-agent: *\nDisallow: /?room=\n", mimetype="text/plain")
+    # (Room links are /join?room=<code> now -- the wildcard covers those
+    # and any older /?room= links still around.)
+    return Response("User-agent: *\nDisallow: /*?room=\n", mimetype="text/plain")
+
+
+@app.route("/apple-touch-icon.png")
+@app.route("/apple-touch-icon-precomposed.png")
+def apple_touch_icon():
+    # iOS asks for these at the site root when adding to the home screen,
+    # whatever the page's own <link> says.
+    return app.send_static_file("apple-touch-icon.png")
 
 
 @app.errorhandler(404)
@@ -2114,10 +2143,15 @@ def ws_spectate(ws):
     identity = _identify(ws, game_id, "You are connected as a spectator. Enter your name:", "Enter your username:")
     if identity is None:
         return
-    name, username, _login_token = identity  # spectating doesn't act as a player
+    name, username, login_token = identity
     error = _identity_error(username, name)
     if error:
         _send(ws, game_id, "IDENTIFY_ERROR", error)
+        return
+    # A spectator's chat goes out under their username, so it's held to the
+    # same proof as a player's seat -- otherwise anyone could chat as anyone.
+    if _identity_rejected(username, login_token):
+        _send(ws, game_id, "IDENTIFY_ERROR", _SIGN_IN_AGAIN)
         return
 
     transport = WebSocketTransport(ws, label=f"{username}@web-spectator")

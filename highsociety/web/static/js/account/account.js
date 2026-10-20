@@ -10,7 +10,6 @@ import { fetchJSON } from '../lobby/lobby.js';
 // this module's own top-level evaluation. See gameHistory.js's identical
 // note on its own import from here.
 import { fetchGamesPage, renderIfChanged } from '../lobby/gameHistory.js';
-import { showToast } from '../ui/notifications.js';
 import { createEloChartController, fetchRatingHistory } from '../ui/eloChart.js';
 import { swr } from '../utils/swrCache.js';
 
@@ -312,7 +311,7 @@ function renderAchievementsIfChanged(grid, unlocked) {
 // resets -- see saveProfile), so achievements only ever start counting
 // once someone is actually signed in with Google (see
 // game_history.record_finished_game's google_id gating). Every tile still
-// renders, just permanently locked, plus a one-time sign-in nudge.
+// renders, just permanently locked, with a sign-in note above the grid.
 async function loadAchievements() {
   const profile = loadProfile();
   const grid = $('achievements-grid');
@@ -320,8 +319,7 @@ async function loadAchievements() {
   if (!profile || !profile.google_id) {
     renderAchievementsIfChanged(grid, new Set());
     if (!profile) return;
-    show(guestNote);
-    showToast('Sign in with Google to start unlocking achievements.');
+    show(guestNote); // the screen's own note -- a toast saying the same thing on top of it was a double nag
     return;
   }
   hide(guestNote);
@@ -351,9 +349,6 @@ export function showAccountScreen() {
   // Unrated/numeric split above already uses.
   $('account-google-badge').classList.toggle('hidden', !(profile && profile.google_id));
   $('account-guest-badge').classList.toggle('hidden', !(profile && !profile.google_id));
-  if (profile && !profile.google_id) {
-    showToast('Sign in with Google to start tracking your Elo rating.');
-  }
   hide($('account-username-edit')); // collapsed by default -- see onAccountEditUsernameClick
   hide($('account-error'));
   hide($('account-saved'));

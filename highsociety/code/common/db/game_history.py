@@ -673,6 +673,24 @@ def ensure_schema() -> None:
                 _release_connection(conn)
 
 
+def ping() -> bool:
+    """One trivial query (_connect's own probe), so the database sees
+    activity even when nobody's playing -- see web_server.py's
+    _keep_database_awake. True if it answered."""
+    if not is_configured():
+        return False
+    conn = None
+    try:
+        conn = _connect()
+        return True
+    except Exception as e:  # noqa: BLE001
+        LoggingManager.warning(f"game_history.ping failed: {e}")
+        return False
+    finally:
+        if conn is not None:
+            _release_connection(conn)
+
+
 def find_player_by_google_id(google_id: str) -> Optional[dict]:
     """
     Looks up an existing account by Google's stable per-user id (the

@@ -227,7 +227,9 @@ export function renderLobby(status) {
   tag.classList.toggle('is-private', isPrivate);
   tag.title = isPrivate ? 'Only joinable with this room code' : 'Listed for anyone to join';
   show($('room-code-display'));
-  $('room-link-input').value = `${location.origin}${location.pathname}?room=${encodeURIComponent(status.room_code)}`;
+  // Always /join: whoever opens it is joining, whatever screen the host
+  // created the room from (it used to copy /host?room=...).
+  $('room-link-input').value = `${location.origin}/join?room=${encodeURIComponent(status.room_code)}`;
   show($('room-link-row'));
   renderSeatsGrid(status);
   const err = takePendingIdentifyError();

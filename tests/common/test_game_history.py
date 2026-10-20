@@ -2016,3 +2016,15 @@ def test_display_ratings_are_empty_on_a_database_error(database_url):
     game_history._schema_ready = True
     with patch.object(game_history, "_connect", side_effect=RuntimeError("down")):
         assert game_history.get_display_ratings(["alice"]) == {}
+
+
+def test_ping_touches_the_database_and_hands_the_connection_back(database_url, mock_release_connection):
+    conn, _cursor = _fake_connection()
+    with patch.object(game_history, "_connect", return_value=conn):
+        assert game_history.ping() is True
+    mock_release_connection.assert_called_once_with(conn)
+
+
+def test_ping_reports_failure_instead_of_raising(database_url):
+    with patch.object(game_history, "_connect", side_effect=RuntimeError("paused")):
+        assert game_history.ping() is False
