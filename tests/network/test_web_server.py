@@ -893,6 +893,39 @@ def test_spectator_joining_a_lobby_gets_a_waiting_message_not_a_live_one(running
     spectator.close()
 
 
+def test_a_spectator_is_only_broadcast_to_after_its_welcome(running_web_server, monkeypatch):
+    """Regression coverage: ws_spectate added the spectator to
+    room.spectators before sending IDENTIFY_SUCCESS, so a live game event
+    broadcast in that gap reached the socket ahead of its own welcome
+    (seen as "--- end of auction ---" where the welcome should be). Checks
+    the ordering directly rather than trying to win the race."""
+    port = running_web_server
+    room_code = web_server.app.test_client().post(
+        "/api/create_game", json={"seats": 3, "bot_mix": []}
+    ).get_json()["room_code"]
+    room = web_server._rooms[room_code]
+
+    registered_at_welcome = []
+    real_send = web_server._send
+
+    def spy(ws, game_id, message_type, *args, **kwargs):
+        if message_type == "IDENTIFY_SUCCESS":
+            registered_at_welcome.append(len(room.spectators))
+        return real_send(ws, game_id, message_type, *args, **kwargs)
+
+    monkeypatch.setattr(web_server, "_send", spy)
+
+    spectator = Client(_ws_url(port, f"/ws_spectate?room={room_code}"))
+    welcome = _spectate_handshake(spectator, "watcher", "watcher-user")
+    assert welcome["message_type"] == "IDENTIFY_SUCCESS"
+    assert registered_at_welcome == [0], "spectator could receive broadcasts before its welcome"
+    deadline = time.time() + 5
+    while time.time() < deadline and not room.spectators:
+        threading.Event().wait(0.05)
+    assert len(room.spectators) == 1
+    spectator.close()
+
+
 def test_spectator_joining_mid_game_gets_a_catchup_not_a_blank_table(running_web_server):
     """Regression coverage: ws_spectate never sent a fresh spectator anything
     about the game already in progress -- no roster, no current auction, no
