@@ -1,6 +1,7 @@
 import datetime
 import itertools
 import json
+import os
 import socket
 import threading
 import time
@@ -2432,3 +2433,35 @@ def test_a_socket_identity_with_a_bad_name_is_rejected(username, name):
 
 def test_a_normal_socket_identity_is_accepted():
     assert web_server._identity_error("alice", "Alice Smith") is None
+
+
+def test_pages_reference_static_files_by_content_hash():
+    html = web_server.app.test_client().get("/").get_data(as_text=True)
+    app_js = f"/static/js/app.js?v={web_server._asset_version('js/app.js')}"
+    assert f'<script type="module" src="{app_js}">' in html
+    # Relative imports between modules can't carry ?v=, so the import map
+    # has to translate every module's plain URL to its versioned one.
+    import_map = json.loads(html.split('<script type="importmap">', 1)[1].split("</script>", 1)[0])
+    assert import_map["imports"]["/static/js/app.js"] == app_js
+    assert import_map["imports"]["/static/js/lobby/lobby.js"].startswith("/static/js/lobby/lobby.js?v=")
+    assert not any("vendor/" in url for url in import_map["imports"])
+    assert f'<link rel="modulepreload" href="{app_js}">' in html
+
+
+def test_only_versioned_static_files_are_cached_long_term():
+    client = web_server.app.test_client()
+    versioned = client.get("/static/css/main.css?v=abc")
+    plain = client.get("/static/css/main.css")
+    assert "immutable" in versioned.headers["Cache-Control"]
+    assert "immutable" not in plain.headers.get("Cache-Control", "")
+    versioned.close(); plain.close()
+
+
+def test_an_edited_static_file_gets_a_new_version(tmp_path, monkeypatch):
+    monkeypatch.setattr(web_server.app, "static_folder", str(tmp_path))
+    asset = tmp_path / "x.css"
+    asset.write_text("a{}")
+    first = web_server._asset_version("x.css")
+    asset.write_text("b{}")
+    os.utime(asset, (time.time() + 5, time.time() + 5))
+    assert web_server._asset_version("x.css") != first

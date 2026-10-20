@@ -17,6 +17,7 @@ frontend" section, which called this out as the intended extension point.
 """
 import argparse
 import datetime
+import hashlib
 import json
 import os
 import random
@@ -29,7 +30,7 @@ import uuid
 from typing import Optional
 
 from dotenv import load_dotenv
-from flask import Flask, Response, jsonify, render_template, request
+from flask import Flask, Response, jsonify, render_template, request, url_for
 from flask_sock import Sock
 
 from highsociety.code.ai import BOT_TYPES, create_bot_players, create_tutorial_bots
@@ -64,6 +65,73 @@ app = Flask(__name__, template_folder=os.path.join(WEB_DIR, "templates"),
 # custom PING-message convention or a heartbeat-monitor thread here.
 app.config['SOCK_SERVER_OPTIONS'] = {"ping_interval": 20}
 sock = Sock(app)
+
+# ------------------------------------------------------------ static assets --
+# Every page references its CSS/JS as /static/<file>?v=<content hash>, and
+# a request carrying ?v= is cached by the browser for a year: a repeat
+# visit loads the page's ~30 files straight from cache instead of
+# re-checking each with the server (a full India<->Oregon round trip
+# apiece, in three waves as app.js's imports are discovered -- ~1.8s even
+# on a warm cache). A changed file gets a new hash, so a deploy is picked
+# up immediately. The JS modules import each other by relative path, which
+# can't carry ?v=, so index.html also emits an import map translating each
+# module's plain URL to its versioned one, plus a modulepreload per module
+# so a first visit fetches them all at once rather than wave by wave.
+_ASSET_CACHE_SECONDS = 365 * 24 * 60 * 60
+_asset_hashes: dict[str, tuple[float, str]] = {}  # filename -> (mtime, hash)
+_asset_hashes_lock = threading.Lock()
+
+
+def _asset_version(filename: str) -> str:
+    """Short content hash of a static file, recomputed only when its mtime
+    changes (so editing a file during local development still busts it)."""
+    path = os.path.join(app.static_folder, filename)
+    mtime = os.path.getmtime(path)
+    with _asset_hashes_lock:
+        cached = _asset_hashes.get(filename)
+    if cached and cached[0] == mtime:
+        return cached[1]
+    with open(path, "rb") as f:
+        digest = hashlib.sha256(f.read()).hexdigest()[:12]
+    with _asset_hashes_lock:
+        _asset_hashes[filename] = (mtime, digest)
+    return digest
+
+
+def asset_url(filename: str) -> str:
+    return f"{url_for('static', filename=filename)}?v={_asset_version(filename)}"
+
+
+def _js_module_filenames() -> list[str]:
+    """Every ES module under static/js, relative to static/ -- vendor/
+    excluded (a classic script loaded on demand, not part of the module
+    graph)."""
+    js_root = os.path.join(app.static_folder, "js")
+    found = []
+    for dirpath, dirnames, filenames in os.walk(js_root):
+        dirnames[:] = [d for d in dirnames if d != "vendor"]
+        for name in filenames:
+            if name.endswith(".js"):
+                found.append(os.path.relpath(os.path.join(dirpath, name), app.static_folder).replace(os.sep, "/"))
+    return sorted(found)
+
+
+@app.context_processor
+def _asset_template_helpers():
+    def module_urls() -> list[str]:
+        return [asset_url(f) for f in _js_module_filenames()]
+
+    def import_map() -> dict:
+        return {"imports": {url_for("static", filename=f): asset_url(f) for f in _js_module_filenames()}}
+
+    return {"asset_url": asset_url, "module_urls": module_urls, "import_map": import_map}
+
+
+@app.after_request
+def _cache_versioned_assets(response):
+    if request.path.startswith("/static/") and request.args.get("v") and response.status_code == 200:
+        response.headers["Cache-Control"] = f"public, max-age={_ASSET_CACHE_SECONDS}, immutable"
+    return response
 
 # Pulls DATABASE_URL (and anything else in a local .env file) into the
 # environment before ensure_schema() below reads it — a no-op if no .env

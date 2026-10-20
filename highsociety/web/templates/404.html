@@ -22,8 +22,8 @@
        unstyled since then (style.css itself 404s). main.css first: it
        defines the CSS variables lobby.css's .error-page/.error-panel
        (used below) depends on. -->
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css') }}">
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/lobby.css') }}">
+  <link rel="stylesheet" href="{{ asset_url('css/main.css') }}">
+  <link rel="stylesheet" href="{{ asset_url('css/lobby.css') }}">
 </head>
 <body>
   <header class="topbar">
