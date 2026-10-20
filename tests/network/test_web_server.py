@@ -11,6 +11,7 @@ import pytest
 from highsociety.code.ai.tutorial_bot import TutorialBot
 from highsociety.code.common import matchmaking
 from highsociety.code.common.db import game_history
+from fake_db import rows, save_connection
 from highsociety.code.gamecore.card_manager.money_card_manager import MoneyCardManager
 from highsociety.code.gamecore.recording.game_replay import replay_record
 
@@ -627,16 +628,7 @@ def test_finished_game_is_recorded_when_a_database_is_configured(running_web_ser
     port = running_web_server
     monkeypatch.setenv("DATABASE_URL", "postgresql://user:pass@localhost/testdb")
     game_history._schema_ready = True  # skip the real DDL round-trip for this test
-    conn = MagicMock()
-    cursor = MagicMock()
-    ids = iter(range(1, 1000))
-    # Second/third columns stand in for google_id/elo -- see game_history's
-    # own _upsert_player (RETURNING id, google_id, elo); None means "guest,
-    # no achievements/elo change", matching this test's own alice, who
-    # isn't Google-linked.
-    cursor.fetchone.side_effect = lambda: (next(ids), None, 1000)
-    conn.cursor.return_value.__enter__.return_value = cursor
-    conn.__enter__.return_value = conn
+    conn, cursor = save_connection()  # alice upserts as a guest: no achievements/elo change
     monkeypatch.setattr(game_history, "_connect", lambda: conn)
     monkeypatch.setattr(game_history, "_release_connection", lambda c: None)
     # Run synchronously so the test doesn't have to race a background thread
@@ -663,13 +655,12 @@ def test_finished_game_is_recorded_when_a_database_is_configured(running_web_ser
 
     queries = [call.args[0] for call in cursor.execute.call_args_list]
     assert any("INSERT INTO games" in q for q in queries)
-    player_games_calls = [c for c in cursor.execute.call_args_list if "INSERT INTO player_games" in c.args[0]]
-    assert len(player_games_calls) == 2  # alice + the pass bot
+    player_games = rows(cursor, "INSERT INTO player_games", 9)
+    assert len(player_games) == 2  # alice + the pass bot
 
-    # One row per participant: the bot has no player_id (params[1]), the
+    # One row per participant: the bot has no player_id (row[1]), the
     # human does -- see the player_xor_bot schema constraint.
-    player_ids = sorted((c.args[1][1] is None) for c in player_games_calls)
-    assert player_ids == [False, True]
+    assert sorted(row[1] is None for row in player_games) == [False, True]
 
     player.close()
 

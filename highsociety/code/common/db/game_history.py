@@ -636,25 +636,6 @@ def ensure_schema() -> None:
                 _release_connection(conn)
 
 
-def _upsert_player(cur, username: str, display_name: str) -> tuple:
-    """Returns (player_id, google_id, elo) -- the caller (record_finished_game)
-    uses google_id to decide whether this player is a real linked account
-    achievements/rating changes should actually apply to, vs. a guest
-    whose identity resets on every browser clear (see achievements.py's
-    own module docstring), and elo as that player's rating *before* this
-    game, for elo.compute_elo_deltas."""
-    cur.execute(
-        """
-        INSERT INTO players (username, display_name)
-        VALUES (%s, %s)
-        ON CONFLICT (username) DO UPDATE SET display_name = EXCLUDED.display_name, last_seen_at = now()
-        RETURNING id, google_id, elo
-        """,
-        (username, display_name),
-    )
-    return cur.fetchone()
-
-
 def find_player_by_google_id(google_id: str) -> Optional[dict]:
     """
     Looks up an existing account by Google's stable per-user id (the
@@ -691,7 +672,7 @@ def username_is_taken(username: str) -> bool:
     """
     Whether `username` is already claimed by any existing players row
     (Google-linked, or a plain guest who's simply finished a game before
-    -- see _upsert_player). Checked before create_google_player commits
+    -- see record_finished_game's player upsert). Checked before create_google_player commits
     to one, so a first-time Google sign-in gets a clear "pick another
     name" instead of a raw uniqueness-constraint error surfacing as a
     generic failure.
@@ -936,7 +917,7 @@ def get_player_profile_stats(username: str) -> Optional[dict]:
             avg_placement, avg_points, avg_money_remaining = cur.fetchone()
             # Read fresh by player_id regardless of the id/elo cache hit
             # above -- last_seen_at changes on every game this player
-            # finishes (see _upsert_player), so serving it from that cache
+            # finishes (record_finished_game's player upsert), so serving it from that cache
             # (which only ever stores id/elo) would show a stale value for
             # the rest of this process's life once cached once.
             cur.execute("SELECT created_at, last_seen_at FROM players WHERE id = %s", (player_id,))
@@ -949,7 +930,7 @@ def get_player_profile_stats(username: str) -> Optional[dict]:
                 "created_at": created_at.isoformat(),
                 # Deliberately named for what this data actually is --
                 # last_seen_at only updates when a game finishes (see
-                # _upsert_player), not on every page load/heartbeat, so
+                # record_finished_game's player upsert), not on every page load/heartbeat, so
                 # it's "last time this player finished a game", not real
                 # presence. The UI should present it that way, not as a
                 # live online/offline indicator.
@@ -1465,6 +1446,21 @@ def rename_player(old_username: str, new_username: str) -> bool:
             _release_connection(conn)
 
 
+# (type, value) -> card_id, read once per process: `cards` is a fixed table
+# seeded by the schema and never written afterwards, so looking each round's
+# card up separately cost one round trip per auction for an answer that
+# never changes.
+_card_id_cache: Optional[dict] = None
+
+
+def _card_ids(cur) -> dict:
+    global _card_id_cache
+    if _card_id_cache is None:
+        cur.execute("SELECT type, value, min(card_id) FROM cards GROUP BY type, value")
+        _card_id_cache = {(t, v): card_id for t, v, card_id in cur.fetchall()}
+    return _card_id_cache
+
+
 def _record_auction_rounds(cur, game_id: int, auction_rounds: list, player_id_by_username: dict,
                            seat_by_username: Optional[dict] = None) -> None:
     """
@@ -1500,12 +1496,7 @@ def _record_auction_rounds(cur, game_id: int, auction_rounds: list, player_id_by
     if not auction_rounds:
         return
 
-    # This SELECT stays one-per-round (not batched) -- there are only ever
-    # as many rounds as cards in the deck (a couple dozen at most), so this
-    # was never the source of the real slowness; the round_players writes
-    # below (one per player per round) and game_actions' (one per action,
-    # see _record_actions) are what multiplied into 100+ round trips for an
-    # ordinary game before they were batched.
+    card_ids = _card_ids(cur)
     round_rows = []
     for record in auction_rounds:
         card = record["card"]
@@ -1513,10 +1504,7 @@ def _record_auction_rounds(cur, game_id: int, auction_rounds: list, player_id_by
         # repeated card (the 3 identical Prestige cards) any matching row
         # is equally correct, since the game's own data never tags which
         # *specific* physical card a given auction drew.
-        cur.execute("SELECT card_id FROM cards WHERE type = %s AND value = %s LIMIT 1",
-                    (card["type"], card["value"]))
-        row = cur.fetchone()
-        card_id = row[0] if row is not None else None
+        card_id = card_ids.get((card["type"], card["value"]))
 
         recipient = record.get("recipient")
         winner_id = player_id_by_username.get(recipient) if recipient else None
@@ -1632,7 +1620,8 @@ def record_finished_game(*, room_code: str, seats: int, bot_mix: list,
                           host_username: Optional[str] = None, time_control: Optional[int] = None,
                           is_finished_successfully: bool = True,
                           auction_rounds: Optional[list] = None,
-                          seed: Optional[int] = None, actions: Optional[list] = None) -> dict:
+                          seed: Optional[int] = None, actions: Optional[list] = None,
+                          rewarm_leaderboard: bool = True) -> dict:
     """
     Returns {rating_key: {"old_rating", "new_rating", "rating_change"}} for
     every participant whose rating actually changed this game (a human's
@@ -1728,28 +1717,11 @@ def record_finished_game(*, room_code: str, seats: int, bot_mix: list,
     try:
         conn = _connect()
         with conn, conn.cursor() as cur:
-            host_player_id = None
-            if host_username:
-                host_player_id, _, _ = _upsert_player(cur, host_username, host_username)
-
-            # `bot_mix` (the parameter) is still accepted for backward
-            # compatibility with existing callers/tests, but deliberately
-            # not written here any more -- superseded by player_1..
-            # player_5 + the bots table, which carry the same information
-            # (and more) per-seat rather than as one game-wide list. The
-            # column itself stays (old rows still have it; new rows just
-            # get the schema's own DEFAULT '[]').
-            cur.execute(
-                """
-                INSERT INTO games (room_code, seats, started_at, finished_at,
-                                    host_player_id, time_control, is_finished_successfully, seed)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-                RETURNING id
-                """,
-                (room_code, seats, started_at, finished_at,
-                 host_player_id, time_control, is_finished_successfully, seed),
-            )
-            game_id = cur.fetchone()[0]
+            # Every write below is batched into one multi-row statement per
+            # table: the database is a long way from the app server, and
+            # this whole transaction is what the finished screen's Elo
+            # reveal waits on, so each extra statement is a full network
+            # round trip the player sits through.
 
             # Mirrors PlayGame's own win rule (gameplay.py's
             # final_standings/winners computation), NOT a plain points
@@ -1777,8 +1749,65 @@ def record_finished_game(*, room_code: str, seats: int, bot_mix: list,
                 )
             }
 
-            rated_standings = []  # {"username", "points", "rating"} -- see elo.compute_elo_deltas
-            rated_player_ids = {}  # username -> player_id, for writing the delta back below
+            # Every human seat plus the host, in one upsert. A host who
+            # also plays ends with their seat's display name (the later
+            # entry wins, as when they were two separate upserts), and
+            # only seated humans get games_played/games_won bumped.
+            # Returns each player's id, google_id (whether achievements
+            # and Elo apply -- see achievements.py's module docstring) and
+            # elo *before* this game, for elo.compute_elo_deltas.
+            human_rows: dict = {}  # username -> [display_name, games_played increment, games_won increment]
+            if host_username:
+                human_rows[host_username] = [host_username, 0, 0]
+            for p in participants:
+                if not p["is_bot"]:
+                    row = human_rows.setdefault(p["username"], [p["name"], 0, 0])
+                    row[0] = p["name"]
+                    row[1] += 1
+                    row[2] += 1 if p["is_winner"] else 0
+            human_by_username = {}  # username -> (player_id, google_id, elo)
+            if human_rows:
+                rows = [(username, *row) for username, row in human_rows.items()]
+                cur.execute(
+                    f"""
+                    INSERT INTO players (username, display_name, games_played, games_won)
+                    VALUES {_values_placeholder(len(rows), 4)}
+                    ON CONFLICT (username) DO UPDATE SET
+                        display_name = EXCLUDED.display_name, last_seen_at = now(),
+                        games_played = players.games_played + EXCLUDED.games_played,
+                        games_won = players.games_won + EXCLUDED.games_won
+                    RETURNING username, id, google_id, elo
+                    """,
+                    _flatten(rows),
+                )
+                human_by_username = {username: (player_id, google_id, elo)
+                                     for username, player_id, google_id, elo in cur.fetchall()}
+            host_player_id = human_by_username[host_username][0] if host_username else None
+
+            # Each bot seat's own named identity (see common/bot_roster.py),
+            # only when the name really is that roster bot -- same name
+            # *and* the difficulty the roster pins it to. A heuristic bot
+            # that drew a roster name for flavor (CLI/scripts, difficulty
+            # None) or an overflow "Bot3" stays bot_name-only. Never the
+            # legacy per-difficulty rows: those are frozen history now.
+            # Bots are rated too, so this also reads each one's current elo.
+            roster_bot_by_index = {}
+            for index, p in enumerate(participants):
+                if p["is_bot"]:
+                    roster_bot = bot_roster.find_by_name(p["name"])
+                    if roster_bot is not None and roster_bot.difficulty == p.get("difficulty"):
+                        roster_bot_by_index[index] = roster_bot
+            bot_by_key = {}  # bot_key -> (player_id, elo)
+            if roster_bot_by_index:
+                cur.execute(
+                    "SELECT b.bot_key, b.player_id, p.elo FROM bots b JOIN players p ON p.id = b.player_id "
+                    "WHERE b.bot_key = ANY(%s)",
+                    (sorted({bot.key for bot in roster_bot_by_index.values()}),),
+                )
+                bot_by_key = {key: (player_id, elo) for key, player_id, elo in cur.fetchall()}
+
+            rated_standings = []  # {"username", "placement", "rating"} -- see elo.compute_elo_deltas
+            rated_player_ids = {}  # rating_key -> player_id, for writing the delta back below
             # player_id (not rating_key) -- every rating_key sharing a
             # player_id (see the bot-seat-sharing comment below) reads the
             # exact same elo at this point anyway, so one dict keyed by the
@@ -1791,70 +1820,37 @@ def record_finished_game(*, room_code: str, seats: int, bot_mix: list,
             # name, which isn't a stable identity -- see the PlayerSession
             # cache refresh below, right before this function returns).
             real_username_by_player_id = {}
+            player_games_rows = []
+            game_results_rows = []
+            game_results_seen = set()
+            winner_ids_to_count = []  # Google-linked winners, for the win-count milestones
+            achievement_rows = []
             for index, p in enumerate(participants):
-                player_id = None
-                google_id = None
-                elo_before = None
-                bot_name = None
+                player_id = google_id = elo_before = bot_name = None
                 if p["is_bot"]:
                     bot_name = p["name"]
-                    # The seat's own named identity (see common/bot_roster.py),
-                    # only when the name really is that roster bot -- same
-                    # name *and* the difficulty the roster pins it to. A
-                    # heuristic bot that drew a roster name for flavor
-                    # (CLI/scripts, difficulty None) or an overflow "Bot3"
-                    # stays bot_name-only. Never the legacy per-difficulty
-                    # rows: those are frozen history now.
-                    roster_bot = bot_roster.find_by_name(p["name"])
-                    if roster_bot is not None and roster_bot.difficulty == p.get("difficulty"):
-                        # Also fetches the bot's *current* elo -- bots are
-                        # real rated participants (see the elo gating
-                        # below), so this needs elo_before the same way
-                        # _upsert_player already gives a human.
-                        cur.execute(
-                            "SELECT b.player_id, p.elo FROM bots b JOIN players p ON p.id = b.player_id "
-                            "WHERE b.bot_key = %s",
-                            (roster_bot.key,),
-                        )
-                        row = cur.fetchone()
-                        if row is not None:
-                            player_id, elo_before = row
-                            # A named bot's username is stable now, so its
-                            # cached profile Elo must refresh like a human's.
-                            real_username_by_player_id[player_id] = bot_roster.roster_username(roster_bot)
+                    roster_bot = roster_bot_by_index.get(index)
+                    if roster_bot is not None and roster_bot.key in bot_by_key:
+                        player_id, elo_before = bot_by_key[roster_bot.key]
+                        # A named bot's username is stable now, so its
+                        # cached profile Elo must refresh like a human's.
+                        real_username_by_player_id[player_id] = bot_roster.roster_username(roster_bot)
                 else:
-                    player_id, google_id, elo_before = _upsert_player(cur, p["username"], p["name"])
+                    player_id, google_id, elo_before = human_by_username[p["username"]]
                     real_username_by_player_id[player_id] = p["username"]
-                    cur.execute(
-                        "UPDATE players SET games_played = games_played + 1, games_won = games_won + %s WHERE id = %s",
-                        (1 if p["is_winner"] else 0, player_id),
-                    )
                 seat_player_ids.append(player_id)
                 if p.get("game_username"):
                     player_id_by_game_username[p["game_username"]] = player_id
 
-                cur.execute(
-                    """
-                    INSERT INTO player_games
-                        (game_id, player_id, bot_name, points, money_left, is_winner, eliminated, placement, seat)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    """,
-                    (game_id, player_id, bot_name, p["points"], p["money_left"],
-                     p["is_winner"], p["eliminated"], placement_by_index[index], p.get("seat")),
-                )
-
+                player_games_rows.append((None, player_id, bot_name, p["points"], p["money_left"],
+                                          p["is_winner"], p["eliminated"], placement_by_index[index], p.get("seat")))
                 if player_id is not None:
                     if p["is_winner"] and winner_player_id is None:
                         winner_player_id = player_id
-                    cur.execute(
-                        """
-                        INSERT INTO game_results (game_id, user_id, num_players, final_money, final_score, placement)
-                        VALUES (%s, %s, %s, %s, %s, %s)
-                        ON CONFLICT (game_id, user_id) DO NOTHING
-                        """,
-                        (game_id, player_id, len(participants), p["money_left"], p["points"],
-                         placement_by_index[index]),
-                    )
+                    if player_id not in game_results_seen:  # first seat wins, as ON CONFLICT DO NOTHING did
+                        game_results_seen.add(player_id)
+                        game_results_rows.append((None, player_id, len(participants), p["money_left"], p["points"],
+                                                  placement_by_index[index]))
 
                 # Elo eligibility now includes bots with a known difficulty
                 # (they have a real, evolving rating of their own -- see
@@ -1882,23 +1878,68 @@ def record_finished_game(*, room_code: str, seats: int, bot_mix: list,
                 # Achievements stay strictly human-only -- a bot must never
                 # unlock one, regardless of the elo change above.
                 if player_id is not None and google_id is not None:
-                    ids_to_unlock = set(achievement_unlocks.get(p["username"]) or ())
+                    for achievement_id in sorted(set(achievement_unlocks.get(p["username"]) or ())):
+                        achievement_rows.append((player_id, achievement_id))
                     if p["is_winner"]:
-                        cur.execute("SELECT count(*) FROM player_games WHERE player_id = %s AND is_winner",
-                                    (player_id,))
-                        win_count = cur.fetchone()[0]
-                        for threshold, achievement_id in WIN_COUNT_MILESTONES.items():
-                            if win_count >= threshold:
-                                ids_to_unlock.add(achievement_id)
-                    for achievement_id in ids_to_unlock:
-                        cur.execute(
-                            """
-                            INSERT INTO player_achievements (player_id, achievement_id)
-                            VALUES (%s, %s)
-                            ON CONFLICT (player_id, achievement_id) DO NOTHING
-                            """,
-                            (player_id, achievement_id),
-                        )
+                        winner_ids_to_count.append(player_id)
+
+            # The games row goes in last of the "who" writes, once the
+            # winner and every seat's player_id are already known.
+            seat_columns = (seat_player_ids + [None] * 5)[:5]
+            cur.execute(
+                """
+                INSERT INTO games (room_code, seats, started_at, finished_at, host_player_id, time_control,
+                                   is_finished_successfully, seed, winner_id,
+                                   player_1, player_2, player_3, player_4, player_5)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                RETURNING id
+                """,
+                (room_code, seats, started_at, finished_at, host_player_id, time_control,
+                 is_finished_successfully, seed, winner_player_id, *seat_columns),
+            )
+            game_id = cur.fetchone()[0]
+
+            if player_games_rows:
+                cur.execute(
+                    f"""
+                    INSERT INTO player_games
+                        (game_id, player_id, bot_name, points, money_left, is_winner, eliminated, placement, seat)
+                    VALUES {_values_placeholder(len(player_games_rows), 9)}
+                    """,
+                    _flatten([(game_id, *row[1:]) for row in player_games_rows]),
+                )
+            if game_results_rows:
+                cur.execute(
+                    f"""
+                    INSERT INTO game_results (game_id, user_id, num_players, final_money, final_score, placement)
+                    VALUES {_values_placeholder(len(game_results_rows), 6)}
+                    ON CONFLICT (game_id, user_id) DO NOTHING
+                    """,
+                    _flatten([(game_id, *row[1:]) for row in game_results_rows]),
+                )
+
+            # Win-count milestones read player_games *after* this game's own
+            # rows are in, so this win counts toward them.
+            if winner_ids_to_count:
+                cur.execute(
+                    "SELECT player_id, count(*) FROM player_games "
+                    "WHERE player_id = ANY(%s) AND is_winner GROUP BY player_id",
+                    (winner_ids_to_count,),
+                )
+                for player_id, win_count in cur.fetchall():
+                    for threshold, achievement_id in WIN_COUNT_MILESTONES.items():
+                        if win_count >= threshold:
+                            achievement_rows.append((player_id, achievement_id))
+            achievement_rows = list(dict.fromkeys(achievement_rows))
+            if achievement_rows:
+                cur.execute(
+                    f"""
+                    INSERT INTO player_achievements (player_id, achievement_id)
+                    VALUES {_values_placeholder(len(achievement_rows), 2)}
+                    ON CONFLICT (player_id, achievement_id) DO NOTHING
+                    """,
+                    _flatten(achievement_rows),
+                )
 
             # Two or more bot seats of the same difficulty share one
             # player_id (the bots table's whole design), so rated_standings
@@ -1933,19 +1974,13 @@ def record_finished_game(*, room_code: str, seats: int, bot_mix: list,
             # __bot_<key>__ username is a stable profile identity); a bot
             # with no roster identity never gets this far.
             cache_refreshes = []
+            rating_rows = []  # (player_id, game_id, old_rating, new_rating, rating_change)
             for player_id, seat_deltas in deltas_by_player_id.items():
                 combined_delta = round(sum(seat_deltas) / len(seat_deltas))
                 if combined_delta:
                     old_rating = elo_before_by_player_id[player_id]
                     new_rating = old_rating + combined_delta
-                    cur.execute("UPDATE players SET elo = elo + %s WHERE id = %s", (combined_delta, player_id))
-                    cur.execute(
-                        """
-                        INSERT INTO ratings (user_id, game_id, old_rating, new_rating, rating_change)
-                        VALUES (%s, %s, %s, %s, %s)
-                        """,
-                        (player_id, game_id, old_rating, new_rating, combined_delta),
-                    )
+                    rating_rows.append((player_id, game_id, old_rating, new_rating, combined_delta))
                     real_username = real_username_by_player_id.get(player_id)
                     if real_username is not None:
                         cache_refreshes.append((real_username, new_rating))
@@ -1959,16 +1994,22 @@ def record_finished_game(*, room_code: str, seats: int, bot_mix: list,
                         elo_changes[rating_key] = {
                             "old_rating": old_rating, "new_rating": new_rating, "rating_change": combined_delta,
                         }
-
-            seat_columns = (seat_player_ids + [None] * 5)[:5]
-            cur.execute(
-                """
-                UPDATE games SET winner_id = %s, player_1 = %s, player_2 = %s,
-                                  player_3 = %s, player_4 = %s, player_5 = %s
-                WHERE id = %s
-                """,
-                (winner_player_id, *seat_columns, game_id),
-            )
+            if rating_rows:
+                cur.execute(
+                    f"""
+                    UPDATE players SET elo = players.elo + delta.change
+                    FROM (VALUES {_values_placeholder(len(rating_rows), 2)}) AS delta (player_id, change)
+                    WHERE players.id = delta.player_id
+                    """,
+                    _flatten([(row[0], row[4]) for row in rating_rows]),
+                )
+                cur.execute(
+                    f"""
+                    INSERT INTO ratings (user_id, game_id, old_rating, new_rating, rating_change)
+                    VALUES {_values_placeholder(len(rating_rows), 5)}
+                    """,
+                    _flatten(rating_rows),
+                )
 
             seat_by_game_username = {p["game_username"]: p["seat"] for p in participants
                                      if p.get("game_username") is not None and p.get("seat") is not None}
@@ -1995,8 +2036,10 @@ def record_finished_game(*, room_code: str, seats: int, bot_mix: list,
         # (cache_refreshes), but games_played/games_won too, which move
         # even when a rating doesn't. Runs on this same background write
         # thread (see record_finished_game_async), so it costs a real
-        # player nothing.
-        _invalidate_leaderboard_cache(rewarm=bool(cache_refreshes))
+        # player nothing. rewarm_leaderboard=False leaves the re-fetch to
+        # the caller (record_finished_game_async does it after on_complete,
+        # so the Elo reveal doesn't wait on a leaderboard query).
+        _invalidate_leaderboard_cache(rewarm=rewarm_leaderboard and bool(cache_refreshes))
     return elo_changes
 
 
@@ -2023,9 +2066,14 @@ def record_finished_game_async(on_complete: Optional[Callable[[dict], None]] = N
         return
 
     def _run():
-        result = record_finished_game(**kwargs)
+        result = record_finished_game(rewarm_leaderboard=False, **kwargs)
         if on_complete:
             on_complete(result)
+        # After on_complete: the finished screen is polling for those Elo
+        # numbers, and the leaderboard re-fetch is one more trip to the
+        # database. A non-empty result is exactly "a rating changed".
+        if result:
+            _warm_leaderboard_cache()
 
     threading.Thread(target=_run, daemon=True, name="GameHistoryWrite").start()
 
