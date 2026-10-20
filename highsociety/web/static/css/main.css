@@ -280,7 +280,9 @@ body {
   flex-shrink: 0;
 }
 .session-status-badge.connecting,
-.session-status-badge.reconnecting { background: rgba(255, 255, 255, 0.14); color: #f5f1e6; }
+.session-status-badge.reconnecting,
+.session-status-badge.waiting,
+.session-status-badge.finished { background: rgba(255, 255, 255, 0.14); color: #f5f1e6; }
 .session-status-badge svg { width: 13px; height: 13px; flex-shrink: 0; }
 
 /* Top-right profile chip: purely an identity display now (avatar + name,

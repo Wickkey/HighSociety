@@ -137,7 +137,12 @@
 }
 
 .login-panel { text-align: center; }
-.login-panel h2 { margin-bottom: 1.4rem; }
+.login-panel h2 { margin-bottom: 0.5rem; }
+.login-tagline { margin: 0 auto 1.4rem; max-width: 34ch; color: var(--muted); font-size: 0.95rem; line-height: 1.45; }
+.login-notice {
+  margin: -0.6rem 0 1.2rem; padding: 0.6rem 0.8rem; border-radius: 10px;
+  background: rgba(200, 160, 77, 0.16); color: inherit; font-size: 0.9rem;
+}
 
 .google-signin-container {
   display: flex;
@@ -613,14 +618,18 @@ h3:has(.section-icon) { display: flex; align-items: center; gap: 0.5rem; }
    arranged when both are showing. */
 .home-grid {
   display: grid;
-  grid-template-columns: 1.3fr 1fr;
+  /* minmax(0, ...): a plain fr track can't shrink below its content's
+     min-content width, and a recent-games row's one-line opponent list
+     is as wide as all its names -- on a phone that pushed the page to
+     ~550px and made it scroll sideways. */
+  grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr);
   gap: 1.75rem;
   max-width: 900px;
   margin: var(--screen-top-gap) auto 0;
   align-items: start;
 }
 @media (max-width: 780px) {
-  .home-grid { grid-template-columns: 1fr; max-width: 480px; }
+  .home-grid { grid-template-columns: minmax(0, 1fr); max-width: 480px; }
 }
 .home-tiles { display: flex; flex-direction: column; gap: 0.85rem; }
 /* Spans both of .home-grid's columns as its own full-width row above the
@@ -1527,6 +1536,7 @@ button.secondary.standalone { margin-top: 0.9rem; display: inline-block; }
 }
 .lobby-seat {
   position: relative;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -1566,7 +1576,17 @@ button.secondary.standalone { margin-top: 0.9rem; display: inline-block; }
   font-size: 0.78rem;
   font-weight: 600;
   line-height: 1.25;
-  overflow-wrap: anywhere;
+  max-width: 100%;
+  min-width: 0;
+}
+/* One line, cut with an ellipsis (full name on hover) -- wrapping let a
+   long guest name like "RoseErza750" break mid-word as "RoseErza75 / 0". */
+.lobby-seat-username {
+  display: block;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .lobby-seat-name span { display: block; font-weight: 500; color: var(--muted); font-size: 0.7rem; }
 
@@ -2018,6 +2038,10 @@ button.secondary.standalone { margin-top: 0.9rem; display: inline-block; }
    lands on, striped or not. */
 .leaderboard-table tbody tr:nth-child(even):not(.leaderboard-row-me) { background: var(--panel-bg-soft); }
 .leaderboard-row-me { background: var(--accent-soft); font-weight: 700; }
+/* The name is a <button> (opens the profile), which centers its text by
+   default -- a name long enough to wrap sat centered under a left-aligned
+   PLAYER heading. */
+.leaderboard-table .name-link { text-align: left; }
 
 /* Top-3 medal pills -- gold / silver / bronze, the exact same gradients
    the recent-games list already uses for a top-3 finish (see
@@ -2038,8 +2062,16 @@ button.secondary.standalone { margin-top: 0.9rem; display: inline-block; }
 .leaderboard-rank-2 .leaderboard-rank-num { color: #2c3230; background: linear-gradient(135deg, #d5dbd8, #aeb8b3); }
 .leaderboard-rank-3 .leaderboard-rank-num { color: #fff; background: linear-gradient(135deg, #cf8f5a, #a1663a); }
 .leaderboard-pagination { display: flex; align-items: center; justify-content: center; gap: 1rem; margin-top: 0.9rem; }
-.leaderboard-pagination button { margin: 0; }
+.leaderboard-pagination button { margin: 0; white-space: nowrap; }
 .leaderboard-pagination button:disabled { opacity: 0.4; cursor: default; }
 #leaderboard-page-label { font-size: 0.85rem; }
+.leaderboard-pagination > span { white-space: nowrap; }
+/* Five columns at desktop padding were ~30px wider than a phone's card,
+   so the table spilled out of it -- tighten rather than drop a column. */
+@media (max-width: 480px) {
+  .leaderboard-table { font-size: 0.85rem; }
+  .leaderboard-table th, .leaderboard-table td { padding: 0.45rem 0.3rem; }
+  .leaderboard-table th { letter-spacing: 0; font-size: 0.66rem; }
+}
 
 .leaderboard-loading-row td { color: var(--muted); animation: stat-skeleton-pulse 1.4s ease-in-out infinite; }

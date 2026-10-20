@@ -1,7 +1,7 @@
 // Entry point: wires every static DOM event listener and boots the app on
 // DOMContentLoaded. Owns nothing itself -- every handler it wires lives in
 // its own feature module; this file only imports and attaches them.
-import { $, showScreen } from './utils/dom.js';
+import { $, show, showScreen } from './utils/dom.js';
 import {
   resolveConfirmDialog, openProfileModal, closeProfileModal, closeGameDetailModal, onGameDetailTableClick,
 } from './ui/modals.js';
@@ -10,7 +10,7 @@ import {
   onContinueAsGuest, onShuffleUsername, onLoginUsernameContinue, initGoogleSignIn, proceedPastLogin,
 } from './auth/login.js';
 import {
-  loadProfile, renderProfileChip, onProfileChipClick, onLogout, closeProfilePopover,
+  loadProfile, renderProfileChip, onProfileChipClick, onLogout, closeProfilePopover, upgradeLegacyProfile,
 } from './auth/profile.js';
 import {
   showAccountScreen, onAccountSaveClick, showAchievementsScreen,
@@ -69,7 +69,8 @@ function wireStaticHandlers() {
   $('btn-login-continue').addEventListener('click', onLoginUsernameContinue);
   $('login-username').addEventListener('keydown', (e) => { if (e.key === 'Enter') onLoginUsernameContinue(); });
   document.querySelectorAll('.home-tile').forEach((btn) => {
-    btn.addEventListener('click', () => showHomeTile(btn.dataset.homeTarget));
+    // "play" is its own screen (matchmaking), not a panel of this one.
+    btn.addEventListener('click', () => (btn.dataset.homeTarget === 'play' ? onPlayClick() : showHomeTile(btn.dataset.homeTarget)));
   });
   $('sidebar-play').addEventListener('click', () => navigateFromSidebar(onPlayClick));
   $('sidebar-join').addEventListener('click', () => navigateFromSidebar(() => {
@@ -270,9 +271,25 @@ document.addEventListener('DOMContentLoaded', () => {
   // A returning visitor who already has a saved profile (guest or Google)
   // skips straight past #screen-login -- only a genuinely new visitor, or
   // someone who explicitly logged out, sees it.
-  if (loadProfile()) {
-    proceedPastLogin();
-  } else {
+  if (!loadProfile()) {
     showScreen('screen-login');
+    return;
   }
+  if (loadProfile().login_token) {
+    proceedPastLogin();
+    return;
+  }
+  // Saved before login tokens existed -- swap one in first (see
+  // upgradeLegacyProfile), or ask them to sign in again if the server
+  // won't hand one out for this name.
+  upgradeLegacyProfile().then((ok) => {
+    if (ok) {
+      proceedPastLogin();
+      return;
+    }
+    renderProfileChip();
+    $('login-notice').textContent = 'For your account\'s security, please sign in again.';
+    show($('login-notice'));
+    showScreen('screen-login');
+  });
 });

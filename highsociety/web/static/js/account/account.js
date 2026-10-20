@@ -2,7 +2,7 @@
 // Elo history chart, and the Recent Activity feed.
 import { $, hide, show, showError, showScreen, setScreenPath } from '../utils/dom.js';
 import { escapeHtml, timeAgo } from '../utils/formatting.js';
-import { loadProfile, saveProfile, renderProfileChip } from '../auth/profile.js';
+import { loadProfile, loginToken, saveProfile, renderProfileChip } from '../auth/profile.js';
 import { fetchJSON } from '../lobby/lobby.js';
 // Circular with gameHistory.js (which imports profileStats from
 // here) -- safe by this project's own established convention: both sides
@@ -430,7 +430,9 @@ export async function onAccountSaveClick() {
     const result = await fetchJSON('/api/auth/username/change', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ old_username: existing ? existing.username : username, new_username: username }),
+      body: JSON.stringify({
+        old_username: existing ? existing.username : username, new_username: username, login_token: loginToken(),
+      }),
     });
     saveProfile(result.username, result.username);
     renderProfileChip();

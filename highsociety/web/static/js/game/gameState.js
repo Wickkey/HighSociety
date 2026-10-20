@@ -195,7 +195,9 @@ export function seedOpponents(status, myUsername) {
   rememberNames(status);
   (status.joined || []).forEach((p) => {
     if (p.username === myUsername) return;
-    game.opponents[p.username] = { name: p.name, statusCards: [], active: true, outOfAuction: false, lastBid: null };
+    game.opponents[p.username] = {
+      name: p.name, statusCards: [], active: true, outOfAuction: false, lastBid: null, elo: p.elo ?? null,
+    };
   });
 }
 

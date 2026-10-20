@@ -17,6 +17,7 @@ frontend" section, which called this out as the intended extension point.
 """
 import argparse
 import datetime
+import hashlib
 import json
 import os
 import random
@@ -29,7 +30,7 @@ import uuid
 from typing import Optional
 
 from dotenv import load_dotenv
-from flask import Flask, Response, jsonify, render_template, request
+from flask import Flask, Response, jsonify, render_template, request, url_for
 from flask_sock import Sock
 
 from highsociety.code.ai import BOT_TYPES, create_bot_players, create_tutorial_bots
@@ -64,6 +65,73 @@ app = Flask(__name__, template_folder=os.path.join(WEB_DIR, "templates"),
 # custom PING-message convention or a heartbeat-monitor thread here.
 app.config['SOCK_SERVER_OPTIONS'] = {"ping_interval": 20}
 sock = Sock(app)
+
+# ------------------------------------------------------------ static assets --
+# Every page references its CSS/JS as /static/<file>?v=<content hash>, and
+# a request carrying ?v= is cached by the browser for a year: a repeat
+# visit loads the page's ~30 files straight from cache instead of
+# re-checking each with the server (a full India<->Oregon round trip
+# apiece, in three waves as app.js's imports are discovered -- ~1.8s even
+# on a warm cache). A changed file gets a new hash, so a deploy is picked
+# up immediately. The JS modules import each other by relative path, which
+# can't carry ?v=, so index.html also emits an import map translating each
+# module's plain URL to its versioned one, plus a modulepreload per module
+# so a first visit fetches them all at once rather than wave by wave.
+_ASSET_CACHE_SECONDS = 365 * 24 * 60 * 60
+_asset_hashes: dict[str, tuple[float, str]] = {}  # filename -> (mtime, hash)
+_asset_hashes_lock = threading.Lock()
+
+
+def _asset_version(filename: str) -> str:
+    """Short content hash of a static file, recomputed only when its mtime
+    changes (so editing a file during local development still busts it)."""
+    path = os.path.join(app.static_folder, filename)
+    mtime = os.path.getmtime(path)
+    with _asset_hashes_lock:
+        cached = _asset_hashes.get(filename)
+    if cached and cached[0] == mtime:
+        return cached[1]
+    with open(path, "rb") as f:
+        digest = hashlib.sha256(f.read()).hexdigest()[:12]
+    with _asset_hashes_lock:
+        _asset_hashes[filename] = (mtime, digest)
+    return digest
+
+
+def asset_url(filename: str) -> str:
+    return f"{url_for('static', filename=filename)}?v={_asset_version(filename)}"
+
+
+def _js_module_filenames() -> list[str]:
+    """Every ES module under static/js, relative to static/ -- vendor/
+    excluded (a classic script loaded on demand, not part of the module
+    graph)."""
+    js_root = os.path.join(app.static_folder, "js")
+    found = []
+    for dirpath, dirnames, filenames in os.walk(js_root):
+        dirnames[:] = [d for d in dirnames if d != "vendor"]
+        for name in filenames:
+            if name.endswith(".js"):
+                found.append(os.path.relpath(os.path.join(dirpath, name), app.static_folder).replace(os.sep, "/"))
+    return sorted(found)
+
+
+@app.context_processor
+def _asset_template_helpers():
+    def module_urls() -> list[str]:
+        return [asset_url(f) for f in _js_module_filenames()]
+
+    def import_map() -> dict:
+        return {"imports": {url_for("static", filename=f): asset_url(f) for f in _js_module_filenames()}}
+
+    return {"asset_url": asset_url, "module_urls": module_urls, "import_map": import_map}
+
+
+@app.after_request
+def _cache_versioned_assets(response):
+    if request.path.startswith("/static/") and request.args.get("v") and response.status_code == 200:
+        response.headers["Cache-Control"] = f"public, max-age={_ASSET_CACHE_SECONDS}, immutable"
+    return response
 
 # Pulls DATABASE_URL (and anything else in a local .env file) into the
 # environment before ensure_schema() below reads it — a no-op if no .env
@@ -243,6 +311,11 @@ class GameRoom:
         # None at the top of every fresh game (including a rematch) so a
         # previous game's numbers can never leak into a new one's reveal.
         self.elo_changes: Optional[dict] = None
+        # sender -> recent chat/reaction timestamps, see _chat_allowed.
+        self.chat_times: dict[str, list[float]] = {}
+        # seat username -> current Elo, for the seats that are rated (see
+        # _refresh_seat_ratings); shown next to each name at the table.
+        self.seat_ratings: dict[str, int] = {}
 
     def touch(self) -> None:
         """Marks the room as recently active, so the reaper thread's idle
@@ -256,7 +329,7 @@ class GameRoom:
             # bot (each name has a fixed one, see common/bot_roster.py),
             # None for a human or a heuristic bot.
             {"username": p.username, "name": p.name, "is_bot": not isinstance(p, NetworkPlayer),
-             "difficulty": getattr(p, "difficulty", None)}
+             "difficulty": getattr(p, "difficulty", None), "elo": self.seat_ratings.get(p.username)}
             for p in self.players
         ]
 
@@ -362,6 +435,29 @@ class GameRoom:
         threading.Thread(target=_run, daemon=True, name=f"Game-{self.game_id}").start()
 
 
+def _rated_username(player) -> Optional[str]:
+    """The players-table username a seat is rated under: a human's own
+    username, or a roster bot's namespaced identity (only when the seat
+    really is that roster bot -- same rule record_finished_game uses)."""
+    if isinstance(player, NetworkPlayer):
+        return player.username
+    roster_bot = bot_roster.find_by_name(player.name)
+    if roster_bot is not None and roster_bot.difficulty == getattr(player, "difficulty", None):
+        return bot_roster.roster_username(roster_bot)
+    return None
+
+
+def _refresh_seat_ratings(room: "GameRoom") -> None:
+    """Re-reads the current Elo of every rated seat into room.seat_ratings
+    -- called whenever the seats change, and once a game's ratings have
+    been written. One query; a no-op without a database."""
+    if not game_history.is_configured():
+        return
+    rated = {p.username: _rated_username(p) for p in list(room.players)}
+    elo_by_rated = game_history.get_display_ratings([u for u in rated.values() if u])
+    room.seat_ratings = {seat: elo_by_rated[r] for seat, r in rated.items() if r in elo_by_rated}
+
+
 def _record_game_history(room: "GameRoom", game: PlayGame, started_at: datetime.datetime) -> None:
     """Translates this finished game into the plain-dict shape game_history
     expects (see its own docstring for the schema/rationale), then hands off
@@ -418,6 +514,7 @@ def _record_game_history(room: "GameRoom", game: PlayGame, started_at: datetime.
         # other room attribute it already reads that way.
         with room.lock:
             room.elo_changes = changes
+        _refresh_seat_ratings(room)  # so a rematch's table shows the new numbers
 
     game_history.record_finished_game_async(
         room_code=room.room_code,
@@ -584,8 +681,9 @@ def _identify(ws, game_id: str, first_prompt: str, second_prompt: str):
     Runs the two-step IDENTIFY -> IDENTIFY_ACK handshake scripts/network_server.py
     already uses (see accept_players/accept_spectators), just reusable for
     either prompt ordering (players: username then name; spectators: name
-    then username). Returns (first_answer, second_answer), or None if the
-    handshake failed/disconnected.
+    then username). Returns (first_answer, second_answer, login_token), or
+    None if the handshake failed/disconnected -- login_token is whatever
+    either ack carried alongside its answer (see _identity_rejected).
     """
     _send(ws, game_id, "IDENTIFY", first_prompt, requires_response=True)
     data = _recv_json(ws)
@@ -593,6 +691,7 @@ def _identify(ws, game_id: str, first_prompt: str, second_prompt: str):
         _send(ws, game_id, "IDENTIFY_ERROR", f"Expected: {first_prompt}")
         return None
     first = data["prompt"]
+    login_token = data.get("login_token")
 
     _send(ws, game_id, "IDENTIFY", second_prompt, requires_response=True)
     data = _recv_json(ws)
@@ -601,10 +700,36 @@ def _identify(ws, game_id: str, first_prompt: str, second_prompt: str):
         return None
     second = data["prompt"]
 
-    return first, second
+    return first, second, login_token or data.get("login_token")
 
 
 _MAX_USERNAME_LENGTH = 24
+# A display name arrives over the game socket, not through the sign-up
+# endpoints that check usernames, so it gets its own cap.
+_MAX_DISPLAY_NAME_LENGTH = 40
+
+
+def _identity_error(username: str, name: str) -> Optional[str]:
+    """Why this socket identity is unacceptable, or None if it's fine."""
+    if not isinstance(username, str) or not isinstance(name, str):
+        return "Username and name must be text."
+    if not username.strip() or len(username) > _MAX_USERNAME_LENGTH:
+        return f"Username must be 1-{_MAX_USERNAME_LENGTH} characters."
+    if not name.strip() or len(name) > _MAX_DISPLAY_NAME_LENGTH:
+        return f"Name must be 1-{_MAX_DISPLAY_NAME_LENGTH} characters."
+    return None
+
+
+def _identity_rejected(username: Optional[str], login_token: Optional[str]) -> bool:
+    """True when the database says `login_token` wasn't issued to
+    `username` (see game_history's player_logins table). Anything acting
+    as a specific player -- taking a seat, renaming, hosting -- checks
+    this. False with no database (local dev, the test suite) or when the
+    lookup itself fails, so a database blip doesn't lock everyone out."""
+    return game_history.login_token_matches(username, login_token) is False
+
+
+_SIGN_IN_AGAIN = "Please sign in again to continue."
 
 
 def _verify_google_id_token(token: str) -> Optional[dict]:
@@ -659,7 +784,7 @@ def api_auth_google():
 
     existing = game_history.find_player_by_google_id(claims["sub"])
     if existing:
-        return jsonify(existing)
+        return jsonify({**existing, "login_token": game_history.issue_login_token(existing["username"])})
     return jsonify({"needs_username": True, "suggested_display_name": claims.get("name") or ""})
 
 
@@ -694,7 +819,7 @@ def api_auth_google_claim_username():
     # this same account already owns.
     existing = game_history.find_player_by_google_id(claims["sub"])
     if existing:
-        return jsonify(existing)
+        return jsonify({**existing, "login_token": game_history.issue_login_token(existing["username"])})
 
     if game_history.username_is_taken(username):
         return jsonify({"error": "That username is already taken."}), 409
@@ -703,7 +828,8 @@ def api_auth_google_claim_username():
     if not ok:
         return jsonify({"error": "That username is already taken."}), 409
 
-    return jsonify({"username": username, "display_name": display_name})
+    return jsonify({"username": username, "display_name": display_name,
+                    "login_token": game_history.issue_login_token(username)})
 
 
 def _active_usernames() -> set[str]:
@@ -773,7 +899,27 @@ def api_auth_guest_claim():
     if not ok:
         return jsonify({"error": "That username is already taken."}), 409
 
-    return jsonify({"username": username})
+    return jsonify({"username": username, "login_token": game_history.issue_login_token(username)})
+
+
+@app.route("/api/auth/upgrade", methods=["POST"])
+def api_auth_upgrade():
+    """
+    One-time login token for a guest profile saved before tokens existed
+    (see game_history.issue_first_login_token for exactly who qualifies).
+    403 tells the browser to sign in again -- a Google-linked account, or
+    a guest name another device already holds.
+    """
+    body = request.get_json(silent=True) or {}
+    username = (body.get("username") or "").strip()
+    if not username or len(username) > _MAX_USERNAME_LENGTH:
+        return jsonify({"error": f"Username must be 1-{_MAX_USERNAME_LENGTH} characters"}), 400
+    if not game_history.is_configured():
+        return jsonify({"login_token": None})
+    token = game_history.issue_first_login_token(username)
+    if token is None:
+        return jsonify({"error": _SIGN_IN_AGAIN}), 403
+    return jsonify({"login_token": token})
 
 
 @app.route("/api/auth/username/change", methods=["POST"])
@@ -793,6 +939,9 @@ def api_auth_username_change():
 
     if not game_history.is_configured():
         return jsonify({"username": new_username})
+
+    if _identity_rejected(old_username, body.get("login_token")):
+        return jsonify({"error": _SIGN_IN_AGAIN}), 403
 
     ok = game_history.rename_player(old_username, new_username)
     if not ok:
@@ -1099,6 +1248,8 @@ def api_create_game():
         host_username = body.get("host_username")
         if host_username is not None and not isinstance(host_username, str):
             return jsonify({"error": "host_username must be a string"}), 400
+        if host_username is not None and _identity_rejected(host_username, body.get("login_token")):
+            return jsonify({"error": _SIGN_IN_AGAIN}), 403
         room = _create_room(
             seats=_TUTORIAL_SEATS, bot_mix=[], seed=_TUTORIAL_SEED,
             bot_think_time=_TUTORIAL_BOT_THINK_TIME, visibility="private",
@@ -1160,11 +1311,14 @@ def api_create_game():
     host_username = body.get("host_username")
     if host_username is not None and not isinstance(host_username, str):
         return jsonify({"error": "host_username must be a string"}), 400
+    if host_username is not None and _identity_rejected(host_username, body.get("login_token")):
+        return jsonify({"error": _SIGN_IN_AGAIN}), 403
 
     room = _create_room(seats=seats, bot_mix=bot_mix, seed=seed, bot_think_time=bot_think_time,
                          visibility=visibility, turn_time_limit=turn_time_limit,
                          reveal_cards=reveal_cards, show_logs=show_logs,
                          host_username=host_username)
+    _refresh_seat_ratings(room)
     return jsonify(_status_payload(room))
 
 
@@ -1270,6 +1424,8 @@ def api_add_bot():
     bot_type = body.get("bot_type")
     if bot_type not in BOT_TYPES:
         return jsonify({"error": f"Unknown bot type; choose from {list(BOT_TYPES)}"}), 400
+    if room.host_username is not None and _identity_rejected(body.get("requester_username"), body.get("login_token")):
+        return jsonify({"error": _SIGN_IN_AGAIN}), 403
 
     with room.lock:
         if not _is_room_host(room, body.get("requester_username")):
@@ -1285,6 +1441,7 @@ def api_add_bot():
         room.bot_mix.append(bot_type)
         room.human_seats -= 1  # this seat is no longer reserved for a human
         room.touch()
+    _refresh_seat_ratings(room)
 
     if room.try_start():
         room.run_game()
@@ -1324,6 +1481,8 @@ def api_remove_seat():
     target_username = body.get("username")
     if not target_username:
         return jsonify({"error": "username is required."}), 400
+    if room.host_username is not None and _identity_rejected(body.get("requester_username"), body.get("login_token")):
+        return jsonify({"error": _SIGN_IN_AGAIN}), 403
 
     kicked_player = None
     with room.lock:
@@ -1358,6 +1517,26 @@ def api_remove_seat():
 
 QUICK_REACTION_EMOJI = {"🗣️", "😂", "💀", "🔥", "🤔"}
 
+# Same 300 the chat inputs' own maxlength allows -- the server enforces it
+# too, since nothing stops a modified client from sending a megabyte to
+# everyone at the table.
+_MAX_CHAT_LENGTH = 300
+# At most this many chat messages/reactions per sender per window; extras
+# are dropped. Generous for real conversation, stops a flood.
+_CHAT_BURST = 5
+_CHAT_WINDOW_SECONDS = 5.0
+
+
+def _chat_allowed(room: "GameRoom", sender: str) -> bool:
+    now = time.time()
+    with room.lock:
+        recent = [t for t in room.chat_times.get(sender, []) if now - t < _CHAT_WINDOW_SECONDS]
+        allowed = len(recent) < _CHAT_BURST
+        if allowed:
+            recent.append(now)
+        room.chat_times[sender] = recent
+    return allowed
+
 
 def _relay_player_chat(username: str, room: GameRoom, msg: dict) -> None:
     """
@@ -1376,6 +1555,8 @@ def _relay_player_chat(username: str, room: GameRoom, msg: dict) -> None:
         emoji = msg.get("emoji", "")
         if emoji not in QUICK_REACTION_EMOJI:
             return  # ignore anything not from the fixed reaction set
+        if not _chat_allowed(room, username):
+            return
         for p in list(room.players):
             if isinstance(p, NetworkPlayer) and p.username != username and p.active:
                 p.send_message("", message_type="REACTION", from_user=username, data={"emoji": emoji})
@@ -1384,8 +1565,9 @@ def _relay_player_chat(username: str, room: GameRoom, msg: dict) -> None:
                 s.send_message("", message_type="REACTION", from_user=username, data={"emoji": emoji})
         return
     text = msg.get("prompt", "")
-    if not text:
+    if not isinstance(text, str) or not text or not _chat_allowed(room, username):
         return
+    text = text[:_MAX_CHAT_LENGTH]
     formatted = f"💬 {username}: {text}"
     for p in list(room.players):
         if isinstance(p, NetworkPlayer) and p.username != username and p.active:
@@ -1508,6 +1690,7 @@ def _maybe_start_rematch(room: "GameRoom") -> None:
         room.human_seats = len(eligible)
         room.state = "starting"
         room.touch()
+    _refresh_seat_ratings(room)
     for p in eligible:
         p.send_message("", message_type="REMATCH_STARTING",
                         data={"bot_mix": bot_mix, "seats": room.seats, "seed": room.seed,
@@ -1662,6 +1845,7 @@ def _send_opponent_roster(player: "NetworkPlayer | NetworkSpectator", room: "Gam
                 "is_bot": not isinstance(other, NetworkPlayer),
                 "active": other.active,
                 "status_cards": [summarize_card(c) for c in other.status_cards],
+                "elo": room.seat_ratings.get(other.username),
             },
         )
 
@@ -1828,7 +2012,14 @@ def ws_player(ws):
     identity = _identify(ws, game_id, "Enter your username", "Enter your display name")
     if identity is None:
         return
-    username, name = identity
+    username, name, login_token = identity
+    error = _identity_error(username, name)
+    if error:
+        _send(ws, game_id, "IDENTIFY_ERROR", error)
+        return
+    if _identity_rejected(username, login_token):
+        _send(ws, game_id, "IDENTIFY_ERROR", _SIGN_IN_AGAIN)
+        return
 
     with room.lock:
         if room.state != "lobby":
@@ -1854,6 +2045,7 @@ def ws_player(ws):
         room.rejoin_tokens[rejoin_token] = username
         room.touch()
 
+    _refresh_seat_ratings(room)
     _send(ws, game_id, "IDENTIFY_SUCCESS", f"Welcome {username}! Waiting for other players...",
           data={"rejoin_token": rejoin_token})
 
@@ -1889,8 +2081,9 @@ def _spectator_chat_listener(spectator: NetworkSpectator, room: GameRoom) -> Non
         if incoming_game_id is not None and incoming_game_id != room.game_id:
             continue
         text = msg.get("prompt", "")
-        if not text:
+        if not isinstance(text, str) or not text or not _chat_allowed(room, spectator.username):
             continue
+        text = text[:_MAX_CHAT_LENGTH]
         target = "spectators" if msg.get("target") == "spectators" else "all"
         # The message's own JSON carries `to_user(s)` structurally (see
         # protocol.py's _chat_payload), but no client renders that field —
@@ -1921,7 +2114,11 @@ def ws_spectate(ws):
     identity = _identify(ws, game_id, "You are connected as a spectator. Enter your name:", "Enter your username:")
     if identity is None:
         return
-    name, username = identity
+    name, username, _login_token = identity  # spectating doesn't act as a player
+    error = _identity_error(username, name)
+    if error:
+        _send(ws, game_id, "IDENTIFY_ERROR", error)
+        return
 
     transport = WebSocketTransport(ws, label=f"{username}@web-spectator")
     spectator = NetworkSpectator(transport=transport, name=name, username=username, game_id=game_id)

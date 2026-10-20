@@ -30,8 +30,10 @@ how those fit together):
                 the legacy per-difficulty player_id instead.
 """
 import datetime
+import hashlib
 import json
 import os
+import secrets
 import threading
 import time
 from typing import Callable, Optional
@@ -446,6 +448,25 @@ _SCHEMA_STATEMENTS = [
         ('selfplay_games', 'Bot-vs-bot self-play episodes for RL training, grouped by generation batch -- kept out of games/ratings on purpose. `replay` is the same game record (seed, seats, actions, rounds, standings) game_history.fetch_game_record assembles from game_actions; see recording/game_replay.py and scripts/selfplay_job.py.')
     ON CONFLICT (table_name) DO NOTHING
     """,
+
+    # Proof that a browser really is the player it claims to be. Identity
+    # used to be just a username in localStorage, so anyone could play as
+    # (or rename) any account, Google-linked leaderboard players included.
+    # Each sign-in now issues a random token to that device; only its
+    # SHA-256 is stored. Keyed to player_id, so a rename keeps it working.
+    """
+    CREATE TABLE IF NOT EXISTS player_logins (
+        token_hash TEXT PRIMARY KEY,
+        player_id INTEGER NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_player_logins_player ON player_logins (player_id)",
+    """
+    INSERT INTO meta (table_name, description) VALUES
+        ('player_logins', 'One row per signed-in device: SHA-256 of the login token it was issued, and whose it is. Required to play as, or rename, that player.')
+    ON CONFLICT (table_name) DO NOTHING
+    """,
 ]
 
 _schema_ready = False
@@ -472,6 +493,16 @@ _MIN_POOL_CONNECTIONS = 1
 _MAX_POOL_CONNECTIONS = 10
 _pool = None
 _pool_lock = threading.Lock()
+
+# One slot per pooled connection. psycopg2's pool doesn't queue: once all
+# _MAX_POOL_CONNECTIONS are lent out, getconn() raises "connection pool
+# exhausted" straight away, so a burst of visitors (each home-page load
+# fires ~5 API calls at once) turned into instant failures -- a false
+# "username taken" on guest sign-up, an empty leaderboard, even a
+# finished game's save giving up. _connect() waits here for a free slot
+# instead, and _release_connection() hands it back.
+_pool_slots = threading.Semaphore(_MAX_POOL_CONNECTIONS)
+_POOL_WAIT_SECONDS = 10
 
 
 def _get_pool():
@@ -549,6 +580,8 @@ def _connect():
     # installed psycopg2 — only actually needed once DATABASE_URL is set.
     import psycopg2  # noqa: F401 -- see _get_pool's own lazy psycopg2.pool import
     pool = _get_pool()
+    if not _pool_slots.acquire(timeout=_POOL_WAIT_SECONDS):
+        raise RuntimeError(f"no free database connection within {_POOL_WAIT_SECONDS}s")
     last_error = None
     for _ in range(_CONNECT_RETRY_ATTEMPTS):
         try:
@@ -567,6 +600,7 @@ def _connect():
         except Exception as e:  # noqa: BLE001 -- this specific connection is dead; discard it and try another
             last_error = e
             pool.putconn(conn, close=True)
+    _pool_slots.release()  # nothing was handed out, so no _release_connection() will follow
     raise last_error
 
 
@@ -581,13 +615,16 @@ def _release_connection(conn) -> None:
     clean, reusable state, never mid-transaction.
     """
     pool = _get_pool()
-    if conn.closed:
-        # Already dead (e.g. the network dropped mid-query) -- tell the
-        # pool to discard it outright rather than recycling a connection
-        # nothing could actually use.
-        pool.putconn(conn, close=True)
-    else:
-        pool.putconn(conn)
+    try:
+        if conn.closed:
+            # Already dead (e.g. the network dropped mid-query) -- tell the
+            # pool to discard it outright rather than recycling a connection
+            # nothing could actually use.
+            pool.putconn(conn, close=True)
+        else:
+            pool.putconn(conn)
+    finally:
+        _pool_slots.release()
 
 
 def ensure_schema() -> None:
@@ -819,6 +856,34 @@ def get_player_elo(username: str) -> int:
     """
     session = get_player_session(username)
     return session.elo if session is not None else _DEFAULT_ELO
+
+
+def get_display_ratings(usernames: list) -> dict:
+    """{username: elo} for whichever of `usernames` are actually rated --
+    Google-linked humans and bot identities (see bot_roster) -- for showing
+    ratings at the table. Guests are left out, matching how the rest of the
+    app treats them as unrated. {} with no database or on any error."""
+    if not usernames or not is_configured():
+        return {}
+    ensure_schema()
+    if not _schema_ready:
+        return {}
+    conn = None
+    try:
+        conn = _connect()
+        with conn, conn.cursor() as cur:
+            cur.execute(
+                "SELECT p.username, p.elo FROM players p WHERE p.username = ANY(%s) "
+                "AND (p.google_id IS NOT NULL OR EXISTS (SELECT 1 FROM bots b WHERE b.player_id = p.id))",
+                (sorted(set(usernames)),),
+            )
+            return {username: elo for username, elo in cur.fetchall()}
+    except Exception as e:  # noqa: BLE001
+        LoggingManager.warning(f"game_history.get_display_ratings failed: {e}")
+        return {}
+    finally:
+        if conn is not None:
+            _release_connection(conn)
 
 
 def get_player_achievements(username: str) -> list:
@@ -1437,10 +1502,122 @@ def rename_player(old_username: str, new_username: str) -> bool:
         # The leaderboard lists players by username -- a renamed player
         # must not keep showing under the old name until the TTL.
         _invalidate_leaderboard_cache()
+        # Same for the per-username id/elo cache: left alone, the old name
+        # kept pointing at this account, so whoever claimed it next got
+        # this account's stats on their profile.
+        with _player_sessions_lock:
+            _player_sessions.pop(old_username, None)
+            _player_sessions.pop(new_username, None)
         return True
     except Exception as e:  # noqa: BLE001 -- includes a uniqueness-constraint race, deliberately not special-cased
         LoggingManager.warning(f"game_history.rename_player failed: {e}")
         return False
+    finally:
+        if conn is not None:
+            _release_connection(conn)
+
+
+def _hash_login_token(token: str) -> str:
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
+def issue_login_token(username: str) -> Optional[str]:
+    """A fresh login token for `username`'s existing players row (see the
+    player_logins table), or None if there's no such row, no database, or
+    the write fails. The caller hands it to the browser once; only its hash
+    is kept."""
+    if not is_configured():
+        return None
+    ensure_schema()
+    if not _schema_ready:
+        return None
+    token = secrets.token_urlsafe(32)
+    conn = None
+    try:
+        conn = _connect()
+        with conn, conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO player_logins (token_hash, player_id) "
+                "SELECT %s, id FROM players WHERE username = %s",
+                (_hash_login_token(token), username),
+            )
+            if cur.rowcount == 0:
+                return None
+        return token
+    except Exception as e:  # noqa: BLE001
+        LoggingManager.warning(f"game_history.issue_login_token failed: {e}")
+        return None
+    finally:
+        if conn is not None:
+            _release_connection(conn)
+
+
+def login_token_matches(username: str, token: Optional[str]) -> Optional[bool]:
+    """Whether `token` was issued to `username`'s account. None when that
+    can't be determined (no database, or the lookup errors) -- callers let
+    the request through then, rather than locking everyone out of playing
+    during a database blip."""
+    if not is_configured():
+        return None
+    ensure_schema()
+    if not _schema_ready:
+        return None
+    if not isinstance(token, str) or not token:
+        return False
+    conn = None
+    try:
+        conn = _connect()
+        with conn, conn.cursor() as cur:
+            cur.execute(
+                "SELECT 1 FROM player_logins l JOIN players p ON p.id = l.player_id "
+                "WHERE l.token_hash = %s AND p.username = %s",
+                (_hash_login_token(token), username),
+            )
+            return cur.fetchone() is not None
+    except Exception as e:  # noqa: BLE001
+        LoggingManager.warning(f"game_history.login_token_matches failed: {e}")
+        return None
+    finally:
+        if conn is not None:
+            _release_connection(conn)
+
+
+def issue_first_login_token(username: str) -> Optional[str]:
+    """One-time upgrade for a guest profile saved before login tokens
+    existed: issues a token only if `username` is a guest (no google_id)
+    that has never been issued one -- once any device holds a token, the
+    name is claimed and this refuses. A Google-linked account never
+    qualifies; it signs in with Google again instead. A username with no
+    players row at all (reserved while the database was unreachable) is
+    reserved now. None means refused or failed."""
+    if not is_configured():
+        return None
+    ensure_schema()
+    if not _schema_ready:
+        return None
+    conn = None
+    try:
+        conn = _connect()
+        with conn, conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO players (username, display_name) VALUES (%s, %s) ON CONFLICT (username) DO NOTHING",
+                (username, username),
+            )
+            cur.execute(
+                "SELECT p.id FROM players p WHERE p.username = %s AND p.google_id IS NULL "
+                "AND NOT EXISTS (SELECT 1 FROM player_logins l WHERE l.player_id = p.id) FOR UPDATE",
+                (username,),
+            )
+            row = cur.fetchone()
+            if row is None:
+                return None
+            token = secrets.token_urlsafe(32)
+            cur.execute("INSERT INTO player_logins (token_hash, player_id) VALUES (%s, %s)",
+                        (_hash_login_token(token), row[0]))
+        return token
+    except Exception as e:  # noqa: BLE001
+        LoggingManager.warning(f"game_history.issue_first_login_token failed: {e}")
+        return None
     finally:
         if conn is not None:
             _release_connection(conn)

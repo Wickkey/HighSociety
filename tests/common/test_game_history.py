@@ -1,5 +1,6 @@
 import datetime
 import json
+import threading
 import time
 from unittest.mock import MagicMock, patch
 
@@ -8,6 +9,9 @@ import pytest
 from highsociety.code.common import elo
 from highsociety.code.common.db import game_history
 from fake_db import queries as _queries, rows as _rows, save_connection as _save_connection
+
+# Captured before the autouse fixture below mocks it out for every test.
+_REAL_RELEASE_CONNECTION = game_history._release_connection
 
 
 @pytest.fixture(autouse=True)
@@ -48,6 +52,14 @@ def mock_release_connection(monkeypatch):
     mock = MagicMock()
     monkeypatch.setattr(game_history, "_release_connection", mock)
     return mock
+
+
+@pytest.fixture(autouse=True)
+def reset_pool_slots(monkeypatch):
+    """Tests that call the real _connect() keep the connection without
+    ever releasing it (_release_connection is mocked above), so give each
+    test a full set of slots rather than letting them leak across tests."""
+    monkeypatch.setattr(game_history, "_pool_slots", threading.Semaphore(game_history._MAX_POOL_CONNECTIONS))
 
 
 @pytest.fixture(autouse=True)
@@ -146,6 +158,36 @@ def test_connect_gives_up_after_exhausting_every_retry_attempt(monkeypatch):
 
     assert pool.getconn.call_count == game_history._CONNECT_RETRY_ATTEMPTS
     assert pool.putconn.call_count == game_history._CONNECT_RETRY_ATTEMPTS
+
+
+def test_connect_waits_for_a_free_connection_instead_of_failing(monkeypatch):
+    """psycopg2's pool raises the instant every connection is lent out;
+    a burst of requests must queue for one instead."""
+    monkeypatch.setattr(game_history, "_MAX_POOL_CONNECTIONS", 2)
+    monkeypatch.setattr(game_history, "_pool_slots", threading.Semaphore(2))
+    monkeypatch.setattr(game_history, "_release_connection", _REAL_RELEASE_CONNECTION)
+    pool = MagicMock()
+    pool.getconn.side_effect = lambda: _fake_connection()[0]
+    monkeypatch.setattr(game_history, "_get_pool", lambda: pool)
+
+    first, second = game_history._connect(), game_history._connect()
+    got_third = threading.Event()
+    threading.Thread(target=lambda: (game_history._connect(), got_third.set()), daemon=True).start()
+    assert not got_third.wait(0.2)  # both connections are out: the third waits rather than raising
+
+    game_history._release_connection(first)
+    assert got_third.wait(2)
+    assert pool.getconn.call_count == 3
+
+
+def test_connect_gives_its_slot_back_when_every_attempt_fails(monkeypatch):
+    monkeypatch.setattr(game_history, "_pool_slots", threading.Semaphore(1))
+    pool = _fake_pool([RuntimeError("down")] * game_history._CONNECT_RETRY_ATTEMPTS)
+    monkeypatch.setattr(game_history, "_get_pool", lambda: pool)
+
+    with pytest.raises(RuntimeError):
+        game_history._connect()
+    assert game_history._pool_slots.acquire(blocking=False)  # not leaked
 
 
 def test_ensure_schema_is_a_silent_no_op_without_a_database(no_database_url):
@@ -1202,6 +1244,19 @@ def test_rename_player_updates_the_existing_row(database_url, mock_release_conne
     mock_release_connection.assert_called_once_with(conn)
 
 
+def test_rename_player_forgets_the_cached_entry_for_the_old_name(database_url):
+    """Otherwise whoever claims "alice" next is served the renamed
+    account's cached id/elo (and so its stats)."""
+    game_history._schema_ready = True
+    game_history._cache_player_session("alice", 7, 1234)
+    conn, cursor = _fake_connection()
+    cursor.rowcount = 1
+    with patch.object(game_history, "username_is_taken", return_value=False), \
+            patch.object(game_history, "_connect", return_value=conn):
+        assert game_history.rename_player("alice", "bob") is True
+    assert game_history._peek_player_session("alice") is None
+
+
 def test_rename_player_falls_back_to_inserting_when_the_old_username_never_existed(database_url):
     """
     A profile that predates this reservation system (or was created while
@@ -1860,3 +1915,104 @@ def test_a_game_with_no_rating_change_still_clears_the_cached_leaderboard(databa
             participants=participants,
         )
     assert game_history._leaderboard_cache == {}
+
+
+# ------------------------------------------------------------ login tokens --
+
+def test_a_login_token_is_stored_only_as_its_hash(database_url):
+    game_history._schema_ready = True
+    conn, cursor = _fake_connection()
+    cursor.rowcount = 1
+    with patch.object(game_history, "_connect", return_value=conn):
+        token = game_history.issue_login_token("alice")
+    assert token and len(token) >= 40
+    query, params = cursor.execute.call_args.args
+    assert "INSERT INTO player_logins" in query
+    assert params == (game_history._hash_login_token(token), "alice")
+    assert token not in params
+
+
+def test_no_login_token_for_a_username_with_no_account(database_url):
+    game_history._schema_ready = True
+    conn, cursor = _fake_connection()
+    cursor.rowcount = 0
+    with patch.object(game_history, "_connect", return_value=conn):
+        assert game_history.issue_login_token("nobody") is None
+
+
+def test_login_token_matches_checks_the_hash_against_the_username(database_url):
+    game_history._schema_ready = True
+    conn, cursor = _fake_connection()
+    cursor.fetchone.side_effect = None
+    cursor.fetchone.return_value = (1,)
+    with patch.object(game_history, "_connect", return_value=conn):
+        assert game_history.login_token_matches("alice", "secret") is True
+    query, params = cursor.execute.call_args.args
+    assert params == (game_history._hash_login_token("secret"), "alice")
+
+    cursor.fetchone.return_value = None
+    with patch.object(game_history, "_connect", return_value=conn):
+        assert game_history.login_token_matches("alice", "wrong") is False
+
+
+def test_a_missing_login_token_never_matches(database_url):
+    game_history._schema_ready = True
+    with patch.object(game_history, "_connect", side_effect=AssertionError("no query needed")):
+        assert game_history.login_token_matches("alice", None) is False
+        assert game_history.login_token_matches("alice", "") is False
+
+
+def test_login_token_matches_is_unknown_when_the_database_errors(database_url):
+    """None, not False: a database blip mustn't lock every player out."""
+    game_history._schema_ready = True
+    with patch.object(game_history, "_connect", side_effect=RuntimeError("down")):
+        assert game_history.login_token_matches("alice", "secret") is None
+
+
+def test_login_token_matches_is_unknown_without_a_database(no_database_url):
+    assert game_history.login_token_matches("alice", "secret") is None
+
+
+def test_first_login_token_is_refused_once_the_name_is_claimed(database_url):
+    """The SELECT only finds a guest with no tokens yet; nothing found means
+    a Google account, or a name another device already holds."""
+    game_history._schema_ready = True
+    conn, cursor = _fake_connection()
+    cursor.fetchone.side_effect = None
+    cursor.fetchone.return_value = None
+    with patch.object(game_history, "_connect", return_value=conn):
+        assert game_history.issue_first_login_token("alice") is None
+    assert not any("INSERT INTO player_logins" in c.args[0] for c in cursor.execute.call_args_list)
+
+
+def test_first_login_token_for_an_unclaimed_guest(database_url):
+    game_history._schema_ready = True
+    conn, cursor = _fake_connection()
+    cursor.fetchone.side_effect = None
+    cursor.fetchone.return_value = (42,)
+    with patch.object(game_history, "_connect", return_value=conn):
+        token = game_history.issue_first_login_token("alice")
+    assert token
+    select = next(c.args[0] for c in cursor.execute.call_args_list if c.args[0].lstrip().startswith("SELECT"))
+    assert "google_id IS NULL" in select and "NOT EXISTS" in select
+    insert_query, insert_params = cursor.execute.call_args.args
+    assert "INSERT INTO player_logins" in insert_query
+    assert insert_params == (game_history._hash_login_token(token), 42)
+
+
+def test_display_ratings_cover_only_rated_players(database_url):
+    game_history._schema_ready = True
+    conn, cursor = _fake_connection()
+    cursor.fetchall.return_value = [("alice", 1110), ("__bot_ziggy__", 1012)]
+    with patch.object(game_history, "_connect", return_value=conn):
+        result = game_history.get_display_ratings(["alice", "guest1", "__bot_ziggy__", "alice"])
+    assert result == {"alice": 1110, "__bot_ziggy__": 1012}
+    query, (usernames,) = cursor.execute.call_args.args
+    assert "google_id IS NOT NULL" in query and "FROM bots" in query  # guests are unrated
+    assert usernames == ["__bot_ziggy__", "alice", "guest1"]
+
+
+def test_display_ratings_are_empty_on_a_database_error(database_url):
+    game_history._schema_ready = True
+    with patch.object(game_history, "_connect", side_effect=RuntimeError("down")):
+        assert game_history.get_display_ratings(["alice"]) == {}

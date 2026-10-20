@@ -6,7 +6,7 @@
 // function body (never at this module's own top-level evaluation), by
 // which point every module involved has finished loading.
 import { $, hide, show, showError, showScreen } from '../utils/dom.js';
-import { setSessionStatus } from '../auth/profile.js';
+import { loginToken, setSessionStatus } from '../auth/profile.js';
 import { game } from '../game/gameState.js';
 import { applyGameMessage, ensureGameScreenVisible } from '../game/gameEvents.js';
 import { ws } from './websocket.js';
@@ -44,7 +44,9 @@ export function beginReconnectAttempt() { isReconnecting = true; }
 export function respondIdentify(socket, pending, msg) {
   const wantsUsername = /username/i.test(msg.prompt);
   const answer = wantsUsername ? pending.username : pending.name;
-  socket.send(JSON.stringify({ message_type: 'IDENTIFY_ACK', prompt: answer }));
+  // The proof this browser really is that username -- the server refuses a
+  // seat without it (see web_server.py's _identity_rejected).
+  socket.send(JSON.stringify({ message_type: 'IDENTIFY_ACK', prompt: answer, login_token: loginToken() }));
 }
 
 export function handlePlayerMessage(msg) {
@@ -83,7 +85,7 @@ export function handlePlayerMessage(msg) {
         $('join-form').classList.add('hidden');
         $('join-waiting').classList.remove('hidden');
         setSpectateLinkLabel(true); // now seated -- the link means giving that seat up, so it says so
-        setSessionStatus('playing');
+        setSessionStatus('waiting'); // becomes 'playing' once the game screen opens (ensureGameScreenVisible)
         startWaitingRoomPolling();
         if (msg.data && msg.data.rejoin_token) {
           saveRejoinInfo(currentRoomCode(), msg.data.rejoin_token, pendingJoin.username, pendingJoin.name);
