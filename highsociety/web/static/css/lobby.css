@@ -621,8 +621,9 @@ h3:has(.section-icon) { display: flex; align-items: center; gap: 0.5rem; }
   /* minmax(0, ...): a plain fr track can't shrink below its content's
      min-content width, and a recent-games row's one-line opponent list
      is as wide as all its names -- on a phone that pushed the page to
-     ~550px and made it scroll sideways. */
-  grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr);
+     ~550px and made it scroll sideways. The ratio keeps the desktop
+     split the content-sized columns used to settle on (~405/465px). */
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr);
   gap: 1.75rem;
   max-width: 900px;
   margin: var(--screen-top-gap) auto 0;
@@ -756,6 +757,11 @@ h3:has(.section-icon) { display: flex; align-items: center; gap: 0.5rem; }
 /* An icon badge alongside the number/label, not just the two stacked
    alone -- matches the icon-led language the rest of this footer's own
    sibling screens (Home tiles, Host form) already use. */
+/* On phones the nav is a bottom tab bar (see main.css), so this sits at
+   the end of the page instead of pinned on top of it. */
+@media (max-width: 600px) {
+  .home-global-stats { position: static; gap: 1.5rem; padding: 0.9rem 1rem; backdrop-filter: none; }
+}
 .home-global-stat { display: flex; align-items: center; gap: 0.6rem; }
 .home-global-stat-icon {
   width: 34px;

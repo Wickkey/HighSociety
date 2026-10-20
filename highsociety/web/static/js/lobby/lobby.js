@@ -130,7 +130,7 @@ export async function enterRoom(roomCode, event) {
   }
   joinIdentityOverridden = false; // a genuinely new room — start from the saved profile again
   currentRoomCodeValue = roomCode;
-  history.replaceState(null, '', `?room=${encodeURIComponent(roomCode)}`);
+  history.replaceState(null, '', `/join?room=${encodeURIComponent(roomCode)}`);
   stopRoomsPolling();
   lastStatusValue = status;
   renderForStatus(status);
@@ -702,7 +702,7 @@ export async function onCreateGame() {
     stopRoomsPolling();
     joinIdentityOverridden = false; // a genuinely new room — start from the saved profile again
     currentRoomCodeValue = status.room_code;
-    history.replaceState(null, '', `?room=${encodeURIComponent(status.room_code)}`);
+    history.replaceState(null, '', `/join?room=${encodeURIComponent(status.room_code)}`);
     lastStatusValue = status;
     renderLobby(status);
     startPolling();
@@ -746,7 +746,7 @@ export async function onStartTutorial() {
     stopRoomsPolling();
     joinIdentityOverridden = false;
     currentRoomCodeValue = status.room_code;
-    history.replaceState(null, '', `?room=${encodeURIComponent(status.room_code)}`);
+    history.replaceState(null, '', `/join?room=${encodeURIComponent(status.room_code)}`);
     lastStatusValue = status;
     renderLobby(status);
     startPolling();
@@ -877,12 +877,13 @@ export function onJoin() {
 
 export function onSpectateJoin() {
   hide($('spectate-error'));
-  const username = $('spectate-username').value.trim();
+  // Same as onJoin: a signed-in browser watches as itself, since spectator
+  // chat is checked against the profile's login token too.
+  const profile = loadProfile();
+  const username = profile ? profile.username : $('spectate-username').value.trim();
   if (!username) { showError($('spectate-error'), 'Username is required.'); return; }
   setPendingSpectate({ username, name: username });
-  // Only a browser with no profile yet adopts this name: watching under
-  // another name mustn't overwrite the signed-in identity (and its token).
-  if (!loadProfile()) saveProfile(username, username);
+  if (!profile) saveProfile(username, username); // this device's identity going forward — see loadProfile
   stopPolling();
   resetGameState(null, lastStatusValue);
   // Seeds with whatever status this tab already knows (from the polling

@@ -2575,3 +2575,53 @@ def test_rated_seats_show_their_elo_at_the_table(monkeypatch):
     (bot,) = status["joined"]
     assert bot["elo"] == 1234
     assert asked and asked[0].startswith("__bot_")  # looked up under its rated identity, not the seat name
+
+
+def test_a_spectator_must_hold_the_login_token_for_their_name(running_web_server, monkeypatch):
+    """Spectator chat goes out under the spectator's username, so watching
+    as someone else would let you chat as them."""
+    monkeypatch.setattr(game_history, "login_token_matches", _only_token("alice-token"))
+    port = running_web_server
+    room_code = web_server.app.test_client().post(
+        "/api/create_game", json={"seats": 2, "bot_mix": ["pass"]}
+    ).get_json()["room_code"]
+
+    def watch(token):
+        spectator = Client(_ws_url(port, f"/ws_spectate?room={room_code}"))
+        spectator.receive(timeout=5)  # "Enter your name"
+        spectator.send(json.dumps({"message_type": "IDENTIFY_ACK", "prompt": "alice", "login_token": token}))
+        spectator.receive(timeout=5)  # "Enter your username"
+        spectator.send(json.dumps({"message_type": "IDENTIFY_ACK", "prompt": "alice"}))
+        reply = json.loads(spectator.receive(timeout=5))["message_type"]
+        try:
+            spectator.close()
+        except ConnectionClosed:  # the server already hung up on a refused identity
+            pass
+        return reply
+
+    assert watch("guess") == "IDENTIFY_ERROR"
+    assert watch("alice-token") == "IDENTIFY_SUCCESS"
+
+
+def test_matchmaking_as_someone_else_is_refused(monkeypatch):
+    monkeypatch.setattr(game_history, "login_token_matches", _only_token("alice-token"))
+    client = web_server.app.test_client()
+    assert client.post("/api/matchmaking/join", json={
+        "username": "alice", "seats": 2, "login_token": "guess"}).status_code == 403
+    ticket = client.post("/api/matchmaking/join", json={
+        "username": "alice", "seats": 2, "login_token": "alice-token"}).get_json()["ticket_id"]
+    client.post("/api/matchmaking/cancel", json={"ticket_id": ticket})
+
+
+def test_robots_keeps_room_links_out_of_search_results():
+    body = web_server.app.test_client().get("/robots.txt").get_data(as_text=True)
+    assert "Disallow: /*?room=" in body
+
+
+def test_the_apple_touch_icon_is_served_where_ios_looks_for_it():
+    client = web_server.app.test_client()
+    for path in ("/apple-touch-icon.png", "/apple-touch-icon-precomposed.png"):
+        resp = client.get(path)
+        assert resp.status_code == 200 and resp.mimetype == "image/png"
+        resp.close()
+    assert "apple-touch-icon.png?v=" in client.get("/").get_data(as_text=True)

@@ -1,7 +1,7 @@
 // The ELO matchmaking flow: find-match, live queue polling, elapsed timer,
 // cancel, and the "fill with bots after timing out" fallback.
 import { $, hide, show, showScreen, setScreenPath, pollWhileVisible } from '../utils/dom.js';
-import { loadProfile } from '../auth/profile.js';
+import { loadProfile, loginToken } from '../auth/profile.js';
 import { fetchJSON, enterRoom, onJoin, startRoomsPolling, showHomeTiles } from './lobby.js';
 
 let matchmakingTicketId = null;
@@ -79,7 +79,7 @@ export async function onFindMatch() {
     const result = await fetchJSON('/api/matchmaking/join', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username: profile.username, seats }),
+      body: JSON.stringify({ username: profile.username, seats, login_token: loginToken() }),
     });
     matchmakingTicketId = result.ticket_id;
     startMatchmakingPolling();
