@@ -27,9 +27,21 @@ repeats the whole tree search across several independent determinizations
 (a fresh shuffled deck each time) and combines them by summing visit counts
 per action across all the resulting trees -- the action landing on top most
 consistently, across the most independently-sampled futures, wins.
+
+Ties are broken at random, everywhere: untried actions are expanded in a
+random order, and equal UCB1 scores / equal final visit counts pick randomly
+among the tied actions. This used to fall back to list order, which is
+always "pass" then the money cards smallest to largest -- expansion popped
+from the end of that list, so the *largest* card was tried first and won
+every tie. A small search (easy: 20 iterations over ~12 moves) is mostly
+ties, so easy bots opened a Painting 1 with their 25 in about two thirds
+of fresh auctions (seen in the rl-v1 self-play data). The randomness comes
+from the caller's rng, so one decision is still reproducible from its seed.
 """
 import math
+import random
 from dataclasses import dataclass
+from typing import Optional
 
 from highsociety.code.ai.mcts.simulation import (
     SimState, advance_to_actor, evaluate_reward, is_terminal, legal_actions, rollout_to_end, step,
@@ -59,7 +71,7 @@ class _Node:
     def is_fully_expanded(self) -> bool:
         return not self.untried_actions
 
-    def best_child_by_ucb1(self, exploration_constant: float) -> "_Node":
+    def best_child_by_ucb1(self, exploration_constant: float, rng: random.Random) -> "_Node":
         log_parent_visits = math.log(self.visits)
 
         def ucb1(child: "_Node") -> float:
@@ -67,16 +79,20 @@ class _Node:
             exploration = exploration_constant * math.sqrt(log_parent_visits / child.visits)
             return exploitation + exploration
 
-        return max(self.children, key=ucb1)
+        # (score, random) -- the random second key only matters on an exact
+        # tie, which is common early on (see the module docstring).
+        return max(self.children, key=lambda child: (ucb1(child), rng.random()))
 
     def most_visited_child(self) -> "_Node":
         return max(self.children, key=lambda c: c.visits)
 
 
-def _run_one_tree(root_state: SimState, me_idx: int, rollout_policy, config: MCTSConfig) -> dict:
+def _run_one_tree(root_state: SimState, me_idx: int, rollout_policy, config: MCTSConfig,
+                  rng: Optional[random.Random] = None) -> dict:
     """One full UCT search from a single determinized root. Returns
     {action: visit_count} for the root's children, which run_search()
     combines across determinizations."""
+    rng = rng or random.Random()
     root = _Node(root_state)
 
     for _ in range(config.iterations):
@@ -86,12 +102,13 @@ def _run_one_tree(root_state: SimState, me_idx: int, rollout_policy, config: MCT
         # 1. Selection -- descend while every child at this level has
         # already been tried at least once.
         while node.is_fully_expanded and node.children and not is_terminal(state):
-            node = node.best_child_by_ucb1(config.exploration_constant)
+            node = node.best_child_by_ucb1(config.exploration_constant, rng)
             state = node.state
 
-        # 2. Expansion -- try one new action at the node we stopped at.
+        # 2. Expansion -- try one new action at the node we stopped at,
+        # picked at random (not list order -- see the module docstring).
         if node.untried_actions:
-            action = node.untried_actions.pop()
+            action = node.untried_actions.pop(rng.randrange(len(node.untried_actions)))
             child_state = advance_to_actor(step(state, action), me_idx, rollout_policy)
             node = _Node(child_state, action=action, parent=node)
             node.parent.children.append(node)
@@ -113,19 +130,27 @@ def _run_one_tree(root_state: SimState, me_idx: int, rollout_policy, config: MCT
     return {child.action: child.visits for child in root.children}
 
 
-def run_search(root_state: SimState, me_idx: int, rollout_policy, config: MCTSConfig):
+def run_search(root_state: SimState, me_idx: int, rollout_policy, config: MCTSConfig,
+               rng: Optional[random.Random] = None):
     """The full search: builds `config.determinizations` independent trees
-    (each with its own freshly re-shuffled future deck -- see
-    simulation.sample_future_deck, called by whoever builds each
-    determinized root_state before this) and returns whichever action
-    accumulated the most total visits summed across all of them. Actions
+    (each with its own freshly re-shuffled future deck) and returns
+    whichever action accumulated the most total visits summed across all of
+    them, ties broken at random. Actions
     are directly comparable across determinizations because they're drawn
     from this player's own exactly-known hand, which doesn't change between
     determinizations -- only the unseen future deck order does.
     """
+    rng = rng or random.Random()
     combined: dict = {}
     for _ in range(config.determinizations):
-        visits_by_action = _run_one_tree(root_state.clone(), me_idx, rollout_policy, config)
+        # Each tree gets its own order for the unseen deck. The caller
+        # samples one order to build root_state; reusing it for every tree
+        # (as this used to) made all the determinizations search the very
+        # same future. `deck` holds exactly the unseen cards, so a shuffle
+        # of it is a fresh sample.
+        determinized = root_state.clone()
+        rng.shuffle(determinized.deck)
+        visits_by_action = _run_one_tree(determinized, me_idx, rollout_policy, config, rng)
         for action, visits in visits_by_action.items():
             combined[action] = combined.get(action, 0) + visits
 
@@ -136,4 +161,5 @@ def run_search(root_state: SimState, me_idx: int, rollout_policy, config: MCTSCo
         actions = legal_actions(root_state)
         return actions[0] if actions else "pass"
 
-    return max(combined, key=combined.get)
+    most_visits = max(combined.values())
+    return rng.choice([action for action, visits in combined.items() if visits == most_visits])

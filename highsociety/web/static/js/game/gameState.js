@@ -61,6 +61,9 @@ export function resetGameState(myUsername, status) {
     // than survive across a resetGameState call.
     highestAnsweredMoveSeq: null,
     opponents: {}, // username -> {name, statusCards: [], active: true, outOfAuction: false, lastBid: null}
+    // username -> display name for everyone at the table, me included (see
+    // nameOf) -- filled from the room's roster by rememberNames.
+    names: {},
     // The real post-shuffle seat/turn order (see gameplay.py's player_order
     // broadcast) -- empty until that arrives, which renderOpponents falls
     // back to plain insertion order for.
@@ -98,6 +101,7 @@ export function resetGameState(myUsername, status) {
     // syncTutorialBidHint).
     tutorialBidHint: false,
   };
+  rememberNames(status);
   // Every other piece of state whose lifetime is "this one active game" --
   // not already inside the `game` object above -- must be reset here too.
   // This is the one place a new game's slate gets wiped clean; the next
@@ -172,7 +176,23 @@ export function applyRoomDisplaySettings() {
   $('spec-seed-display').textContent = seedLabel;
 }
 
+// Records every seated player's display name from a status payload's
+// roster -- usernames are ids, not what people should read: a bot's is
+// lowercase ("marbles bot", shown as "Marbles Bot"), and a person's can
+// differ from the name they picked.
+export function rememberNames(status) {
+  if (!game || !status) return;
+  (status.joined || []).forEach((p) => { if (p.name) game.names[p.username] = p.name; });
+}
+
+// The name to show for a username anywhere in the game UI.
+export function nameOf(username) {
+  if (!username) return '';
+  return (game && (game.names[username] || (game.opponents[username] && game.opponents[username].name))) || username;
+}
+
 export function seedOpponents(status, myUsername) {
+  rememberNames(status);
   (status.joined || []).forEach((p) => {
     if (p.username === myUsername) return;
     game.opponents[p.username] = { name: p.name, statusCards: [], active: true, outOfAuction: false, lastBid: null };

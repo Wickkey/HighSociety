@@ -3,7 +3,7 @@
 // mutations and DOM updates.
 import { $, show, hide, showScreen } from '../utils/dom.js';
 import { escapeHtml } from '../utils/formatting.js';
-import { game, ensureOpponent, openMyPrompt, recordMoneySpent, topSpender, spentSoFar } from './gameState.js';
+import { game, ensureOpponent, openMyPrompt, recordMoneySpent, topSpender, spentSoFar, nameOf } from './gameState.js';
 import {
   renderAuctionPanel, renderOpponents, renderMyPanel, renderMoneyChips,
   renderPaintingChoices, updateBidStatus, actorLabel, describeCard, cardTypeName,
@@ -331,7 +331,7 @@ function maybeShowTutorialResultCoach(d) {
 
   if (d.card && d.card.type === 'FauxPas' && d.recipient) {
     if (d.recipient !== game.myUsername) {
-      const who = (game.opponents[d.recipient] && game.opponents[d.recipient].name) || d.recipient;
+      const who = nameOf(d.recipient);
       show('faux_pas_other', `${who} is stuck with the Faux Pas, so they must throw away one of their `
         + 'paintings (or the next one they win, if they have none). If you ever end up with a Faux Pas, '
         + 'you\'ll pick which of your paintings to lose.', 'disgrace');
@@ -432,7 +432,7 @@ function applyAuctionUpdate(msg, isSpectator) {
       ensureOpponent(d.player).lastBid = d.max_bid;
     }
     enqueueEvent(isSpectator, `${actorLabel(d.player)} raised to ${d.max_bid}`, 'bid');
-    logLine(`💰 ${d.player} raised to ${d.max_bid}`, isSpectator);
+    logLine(`💰 ${nameOf(d.player)} raised to ${d.max_bid}`, isSpectator);
   } else if (d.kind === 'pass' || d.kind === 'fold') {
     if (d.player !== game.myUsername) {
       const o = ensureOpponent(d.player);
@@ -440,7 +440,7 @@ function applyAuctionUpdate(msg, isSpectator) {
       o.lastBid = null; // no longer contesting -- nothing left to show a badge for
     }
     enqueueEvent(isSpectator, `${actorLabel(d.player)} passed`, 'pass');
-    logLine(`⚪ ${d.player} passed`, isSpectator);
+    logLine(`⚪ ${nameOf(d.player)} passed`, isSpectator);
   } else if (d.kind === 'quit') {
     if (d.player !== game.myUsername) {
       const o = ensureOpponent(d.player);
@@ -449,7 +449,7 @@ function applyAuctionUpdate(msg, isSpectator) {
       o.lastBid = null;
     }
     enqueueEvent(isSpectator, `${actorLabel(d.player)} quit`, 'quit');
-    logLine(`❌ ${d.player} quit`, isSpectator);
+    logLine(`❌ ${nameOf(d.player)} quit`, isSpectator);
   } else if (d.kind === 'sync') {
     // Reconnect catch-up only (see web_server.py's _send_reconnect_catchup)
     // — a silent state restore, not a live event: no toast, no log line,
@@ -479,7 +479,7 @@ function applyAuctionResult(msg, isSpectator) {
       // BUY
       enqueueEvent(isSpectator, `${actorLabel(d.recipient)} bought ${describeCard(d.card)} for ${spent}`, 'buy');
     }
-    logLine(`🏆 ${d.recipient} won ${describeCard(d.card)} for ${spent}`, isSpectator);
+    logLine(`🏆 ${nameOf(d.recipient)} won ${describeCard(d.card)} for ${spent}`, isSpectator);
   } else {
     enqueueEvent(isSpectator, `Nobody wanted ${describeCard(d.card)}`, 'pass');
     logLine(`⚠️ Nobody took ${describeCard(d.card)}`, isSpectator);

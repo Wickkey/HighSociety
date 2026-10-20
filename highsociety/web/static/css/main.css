@@ -298,7 +298,6 @@ body {
   color: #f5f1e6;
   display: inline-flex;
   align-items: center;
-  gap: 0.55rem;
   max-width: 100%;
 }
 .profile-chip.editable {
@@ -342,6 +341,10 @@ body {
 .profile-chip-name {
   max-width: 0;
   opacity: 0;
+  /* The avatar-to-name spacing lives here, not as a gap on the chip: a gap
+     stays even while the name is collapsed, which left the lone avatar
+     visibly off-centre in its pill. */
+  margin-left: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -356,6 +359,7 @@ body {
 .profile-chip:focus-within .profile-chip-name {
   max-width: 140px;
   opacity: 1;
+  margin-left: 0.55rem;
   transition-delay: 0s;
 }
 .profile-chip:focus-visible { outline: 2px solid var(--accent-light); outline-offset: 2px; }

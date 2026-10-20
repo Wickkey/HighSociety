@@ -11,7 +11,14 @@
   align-items: start;
 }
 @media (max-width: 800px) {
-  .table-layout { grid-template-columns: 1fr; }
+  /* One column: rather than stacking the whole side column (your panel,
+     the opponents) under the centre one -- which put it below the game
+     log and chat, out of sight while choosing a bid -- both columns
+     dissolve into one list, and the log and chat move to the end. Row
+     gap 0: each panel already brings its own margin-bottom. */
+  .table-layout { grid-template-columns: 1fr; row-gap: 0; }
+  .table-layout > .center-col, .table-layout > .side-col { display: contents; }
+  .table-layout .log-details, .table-layout .chat-panel { order: 1; }
 }
 
 .side-col .panel { --panel-tint: var(--panel-bg-alt); }
@@ -812,10 +819,15 @@
 .elo-reveal-guest-note { margin: 0 auto 1.1rem; max-width: 320px; }
 
 #standings-table { text-align: left; }
+/* Name, then the two stats. A grid, not a 3-way flex split: on a phone the
+   flex version gave each item a third of ~270px, so the name and both
+   "Points: N" / "Money left: N" labels wrapped onto 2-3 lines each. */
 .standing-row {
-  display: flex;
-  justify-content: space-between;
-  gap: 1rem;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: baseline;
+  column-gap: 1rem;
+  row-gap: 0.15rem;
   padding: 0.6rem 0;
   border-top: 1px solid var(--panel-border);
   font-size: 0.95rem;
@@ -827,6 +839,13 @@
   to { opacity: 1; transform: translateY(0); }
 }
 .standing-row:first-child { border-top: none; }
+.standing-row > span:not(.name) { white-space: nowrap; }
+@media (max-width: 560px) {
+  /* Narrow: the name gets its own line, both stats share the one below. */
+  .standing-row { grid-template-columns: auto auto; justify-content: start; }
+  .standing-row .name { grid-column: 1 / -1; }
+  .standing-row > span:not(.name) { font-size: 0.85rem; }
+}
 /* See app.js's openProfileModal -- clicking a name pulls up that player's
    public games-played/win-rate/Elo (bots come back empty, which is fine). */
 .name-link {

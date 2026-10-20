@@ -14,7 +14,7 @@ import { escapeHtml } from '../utils/formatting.js';
 import { clearRejoinInfo, currentRoomCode, fetchJSON, lastStatus, loadRejoinInfo, setGameFinished } from './lobby.js';
 import { openProfileModal } from '../ui/modals.js';
 import { ws } from '../network/websocket.js';
-import { game, resetGameState, seedOpponents, applyRoomDisplaySettings } from '../game/gameState.js';
+import { game, resetGameState, seedOpponents, applyRoomDisplaySettings, rememberNames, nameOf } from '../game/gameState.js';
 import { ensureGameScreenVisible } from '../game/gameEvents.js';
 import { renderOpponents } from '../game/gameRenderer.js';
 import { loadProfile } from '../auth/profile.js';
@@ -63,14 +63,15 @@ export function renderFinished(status) {
     return b.points - a.points;
   });
   const winners = new Set(status.winners || []);
+  rememberNames(status);
 
   const trophy = $('finished-trophy');
   if (winners.size === 1) {
     trophy.textContent = '🏆';
-    $('finished-headline').textContent = `${[...winners][0]} wins!`;
+    $('finished-headline').textContent = `${nameOf([...winners][0])} wins!`;
   } else if (winners.size > 1) {
     trophy.textContent = '🤝';
-    $('finished-headline').textContent = `Tie: ${[...winners].join(', ')}`;
+    $('finished-headline').textContent = `Tie: ${[...winners].map(nameOf).join(', ')}`;
   } else {
     trophy.textContent = '🎲';
     $('finished-headline').textContent = 'Game over';
@@ -90,7 +91,7 @@ export function renderFinished(status) {
       : (s.active === false ? ' (left the game)' : '');
     return `
     <div class="standing-row ${state}" style="animation-delay: ${i * 90}ms">
-      <span class="name"><button type="button" class="name-link" data-open-profile>${escapeHtml(s.username)}</button>${tag}</span>
+      <span class="name"><button type="button" class="name-link" data-open-profile data-username="${escapeHtml(s.username)}">${escapeHtml(nameOf(s.username))}</button>${tag}</span>
       <span>Points: ${s.points}</span>
       <span>Money left: ${s.money_left}</span>
     </div>`;
@@ -277,11 +278,11 @@ export function renderRematchPanel() {
   if (iHaveAccepted) {
     hide(voteActions);
     $('rematch-status-text').textContent = waitingOn.length
-      ? `Waiting on ${waitingOn.join(', ')} to accept the rematch…`
+      ? `Waiting on ${waitingOn.map(nameOf).join(', ')} to accept the rematch…`
       : 'Everyone accepted. Starting the rematch…';
   } else {
     show(voteActions);
-    $('rematch-status-text').textContent = `${requestedBy} wants a rematch. Accept?`;
+    $('rematch-status-text').textContent = `${nameOf(requestedBy)} wants a rematch. Accept?`;
   }
 }
 
@@ -402,5 +403,5 @@ export function handleRematchMessage(msg) {
 // Wired from index.html's standings-table click delegation (see app.js).
 export function onStandingsTableClick(e) {
   const btn = e.target.closest('[data-open-profile]');
-  if (btn) openProfileModal(btn.textContent.trim());
+  if (btn) openProfileModal(btn.dataset.username);
 }

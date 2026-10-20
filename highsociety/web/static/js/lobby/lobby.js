@@ -11,7 +11,7 @@
 // for the same reason documented in gameState.js/messages.js: everything
 // is read inside a function body, never at this module's own top-level
 // evaluation, so load order never matters.
-import { $, hide, show, showError, showScreen, setScreenPath } from '../utils/dom.js';
+import { $, hide, show, showError, showScreen, setScreenPath, pollWhileVisible } from '../utils/dom.js';
 import { escapeHtml } from '../utils/formatting.js';
 import { ensureProfileSet, loadProfile, renderProfileChip, saveProfile, setSessionStatus } from '../auth/profile.js';
 import { game, resetGameState, seedOpponents, applyRoomDisplaySettings } from '../game/gameState.js';
@@ -49,7 +49,7 @@ let lastStatusValue = null;
 export function lastStatus() { return lastStatusValue; }
 export function setLastStatus(v) { lastStatusValue = v; }
 
-let roomsPollTimer = null;
+let stopRoomsPoll = null;
 
 // Reconnection: if a refresh/dropped connection happens mid-game, the
 // server keeps your seat (see web_server.py's rejoin-token handling) —
@@ -306,12 +306,12 @@ export async function navigateFromSidebar(afterHome = () => {}) {
 }
 
 export function startRoomsPolling() {
-  if (roomsPollTimer) return;
+  if (stopRoomsPoll) return;
   refreshRoomsList();
-  roomsPollTimer = setInterval(refreshRoomsList, 2000);
+  stopRoomsPoll = pollWhileVisible(refreshRoomsList, 2000);
 }
 export function stopRoomsPolling() {
-  if (roomsPollTimer) { clearInterval(roomsPollTimer); roomsPollTimer = null; }
+  if (stopRoomsPoll) { stopRoomsPoll(); stopRoomsPoll = null; }
 }
 
 export async function refreshRoomsList() {

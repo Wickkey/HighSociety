@@ -1,4 +1,5 @@
 import logging
+import sys
 import threading
 import traceback
 from enum import Enum
@@ -8,6 +9,19 @@ import os
 
 # .../<repo_root>/highsociety/code/common/logger_module/logger/logging_manager.py -> <repo_root>
 _REPO_ROOT = Path(__file__).resolve().parents[5]
+
+
+class _CurrentStderrHandler(logging.StreamHandler):
+    """Writes to whatever sys.stderr is at the moment of each record, not
+    the stream it was at setup (same idea as logging's own last-resort
+    handler) -- so a later redirect of stderr is still honoured."""
+
+    def __init__(self):
+        logging.Handler.__init__(self)
+
+    @property
+    def stream(self):
+        return sys.stderr
 
 
 class LogType(Enum):
@@ -70,6 +84,16 @@ class LoggingManager:
         security_log_handler.setFormatter(formatter)
         cls._security_logger = logging.getLogger('security')
         cls._security_logger.addHandler(security_log_handler)
+
+        # The files above live on the host's own disk -- on Render that's
+        # wiped on every deploy and never shown anywhere, so a production
+        # error (e.g. "Game thread crashed") used to be invisible. Render
+        # shows a service's stdout/stderr, so warnings and up also go there.
+        console_handler = _CurrentStderrHandler()
+        console_handler.setLevel(config.get("logging").get("console_level", "WARNING").upper())
+        console_handler.setFormatter(formatter)
+        cls._generic_logger.addHandler(console_handler)
+        cls._security_logger.addHandler(console_handler)
 
         LoggingManager.set_level(log_level)
         LoggingManager.info("Logger successfully initialized")

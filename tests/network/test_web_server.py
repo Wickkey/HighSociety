@@ -2252,6 +2252,29 @@ def test_recent_games_endpoint_rejects_non_integer_pagination_params(monkeypatch
     assert resp.status_code == 400
 
 
+@pytest.mark.parametrize("path, fetcher", [
+    ("/api/games/alice", "get_recent_games"),
+    ("/api/leaderboard", "get_leaderboard"),
+])
+@pytest.mark.parametrize("query, expected", [
+    ("limit=100000&offset=0", (50, 0)),     # capped: one request can't ask for the whole table
+    ("limit=0&offset=0", (1, 0)),
+    ("limit=-5&offset=-20", (1, 0)),        # a negative offset used to reach the SQL
+    ("limit=20&offset=40", (20, 40)),       # what the client actually sends is untouched
+])
+def test_paging_params_are_clamped(monkeypatch, path, fetcher, query, expected):
+    seen = {}
+
+    def fake(*args, limit=20, offset=0):
+        seen["args"] = (limit, offset)
+        return {"games": [], "rows": [], "has_more": False}
+
+    monkeypatch.setattr(game_history, fetcher, fake)
+    resp = web_server.app.test_client().get(f"{path}?{query}")
+    assert resp.status_code == 200
+    assert seen["args"] == expected
+
+
 def test_game_detail_endpoint_404s_for_an_unknown_game(monkeypatch):
     monkeypatch.setattr(game_history, "get_game_detail", lambda game_id: None)
     resp = web_server.app.test_client().get("/api/games/detail/999")

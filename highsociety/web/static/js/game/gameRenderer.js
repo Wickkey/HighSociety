@@ -3,7 +3,7 @@
 import { $ } from '../utils/dom.js';
 import { escapeHtml } from '../utils/formatting.js';
 import { CLOCK_ICON_SVG, CARD_INFO_TEXT } from '../utils/constants.js';
-import { game, ensureOpponent, computePoints, answerMyPrompt, spentSoFar, topSpender } from './gameState.js';
+import { game, ensureOpponent, computePoints, answerMyPrompt, spentSoFar, topSpender, nameOf } from './gameState.js';
 
 // ---------------------------------------------------------------- cards --
 
@@ -12,7 +12,7 @@ import { game, ensureOpponent, computePoints, answerMyPrompt, spentSoFar, topSpe
 // game.myUsername (it's null), so this is a no-op for them; they always see
 // real names, which is correct since they aren't a player at the table.
 export function actorLabel(username) {
-  return game && username === game.myUsername ? 'You' : username;
+  return game && username === game.myUsername ? 'You' : nameOf(username);
 }
 
 export function describeCard(card) {
@@ -214,7 +214,7 @@ export function renderAuctionPanel(isSpectator) {
   // was the actual bug (multiple call sites each independently responsible
   // for keeping turnPlayer in sync), not the comparison itself.
   const iAmUp = (game.myPrompt && !game.myPrompt.answered) || game.turnPlayer === game.myUsername;
-  const turnText = iAmUp ? 'Your turn' : `${escapeHtml(game.turnPlayer)}'s turn`;
+  const turnText = iAmUp ? 'Your turn' : `${escapeHtml(nameOf(game.turnPlayer))}'s turn`;
   $(`${prefix}turn-label`).innerHTML = (iAmUp || game.turnPlayer)
     ? `<span class="turn-dot"></span>${turnText}`
     : '';

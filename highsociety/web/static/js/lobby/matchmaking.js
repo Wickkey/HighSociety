@@ -1,6 +1,6 @@
 // The ELO matchmaking flow: find-match, live queue polling, elapsed timer,
 // cancel, and the "fill with bots after timing out" fallback.
-import { $, hide, show, showScreen, setScreenPath } from '../utils/dom.js';
+import { $, hide, show, showScreen, setScreenPath, pollWhileVisible } from '../utils/dom.js';
 import { loadProfile } from '../auth/profile.js';
 import { fetchJSON, enterRoom, onJoin, startRoomsPolling, showHomeTiles } from './lobby.js';
 
@@ -9,7 +9,7 @@ let matchmakingPollTimer = null;
 let matchmakingSeats = null;
 let matchmakingStartedAt = null;
 let matchmakingElapsedTimer = null;
-let queueDepthPollTimer = null;
+let stopQueueDepthPoll = null;
 
 export function onPlayClick() {
   showScreen('screen-matchmaking');
@@ -42,11 +42,11 @@ export function onMatchmakingSeatButtonClick(e) {
 function startQueueDepthPolling() {
   stopQueueDepthPolling();
   refreshQueueDepth();
-  queueDepthPollTimer = setInterval(refreshQueueDepth, 3000);
+  stopQueueDepthPoll = pollWhileVisible(refreshQueueDepth, 3000);
 }
 
 function stopQueueDepthPolling() {
-  if (queueDepthPollTimer) { clearInterval(queueDepthPollTimer); queueDepthPollTimer = null; }
+  if (stopQueueDepthPoll) { stopQueueDepthPoll(); stopQueueDepthPoll = null; }
 }
 
 async function refreshQueueDepth() {

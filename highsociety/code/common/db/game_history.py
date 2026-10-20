@@ -2089,10 +2089,19 @@ def insert_selfplay_games(batch: str, episodes: list, engine_version: Optional[s
         _release_connection(conn)
 
 
+# Rows per query when fetch_selfplay_records reads a whole batch. Each row
+# carries a full game record (~3KB of JSON); asking for all 10,000 rl-v1
+# games in one query ran past the database's statement timeout.
+_SELFPLAY_FETCH_PAGE_SIZE = 500
+
+
 def fetch_selfplay_records(ids: Optional[list] = None, batch: Optional[str] = None,
                            sample: Optional[int] = None) -> list:
     """[(selfplay_games.id, game record), ...] -- explicit `ids`, or a random
-    `sample` of that many (optionally within one `batch`), else all."""
+    `sample` of that many (optionally within one `batch`), else all.
+    Everything but a sample is read in id order, _SELFPLAY_FETCH_PAGE_SIZE
+    rows per query (keyset paging on id), so no single query is big enough
+    to hit the statement timeout."""
     _require_schema()
     where, params = [], []
     if ids:
@@ -2101,17 +2110,27 @@ def fetch_selfplay_records(ids: Optional[list] = None, batch: Optional[str] = No
     if batch is not None:
         where.append("batch = %s")
         params.append(batch)
-    query = "SELECT id, replay FROM selfplay_games"
-    if where:
-        query += " WHERE " + " AND ".join(where)
-    query += " ORDER BY random() LIMIT %s" if sample else " ORDER BY id"
-    if sample:
-        params.append(sample)
     conn = _connect()
     try:
         with conn, conn.cursor() as cur:
-            cur.execute(query, params)
-            return cur.fetchall()
+            if sample:
+                query = "SELECT id, replay FROM selfplay_games"
+                if where:
+                    query += " WHERE " + " AND ".join(where)
+                cur.execute(query + " ORDER BY random() LIMIT %s", params + [sample])
+                return cur.fetchall()
+            rows, last_id = [], 0
+            while True:
+                cur.execute(
+                    "SELECT id, replay FROM selfplay_games WHERE " + " AND ".join(where + ["id > %s"])
+                    + " ORDER BY id LIMIT %s",
+                    params + [last_id, _SELFPLAY_FETCH_PAGE_SIZE],
+                )
+                page = cur.fetchall()
+                rows.extend(page)
+                if len(page) < _SELFPLAY_FETCH_PAGE_SIZE:
+                    return rows
+                last_id = page[-1][0]
     finally:
         _release_connection(conn)
 

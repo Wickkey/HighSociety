@@ -1,3 +1,5 @@
+import random
+
 from highsociety.code.ai.mcts.policy import capped_greedy_policy
 from highsociety.code.ai.mcts.search import MCTSConfig, run_search
 from highsociety.code.ai.mcts.simulation import SimCard, SimPlayer, SimState, legal_actions
@@ -39,18 +41,23 @@ def test_only_one_choice_available_returns_it_without_searching_further():
 
 
 def test_does_not_hand_the_opponent_a_free_win_by_passing():
-    """The opponent is completely out of money (nothing left to raise with
-    at all) and this is the last card in the game (empty deck -- nothing
-    left for spending less now to help with later). Passing myself would
-    hand *them* the card for free (normal-auction rule: the last still-in
-    bidder wins) and lose outright; any raise instead guarantees the
-    opponent must pass next turn (no legal raise of their own) and I win.
-    A reasonable search must never blunder into the strictly losing option
-    when a guaranteed win is sitting right there."""
-    state = _make_state({"me": [1, 25], "opp": []}, _painting(5), deck=[])
+    """Last card in the game (empty deck). "broke" has no money left but is
+    still in this auction; "rich" already dropped out and holds a Painting
+    3. Passing hands the Painting 5 to broke for free -- broke is then the
+    poorest and eliminated, and rich's 3 points beat my 0, so I lose. Any
+    raise leaves broke unable to answer, I take the 5 and win.
+
+    (This used to be a 2-player version with a broke opponent, but there
+    the broke player is eliminated whatever happens, so passing won too;
+    the old test only held because ties always went against "pass".)"""
+    players = [SimPlayer("me", [1, 25]), SimPlayer("broke", []),
+               SimPlayer("rich", [10, 30], status_cards=[_painting(3)])]
+    state = SimState(players=players, turn=0, deck=[], current_card=_painting(5), is_disgrace=False,
+                     max_bid=0, still_in=[True, True, False], green_count=0)
     config = MCTSConfig(iterations=60, determinizations=3, exploration_constant=1.4)
-    action = run_search(state, me_idx=0, rollout_policy=capped_greedy_policy, config=config)
-    assert action != "pass"
+    for seed in range(20):
+        action = run_search(state, 0, capped_greedy_policy, config, random.Random(seed))
+        assert action != "pass"
 
 
 def test_root_children_cover_every_legal_action_given_enough_iterations():
@@ -65,3 +72,52 @@ def test_root_children_cover_every_legal_action_given_enough_iterations():
     from highsociety.code.ai.mcts.search import _run_one_tree
     visits_by_action = _run_one_tree(state, me_idx=0, rollout_policy=capped_greedy_policy, config=config)
     assert set(visits_by_action.keys()) == set(legal_actions(state))
+
+
+_FULL_HAND = [1, 2, 3, 4, 6, 8, 10, 12, 15, 20, 25]
+
+
+def test_ties_are_broken_at_random_not_toward_the_largest_card(monkeypatch):
+    """Every playout scores the same here, so every decision is one big
+    tie. Ties used to go to whichever action was expanded first -- always
+    the largest card -- which is how easy bots came to open a Painting 1
+    with their 25 (rl-v1 self-play data). They must now spread out."""
+    from highsociety.code.ai.mcts import search
+    monkeypatch.setattr(search, "evaluate_reward", lambda state, me_idx: 0.0)
+    state = _make_state({"me": _FULL_HAND, "opp": _FULL_HAND}, _painting(1),
+                        deck=[_painting(v) for v in (2, 3, 4)])
+    config = MCTSConfig(iterations=20, determinizations=2, exploration_constant=1.4)
+    picks = [run_search(state, 0, capped_greedy_policy, config, random.Random(seed)) for seed in range(120)]
+    assert len(set(picks)) >= 8
+    assert picks.count(25) < 30
+
+
+def test_the_same_rng_seed_gives_the_same_decision():
+    state = _make_state({"me": _FULL_HAND, "opp": _FULL_HAND}, _painting(4),
+                        deck=[_painting(v) for v in (1, 2, 3, 5, 6)])
+    config = MCTSConfig(iterations=40, determinizations=3, exploration_constant=1.4)
+    first = [run_search(state, 0, capped_greedy_policy, config, random.Random(seed)) for seed in range(10)]
+    again = [run_search(state, 0, capped_greedy_policy, config, random.Random(seed)) for seed in range(10)]
+    assert first == again
+
+
+def test_each_determinization_searches_its_own_deck_order(monkeypatch):
+    """The caller samples one deck order to build the root state; every
+    determinization used to search that same order, so 8 of them were one
+    future searched 8 times."""
+    from highsociety.code.ai.mcts import search
+    seen = []
+    real_run_one_tree = search._run_one_tree
+
+    def spy(root_state, *args, **kwargs):
+        seen.append(tuple(card.value for card in root_state.deck))
+        return real_run_one_tree(root_state, *args, **kwargs)
+
+    monkeypatch.setattr(search, "_run_one_tree", spy)
+    deck = [_painting(v) for v in range(1, 11)]
+    state = _make_state({"me": [1, 5, 10], "opp": [3]}, _painting(5), deck=deck)
+    run_search(state, 0, capped_greedy_policy, MCTSConfig(iterations=5, determinizations=6), random.Random(0))
+    assert len(seen) == 6
+    assert len(set(seen)) > 1
+    assert all(sorted(order) == list(range(1, 11)) for order in seen)   # same cards, new order
+    assert [card.value for card in state.deck] == list(range(1, 11))   # caller's state untouched
