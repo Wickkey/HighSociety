@@ -423,6 +423,7 @@ body {
    style (that read as a bare hyperlink, not a menu row) -- resets every
    default <button> property (background/border/margin) that would
    otherwise leak in. */
+a.popover-menu-item { text-decoration: none; box-sizing: border-box; }
 .popover-menu-item {
   display: flex;
   align-items: center;

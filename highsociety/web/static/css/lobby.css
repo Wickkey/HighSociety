@@ -2009,6 +2009,17 @@ button.secondary.standalone { margin-top: 0.9rem; display: inline-block; }
 
 .game-detail-box { max-width: 480px; width: 100%; }
 
+/* ---------------- privacy policy (privacy.html) ---------------- */
+.legal-page { max-width: 720px; margin: var(--screen-top-gap, 1.5rem) auto 3rem; text-align: left; line-height: 1.6; }
+.legal-page h2 { margin: 0.6rem 0 0.2rem; }
+.legal-page h3 { margin: 1.6rem 0 0.4rem; font-size: 1.05rem; }
+.legal-page ul { padding-left: 1.2rem; margin: 0.4rem 0; }
+.legal-page li { margin: 0.35rem 0; }
+.legal-page a { color: var(--accent-strong); }
+.legal-back { font-size: 0.85rem; font-weight: 600; text-decoration: none; }
+.login-legal { margin: 1.1rem 0 0; font-size: 0.8rem; }
+.login-legal a { color: var(--muted); }
+
 /* ---------------- leaderboard (Part G) ---------------- */
 /* Width + centering for .leaderboard-panel itself now live in main.css,
    alongside every other screen's own panel-centering rule. */

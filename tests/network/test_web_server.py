@@ -2625,3 +2625,12 @@ def test_the_apple_touch_icon_is_served_where_ios_looks_for_it():
         assert resp.status_code == 200 and resp.mimetype == "image/png"
         resp.close()
     assert "apple-touch-icon.png?v=" in client.get("/").get_data(as_text=True)
+
+
+def test_the_privacy_policy_is_readable_without_signing_in():
+    client = web_server.app.test_client()
+    page = client.get("/privacy")
+    assert page.status_code == 200
+    html = page.get_data(as_text=True)
+    assert "Privacy Policy" in html and "github.com/Wickkey/HighSociety/issues" in html
+    assert 'href="/privacy"' in client.get("/").get_data(as_text=True)  # linked from the app

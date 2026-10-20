@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+<head>
+  {% if ga_measurement_id %}
+  <!-- Google tag (gtag.js) -- opt-in via GA_MEASUREMENT_ID env var, see web_server.py -->
+  <script async src="https://www.googletagmanager.com/gtag/js?id={{ ga_measurement_id }}"></script>
+  <script>
+    window.dataLayer = window.dataLayer || [];
+    function gtag(){dataLayer.push(arguments);}
+    gtag('js', new Date());
+    gtag('config', '{{ ga_measurement_id }}');
+  </script>
+  {% endif %}
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Privacy Policy — High Society</title>
+  <meta name="description" content="What High Society collects, what's public, and how to have your data deleted.">
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+CiAgPHJlY3Qgd2lkdGg9IjY0IiBoZWlnaHQ9IjY0IiByeD0iMTQiIGZpbGw9IiMwYjM0MjciLz4KICA8cGF0aCBmaWxsPSIjYzhhMDRkIiBkPSJNMzIsOCBDMjIsMTYgMTEsMjMgMTEsMzMgQzExLDQxIDE4LDQ1IDI1LDQzIEMyMyw0OSAxOCw1MyAxNCw1NiBMNTAsNTYgQzQ2LDUzIDQxLDQ5IDM5LDQzIEM0Niw0NSA1Myw0MSA1MywzMyBDNTMsMjMgNDIsMTYgMzIsOCBaIi8+Cjwvc3ZnPgo=">
+  <link rel="apple-touch-icon" href="{{ asset_url('apple-touch-icon.png') }}">
+  <link rel="stylesheet" href="{{ asset_url('css/main.css') }}">
+  <link rel="stylesheet" href="{{ asset_url('css/lobby.css') }}">
+</head>
+<body>
+  <!-- A standalone page (like 404.html), not a screen inside the app: it
+       has to be readable before signing in, and from a plain link. -->
+  <header class="topbar">
+    <a href="/" class="home-link" style="text-decoration: none; color: inherit;">
+      <h1 style="margin: 0;">High&nbsp;Society</h1>
+    </a>
+  </header>
+
+  <main id="app">
+    <article class="panel legal-page">
+      <a href="/" class="legal-back">← Back to the game</a>
+      <h2>Privacy Policy</h2>
+      <p class="muted">Last updated October 20, 2026</p>
+
+      <p>High Society is a free, open-source hobby project: an online version of the High Society auction card game.
+        It has no ads and never sells or shares your data for marketing. This page explains what it stores and why.</p>
+
+      <h3>What we collect</h3>
+      <ul>
+        <li><strong>Your username.</strong> Every player picks one, as a guest or with Google.</li>
+        <li><strong>If you sign in with Google:</strong> Google tells us your Google account ID, email address and name.
+          We store the ID and email to recognize you next time. We use your name only to suggest a username.
+          Your email is never shown to anyone.</li>
+        <li><strong>Your games:</strong> who played, the final scores and placements, every bid and pass, your Elo
+          rating over time, achievements, and when you joined and last played. This is what powers your profile,
+          the leaderboard and game history.</li>
+        <li><strong>A sign-in token</strong> for each device you use, so nobody else can play under your name. We store
+          only a one-way fingerprint of it, never the token itself.</li>
+      </ul>
+      <p><strong>Chat messages and emoji reactions are not stored.</strong> They're passed live to the other people at
+        your table and then gone.</p>
+
+      <h3>What's public</h3>
+      <p>Your username, Elo rating, stats and game history (including the usernames of who you played) can be seen by
+        anyone who visits your profile. Google-linked accounts appear on the leaderboard. Your email address is never public.</p>
+
+      <h3>What's saved in your browser</h3>
+      <p>Your username, your Google account ID (if you signed in with Google) and your sign-in token are saved in your
+        browser's local storage and a cookie, so you stay signed in. The site also saves recent stats there so screens
+        load faster, and a short-lived code that lets you rejoin a game after a refresh. Clearing this site's data
+        signs you out.</p>
+
+      <h3>Analytics</h3>
+      <p>We use Google Analytics to count visits and see which pages are used: things like the pages viewed,
+        device and browser type, and approximate location. It uses cookies to do this. See
+        <a href="https://policies.google.com/privacy" target="_blank" rel="noopener noreferrer">Google's privacy policy</a>.
+        Most ad and tracker blockers turn it off, and the game works the same without it.</p>
+
+      <h3>Who handles the data</h3>
+      <ul>
+        <li><strong>Render</strong> hosts the website (servers in the United States).</li>
+        <li><strong>Supabase</strong> hosts the database (servers in the United States).</li>
+        <li><strong>Google</strong> provides sign-in and analytics.</li>
+        <li><strong>Cloudflare</strong> carries traffic to the site, as part of Render's hosting.</li>
+      </ul>
+
+      <h3>How long we keep it, and deleting it</h3>
+      <p>Your account and game records are kept for as long as the site runs, so ratings and history stay accurate.
+        To have your account deleted, open an issue on
+        <a href="https://github.com/Wickkey/HighSociety/issues" target="_blank" rel="noopener noreferrer">the project's GitHub page</a>
+        with your username. Please don't post your email or anything else personal there; the issue is public.
+        Deleting an account removes your username and, for Google accounts, your Google ID and email.</p>
+
+      <h3>Children</h3>
+      <p>The site isn't directed at children under 13, and we don't knowingly collect their information.</p>
+
+      <h3>Changes and questions</h3>
+      <p>If this policy changes, the date at the top changes with it. Questions are welcome on
+        <a href="https://github.com/Wickkey/HighSociety/issues" target="_blank" rel="noopener noreferrer">GitHub</a>.</p>
+    </article>
+  </main>
+</body>
+</html>

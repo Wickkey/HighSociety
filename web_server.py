@@ -1246,6 +1246,13 @@ def robots_txt():
     return Response("User-agent: *\nDisallow: /*?room=\n", mimetype="text/plain")
 
 
+@app.route("/privacy")
+def privacy_policy():
+    # A standalone page rather than an app screen: it has to be readable
+    # before signing in (the app itself starts at the login wall).
+    return render_template("privacy.html", ga_measurement_id=GA_MEASUREMENT_ID)
+
+
 @app.route("/apple-touch-icon.png")
 @app.route("/apple-touch-icon-precomposed.png")
 def apple_touch_icon():
