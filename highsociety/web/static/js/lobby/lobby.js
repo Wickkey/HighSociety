@@ -232,7 +232,14 @@ function resetRoomState(clearRejoin) {
 // navigateFromSidebar below, the tile picker genuinely *is* the
 // destination here, so rendering it as part of this call is correct,
 // not wasted.
+//
+// Closes the room's socket too: after a game the server keeps it open for
+// a rematch, and leaving it open here meant (a) the next sidebar click saw
+// an open socket on a started game -- gameFinished having just been reset
+// below -- and asked "Leave the game?" for a game that was over, and (b)
+// the server still counted this player at the table for a rematch vote.
 export function leaveToHome(clearRejoin = true) {
+  closeSocket();
   resetRoomState(clearRejoin);
   showScreen('screen-host-setup');
   showHomeTiles();
