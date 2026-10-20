@@ -1,5 +1,6 @@
 import datetime
 import json
+import threading
 import time
 from unittest.mock import MagicMock, patch
 
@@ -8,6 +9,9 @@ import pytest
 from highsociety.code.common import elo
 from highsociety.code.common.db import game_history
 from fake_db import queries as _queries, rows as _rows, save_connection as _save_connection
+
+# Captured before the autouse fixture below mocks it out for every test.
+_REAL_RELEASE_CONNECTION = game_history._release_connection
 
 
 @pytest.fixture(autouse=True)
@@ -48,6 +52,14 @@ def mock_release_connection(monkeypatch):
     mock = MagicMock()
     monkeypatch.setattr(game_history, "_release_connection", mock)
     return mock
+
+
+@pytest.fixture(autouse=True)
+def reset_pool_slots(monkeypatch):
+    """Tests that call the real _connect() keep the connection without
+    ever releasing it (_release_connection is mocked above), so give each
+    test a full set of slots rather than letting them leak across tests."""
+    monkeypatch.setattr(game_history, "_pool_slots", threading.Semaphore(game_history._MAX_POOL_CONNECTIONS))
 
 
 @pytest.fixture(autouse=True)
@@ -146,6 +158,36 @@ def test_connect_gives_up_after_exhausting_every_retry_attempt(monkeypatch):
 
     assert pool.getconn.call_count == game_history._CONNECT_RETRY_ATTEMPTS
     assert pool.putconn.call_count == game_history._CONNECT_RETRY_ATTEMPTS
+
+
+def test_connect_waits_for_a_free_connection_instead_of_failing(monkeypatch):
+    """psycopg2's pool raises the instant every connection is lent out;
+    a burst of requests must queue for one instead."""
+    monkeypatch.setattr(game_history, "_MAX_POOL_CONNECTIONS", 2)
+    monkeypatch.setattr(game_history, "_pool_slots", threading.Semaphore(2))
+    monkeypatch.setattr(game_history, "_release_connection", _REAL_RELEASE_CONNECTION)
+    pool = MagicMock()
+    pool.getconn.side_effect = lambda: _fake_connection()[0]
+    monkeypatch.setattr(game_history, "_get_pool", lambda: pool)
+
+    first, second = game_history._connect(), game_history._connect()
+    got_third = threading.Event()
+    threading.Thread(target=lambda: (game_history._connect(), got_third.set()), daemon=True).start()
+    assert not got_third.wait(0.2)  # both connections are out: the third waits rather than raising
+
+    game_history._release_connection(first)
+    assert got_third.wait(2)
+    assert pool.getconn.call_count == 3
+
+
+def test_connect_gives_its_slot_back_when_every_attempt_fails(monkeypatch):
+    monkeypatch.setattr(game_history, "_pool_slots", threading.Semaphore(1))
+    pool = _fake_pool([RuntimeError("down")] * game_history._CONNECT_RETRY_ATTEMPTS)
+    monkeypatch.setattr(game_history, "_get_pool", lambda: pool)
+
+    with pytest.raises(RuntimeError):
+        game_history._connect()
+    assert game_history._pool_slots.acquire(blocking=False)  # not leaked
 
 
 def test_ensure_schema_is_a_silent_no_op_without_a_database(no_database_url):
@@ -1200,6 +1242,19 @@ def test_rename_player_updates_the_existing_row(database_url, mock_release_conne
     assert "UPDATE players" in query
     assert params == ("bob", "bob", "alice")
     mock_release_connection.assert_called_once_with(conn)
+
+
+def test_rename_player_forgets_the_cached_entry_for_the_old_name(database_url):
+    """Otherwise whoever claims "alice" next is served the renamed
+    account's cached id/elo (and so its stats)."""
+    game_history._schema_ready = True
+    game_history._cache_player_session("alice", 7, 1234)
+    conn, cursor = _fake_connection()
+    cursor.rowcount = 1
+    with patch.object(game_history, "username_is_taken", return_value=False), \
+            patch.object(game_history, "_connect", return_value=conn):
+        assert game_history.rename_player("alice", "bob") is True
+    assert game_history._peek_player_session("alice") is None
 
 
 def test_rename_player_falls_back_to_inserting_when_the_old_username_never_existed(database_url):

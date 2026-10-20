@@ -2389,3 +2389,46 @@ def test_static_screen_paths_all_serve_the_same_app_shell(path):
     resp = web_server.app.test_client().get(path)
     assert resp.status_code == 200
     assert b"High Society" in resp.data
+
+
+def _chat_room_with_listener():
+    """A lobby room holding one connected human whose sent messages we can
+    inspect -- enough to drive _relay_player_chat directly."""
+    from highsociety.code.gamecore.player.networkplayer import NetworkPlayer
+    room = web_server._create_room(seats=3, bot_mix=[], seed=1, bot_think_time=0, visibility="private")
+    listener = MagicMock(spec=NetworkPlayer)
+    listener.username, listener.active = "bob", True
+    room.players.append(listener)
+    return room, listener
+
+
+def test_chat_is_capped_at_the_inputs_own_length():
+    room, bob = _chat_room_with_listener()
+    web_server._relay_player_chat("alice", room, {"message_type": "CHAT", "prompt": "x" * 5000})
+    (sent,), _ = bob.send_message.call_args
+    assert sent == "💬 alice: " + "x" * web_server._MAX_CHAT_LENGTH
+
+
+def test_a_chat_flood_is_dropped_after_the_burst():
+    room, bob = _chat_room_with_listener()
+    for i in range(web_server._CHAT_BURST + 3):
+        web_server._relay_player_chat("alice", room, {"message_type": "CHAT", "prompt": f"m{i}"})
+    web_server._relay_player_chat("alice", room, {"message_type": "REACTION", "emoji": "🔥"})
+    assert bob.send_message.call_count == web_server._CHAT_BURST
+
+
+def test_a_non_text_chat_message_is_ignored():
+    room, bob = _chat_room_with_listener()
+    web_server._relay_player_chat("alice", room, {"message_type": "CHAT", "prompt": {"not": "text"}})
+    bob.send_message.assert_not_called()
+
+
+@pytest.mark.parametrize("username,name", [
+    ("x" * 25, "ok"), ("ok", "y" * 41), ("   ", "ok"), (123, "ok"),
+])
+def test_a_socket_identity_with_a_bad_name_is_rejected(username, name):
+    assert web_server._identity_error(username, name) is not None
+
+
+def test_a_normal_socket_identity_is_accepted():
+    assert web_server._identity_error("alice", "Alice Smith") is None

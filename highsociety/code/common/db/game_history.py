@@ -473,6 +473,16 @@ _MAX_POOL_CONNECTIONS = 10
 _pool = None
 _pool_lock = threading.Lock()
 
+# One slot per pooled connection. psycopg2's pool doesn't queue: once all
+# _MAX_POOL_CONNECTIONS are lent out, getconn() raises "connection pool
+# exhausted" straight away, so a burst of visitors (each home-page load
+# fires ~5 API calls at once) turned into instant failures -- a false
+# "username taken" on guest sign-up, an empty leaderboard, even a
+# finished game's save giving up. _connect() waits here for a free slot
+# instead, and _release_connection() hands it back.
+_pool_slots = threading.Semaphore(_MAX_POOL_CONNECTIONS)
+_POOL_WAIT_SECONDS = 10
+
 
 def _get_pool():
     global _pool
@@ -549,6 +559,8 @@ def _connect():
     # installed psycopg2 — only actually needed once DATABASE_URL is set.
     import psycopg2  # noqa: F401 -- see _get_pool's own lazy psycopg2.pool import
     pool = _get_pool()
+    if not _pool_slots.acquire(timeout=_POOL_WAIT_SECONDS):
+        raise RuntimeError(f"no free database connection within {_POOL_WAIT_SECONDS}s")
     last_error = None
     for _ in range(_CONNECT_RETRY_ATTEMPTS):
         try:
@@ -567,6 +579,7 @@ def _connect():
         except Exception as e:  # noqa: BLE001 -- this specific connection is dead; discard it and try another
             last_error = e
             pool.putconn(conn, close=True)
+    _pool_slots.release()  # nothing was handed out, so no _release_connection() will follow
     raise last_error
 
 
@@ -581,13 +594,16 @@ def _release_connection(conn) -> None:
     clean, reusable state, never mid-transaction.
     """
     pool = _get_pool()
-    if conn.closed:
-        # Already dead (e.g. the network dropped mid-query) -- tell the
-        # pool to discard it outright rather than recycling a connection
-        # nothing could actually use.
-        pool.putconn(conn, close=True)
-    else:
-        pool.putconn(conn)
+    try:
+        if conn.closed:
+            # Already dead (e.g. the network dropped mid-query) -- tell the
+            # pool to discard it outright rather than recycling a connection
+            # nothing could actually use.
+            pool.putconn(conn, close=True)
+        else:
+            pool.putconn(conn)
+    finally:
+        _pool_slots.release()
 
 
 def ensure_schema() -> None:
@@ -1437,6 +1453,12 @@ def rename_player(old_username: str, new_username: str) -> bool:
         # The leaderboard lists players by username -- a renamed player
         # must not keep showing under the old name until the TTL.
         _invalidate_leaderboard_cache()
+        # Same for the per-username id/elo cache: left alone, the old name
+        # kept pointing at this account, so whoever claimed it next got
+        # this account's stats on their profile.
+        with _player_sessions_lock:
+            _player_sessions.pop(old_username, None)
+            _player_sessions.pop(new_username, None)
         return True
     except Exception as e:  # noqa: BLE001 -- includes a uniqueness-constraint race, deliberately not special-cased
         LoggingManager.warning(f"game_history.rename_player failed: {e}")

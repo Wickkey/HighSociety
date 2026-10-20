@@ -243,6 +243,8 @@ class GameRoom:
         # None at the top of every fresh game (including a rematch) so a
         # previous game's numbers can never leak into a new one's reveal.
         self.elo_changes: Optional[dict] = None
+        # sender -> recent chat/reaction timestamps, see _chat_allowed.
+        self.chat_times: dict[str, list[float]] = {}
 
     def touch(self) -> None:
         """Marks the room as recently active, so the reaper thread's idle
@@ -605,6 +607,20 @@ def _identify(ws, game_id: str, first_prompt: str, second_prompt: str):
 
 
 _MAX_USERNAME_LENGTH = 24
+# A display name arrives over the game socket, not through the sign-up
+# endpoints that check usernames, so it gets its own cap.
+_MAX_DISPLAY_NAME_LENGTH = 40
+
+
+def _identity_error(username: str, name: str) -> Optional[str]:
+    """Why this socket identity is unacceptable, or None if it's fine."""
+    if not isinstance(username, str) or not isinstance(name, str):
+        return "Username and name must be text."
+    if not username.strip() or len(username) > _MAX_USERNAME_LENGTH:
+        return f"Username must be 1-{_MAX_USERNAME_LENGTH} characters."
+    if not name.strip() or len(name) > _MAX_DISPLAY_NAME_LENGTH:
+        return f"Name must be 1-{_MAX_DISPLAY_NAME_LENGTH} characters."
+    return None
 
 
 def _verify_google_id_token(token: str) -> Optional[dict]:
@@ -1358,6 +1374,26 @@ def api_remove_seat():
 
 QUICK_REACTION_EMOJI = {"🗣️", "😂", "💀", "🔥", "🤔"}
 
+# Same 300 the chat inputs' own maxlength allows -- the server enforces it
+# too, since nothing stops a modified client from sending a megabyte to
+# everyone at the table.
+_MAX_CHAT_LENGTH = 300
+# At most this many chat messages/reactions per sender per window; extras
+# are dropped. Generous for real conversation, stops a flood.
+_CHAT_BURST = 5
+_CHAT_WINDOW_SECONDS = 5.0
+
+
+def _chat_allowed(room: "GameRoom", sender: str) -> bool:
+    now = time.time()
+    with room.lock:
+        recent = [t for t in room.chat_times.get(sender, []) if now - t < _CHAT_WINDOW_SECONDS]
+        allowed = len(recent) < _CHAT_BURST
+        if allowed:
+            recent.append(now)
+        room.chat_times[sender] = recent
+    return allowed
+
 
 def _relay_player_chat(username: str, room: GameRoom, msg: dict) -> None:
     """
@@ -1376,6 +1412,8 @@ def _relay_player_chat(username: str, room: GameRoom, msg: dict) -> None:
         emoji = msg.get("emoji", "")
         if emoji not in QUICK_REACTION_EMOJI:
             return  # ignore anything not from the fixed reaction set
+        if not _chat_allowed(room, username):
+            return
         for p in list(room.players):
             if isinstance(p, NetworkPlayer) and p.username != username and p.active:
                 p.send_message("", message_type="REACTION", from_user=username, data={"emoji": emoji})
@@ -1384,8 +1422,9 @@ def _relay_player_chat(username: str, room: GameRoom, msg: dict) -> None:
                 s.send_message("", message_type="REACTION", from_user=username, data={"emoji": emoji})
         return
     text = msg.get("prompt", "")
-    if not text:
+    if not isinstance(text, str) or not text or not _chat_allowed(room, username):
         return
+    text = text[:_MAX_CHAT_LENGTH]
     formatted = f"💬 {username}: {text}"
     for p in list(room.players):
         if isinstance(p, NetworkPlayer) and p.username != username and p.active:
@@ -1829,6 +1868,10 @@ def ws_player(ws):
     if identity is None:
         return
     username, name = identity
+    error = _identity_error(username, name)
+    if error:
+        _send(ws, game_id, "IDENTIFY_ERROR", error)
+        return
 
     with room.lock:
         if room.state != "lobby":
@@ -1889,8 +1932,9 @@ def _spectator_chat_listener(spectator: NetworkSpectator, room: GameRoom) -> Non
         if incoming_game_id is not None and incoming_game_id != room.game_id:
             continue
         text = msg.get("prompt", "")
-        if not text:
+        if not isinstance(text, str) or not text or not _chat_allowed(room, spectator.username):
             continue
+        text = text[:_MAX_CHAT_LENGTH]
         target = "spectators" if msg.get("target") == "spectators" else "all"
         # The message's own JSON carries `to_user(s)` structurally (see
         # protocol.py's _chat_payload), but no client renders that field —
@@ -1922,6 +1966,10 @@ def ws_spectate(ws):
     if identity is None:
         return
     name, username = identity
+    error = _identity_error(username, name)
+    if error:
+        _send(ws, game_id, "IDENTIFY_ERROR", error)
+        return
 
     transport = WebSocketTransport(ws, label=f"{username}@web-spectator")
     spectator = NetworkSpectator(transport=transport, name=name, username=username, game_id=game_id)
