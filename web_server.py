@@ -313,6 +313,9 @@ class GameRoom:
         self.elo_changes: Optional[dict] = None
         # sender -> recent chat/reaction timestamps, see _chat_allowed.
         self.chat_times: dict[str, list[float]] = {}
+        # seat username -> current Elo, for the seats that are rated (see
+        # _refresh_seat_ratings); shown next to each name at the table.
+        self.seat_ratings: dict[str, int] = {}
 
     def touch(self) -> None:
         """Marks the room as recently active, so the reaper thread's idle
@@ -326,7 +329,7 @@ class GameRoom:
             # bot (each name has a fixed one, see common/bot_roster.py),
             # None for a human or a heuristic bot.
             {"username": p.username, "name": p.name, "is_bot": not isinstance(p, NetworkPlayer),
-             "difficulty": getattr(p, "difficulty", None)}
+             "difficulty": getattr(p, "difficulty", None), "elo": self.seat_ratings.get(p.username)}
             for p in self.players
         ]
 
@@ -432,6 +435,29 @@ class GameRoom:
         threading.Thread(target=_run, daemon=True, name=f"Game-{self.game_id}").start()
 
 
+def _rated_username(player) -> Optional[str]:
+    """The players-table username a seat is rated under: a human's own
+    username, or a roster bot's namespaced identity (only when the seat
+    really is that roster bot -- same rule record_finished_game uses)."""
+    if isinstance(player, NetworkPlayer):
+        return player.username
+    roster_bot = bot_roster.find_by_name(player.name)
+    if roster_bot is not None and roster_bot.difficulty == getattr(player, "difficulty", None):
+        return bot_roster.roster_username(roster_bot)
+    return None
+
+
+def _refresh_seat_ratings(room: "GameRoom") -> None:
+    """Re-reads the current Elo of every rated seat into room.seat_ratings
+    -- called whenever the seats change, and once a game's ratings have
+    been written. One query; a no-op without a database."""
+    if not game_history.is_configured():
+        return
+    rated = {p.username: _rated_username(p) for p in list(room.players)}
+    elo_by_rated = game_history.get_display_ratings([u for u in rated.values() if u])
+    room.seat_ratings = {seat: elo_by_rated[r] for seat, r in rated.items() if r in elo_by_rated}
+
+
 def _record_game_history(room: "GameRoom", game: PlayGame, started_at: datetime.datetime) -> None:
     """Translates this finished game into the plain-dict shape game_history
     expects (see its own docstring for the schema/rationale), then hands off
@@ -488,6 +514,7 @@ def _record_game_history(room: "GameRoom", game: PlayGame, started_at: datetime.
         # other room attribute it already reads that way.
         with room.lock:
             room.elo_changes = changes
+        _refresh_seat_ratings(room)  # so a rematch's table shows the new numbers
 
     game_history.record_finished_game_async(
         room_code=room.room_code,
@@ -1291,6 +1318,7 @@ def api_create_game():
                          visibility=visibility, turn_time_limit=turn_time_limit,
                          reveal_cards=reveal_cards, show_logs=show_logs,
                          host_username=host_username)
+    _refresh_seat_ratings(room)
     return jsonify(_status_payload(room))
 
 
@@ -1413,6 +1441,7 @@ def api_add_bot():
         room.bot_mix.append(bot_type)
         room.human_seats -= 1  # this seat is no longer reserved for a human
         room.touch()
+    _refresh_seat_ratings(room)
 
     if room.try_start():
         room.run_game()
@@ -1661,6 +1690,7 @@ def _maybe_start_rematch(room: "GameRoom") -> None:
         room.human_seats = len(eligible)
         room.state = "starting"
         room.touch()
+    _refresh_seat_ratings(room)
     for p in eligible:
         p.send_message("", message_type="REMATCH_STARTING",
                         data={"bot_mix": bot_mix, "seats": room.seats, "seed": room.seed,
@@ -1815,6 +1845,7 @@ def _send_opponent_roster(player: "NetworkPlayer | NetworkSpectator", room: "Gam
                 "is_bot": not isinstance(other, NetworkPlayer),
                 "active": other.active,
                 "status_cards": [summarize_card(c) for c in other.status_cards],
+                "elo": room.seat_ratings.get(other.username),
             },
         )
 
@@ -2014,6 +2045,7 @@ def ws_player(ws):
         room.rejoin_tokens[rejoin_token] = username
         room.touch()
 
+    _refresh_seat_ratings(room)
     _send(ws, game_id, "IDENTIFY_SUCCESS", f"Welcome {username}! Waiting for other players...",
           data={"rejoin_token": rejoin_token})
 

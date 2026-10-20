@@ -4,6 +4,13 @@
    former single style.css. */
 /* ---------------- game table layout ---------------- */
 
+/* A rated seat's new rating and change on the finished screen's standings
+   (see rematch.js's showTableEloChanges). */
+.standing-elo { margin-left: 0.45rem; font-size: 0.78rem; font-weight: 600; color: var(--muted); white-space: nowrap; }
+.standing-elo:empty { display: none; }
+.standing-elo.gain { color: var(--chip-money); }
+.standing-elo.loss { color: var(--danger); }
+
 .table-layout {
   display: grid;
   grid-template-columns: 2fr 1fr;
@@ -18,7 +25,14 @@
      gap 0: each panel already brings its own margin-bottom. */
   .table-layout { grid-template-columns: 1fr; row-gap: 0; }
   .table-layout > .center-col, .table-layout > .side-col { display: contents; }
-  .table-layout .log-details, .table-layout .chat-panel { order: 1; }
+  /* Who's bidding what comes straight after the card being auctioned --
+     it's what a bid decision is made from, so it can't sit below your
+     own move panel, off-screen while you choose. */
+  .table-layout .auction-panel { order: 0; }
+  .table-layout .opponents-panel { order: 1; }
+  .table-layout .move-panel { order: 2; }
+  .table-layout #my-panel { order: 3; }
+  .table-layout .log-details, .table-layout .chat-panel { order: 4; }
 }
 
 .side-col .panel { --panel-tint: var(--panel-bg-alt); }
@@ -511,6 +525,8 @@
 .opponent-row.inactive { opacity: 0.35; }
 .opponent-header { display: flex; justify-content: space-between; align-items: center; font-size: 0.9rem; margin-bottom: 0.35rem; gap: 0.5rem; }
 .opponent-header-left, .opponent-header-right { display: flex; align-items: center; gap: 0.4rem; min-width: 0; }
+.opp-elo { font-size: 0.75rem; font-weight: 600; color: var(--muted); font-variant-numeric: tabular-nums; }
+.opp-elo:empty { display: none; }
 .opponent-header .name { font-weight: 600; }
 /* A long name plus the bid badge (and, in the tutorial, the Spent tag) can
    outgrow the narrow sidebar: drop the right-hand group onto its own line,

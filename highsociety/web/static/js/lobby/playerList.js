@@ -100,7 +100,12 @@ function seatTileHtml(seat, index, canManage, selfUsername) {
   const botTag = seat.difficulty
     ? `${seat.difficulty.charAt(0).toUpperCase()}${seat.difficulty.slice(1)} bot`
     : 'Bot';
-  const nameHtml = seat.is_bot ? `${safeName}<span>${escapeHtml(botTag)}</span>` : safeName;
+  // Second line: a bot's difficulty, and a rated seat's Elo (Google-linked
+  // players and the named bots -- see web_server.py's _refresh_seat_ratings)
+  // so you can size up the table before it starts.
+  const details = [seat.is_bot ? botTag : null, seat.elo != null ? `${seat.elo} Elo` : null].filter(Boolean).join(' · ');
+  const nameHtml = `<strong class="lobby-seat-username" title="${safeName}">${safeName}</strong>`
+    + (details ? `<span>${escapeHtml(details)}</span>` : '');
   // The manager's own seat still gets an x -- clicking it just isn't a
   // kick (see initLobbySeatGrid's remove-seat handler): it shows a plain
   // inline "you can't kick yourself" rather than the "Kick {name}?"

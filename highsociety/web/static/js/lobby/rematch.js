@@ -17,7 +17,7 @@ import { ws } from '../network/websocket.js';
 import { game, resetGameState, seedOpponents, applyRoomDisplaySettings, rememberNames, nameOf } from '../game/gameState.js';
 import { ensureGameScreenVisible } from '../game/gameEvents.js';
 import { renderOpponents } from '../game/gameRenderer.js';
-import { loadProfile } from '../auth/profile.js';
+import { loadProfile, setSessionStatus } from '../auth/profile.js';
 import { prefetchAccountStats } from '../account/account.js';
 
 // Rematch panel state on the finished screen: null while no vote is
@@ -53,6 +53,7 @@ export function renderFinished(status) {
   }
   clearRejoinInfo(currentRoomCode()); // game's over — nothing left to reconnect to
   setGameFinished(true); // see lobby.js's own comment on why this can't just be inferred from the current screen
+  if (game.myUsername) setSessionStatus('finished');
   showScreen('screen-finished');
   // The money-eliminated player (see gameplay.py's determine_winner —
   // distinct from simply "didn't have the highest score") was never in
@@ -91,12 +92,13 @@ export function renderFinished(status) {
       : (s.active === false ? ' (left the game)' : '');
     return `
     <div class="standing-row ${state}" style="animation-delay: ${i * 90}ms">
-      <span class="name"><button type="button" class="name-link" data-open-profile data-username="${escapeHtml(s.username)}">${escapeHtml(nameOf(s.username))}</button>${tag}</span>
+      <span class="name"><button type="button" class="name-link" data-open-profile data-username="${escapeHtml(s.username)}">${escapeHtml(nameOf(s.username))}</button>${tag}<span class="standing-elo" data-elo-for="${escapeHtml(s.username)}"></span></span>
       <span>Points: ${s.points}</span>
       <span>Money left: ${s.money_left}</span>
     </div>`;
   }).join('');
   $('standings-table').innerHTML = rows || '<p class="muted">No standings available.</p>';
+  if (eloChangesGameId === status.game_id) showTableEloChanges(eloChangesForGame);
 
   currentRematch = status.rematch || null;
   rematchBotSeats = status.rematch_bot_seats || 0;
@@ -127,6 +129,26 @@ export function renderFinished(status) {
 // renderFinished's own comment on why a repeat call for the same game must
 // never restart it. null until the first finished render of any game.
 let revealedGameId = null;
+
+// The settled Elo changes for one game, kept so a repeat renderFinished
+// (which rebuilds the standings rows) can put them straight back.
+let eloChangesGameId = null;
+let eloChangesForGame = null;
+
+// Every rated seat's new rating and change, next to their name in the
+// standings -- your own big reveal card shows yours, but who gained or
+// lost how much at your table is part of the result too.
+function showTableEloChanges(changes) {
+  document.querySelectorAll('#standings-table [data-elo-for]').forEach((el) => {
+    const change = changes && changes[el.dataset.eloFor];
+    el.classList.remove('gain', 'loss');
+    if (!change) { el.textContent = ''; return; }
+    const delta = change.rating_change;
+    el.textContent = `${change.new_rating} (${delta > 0 ? '+' : ''}${delta})`;
+    if (delta > 0) el.classList.add('gain');
+    else if (delta < 0) el.classList.add('loss');
+  });
+}
 
 // A per-game token, bumped every time revealEloChange starts -- so a
 // rematch (which calls renderFinished again for a brand new game) can't
@@ -159,9 +181,12 @@ async function revealEloChange(initialStatus) {
   // the old budget, even though the actual rating write next to it
   // finishes in ~1s. This is comfortable headroom above that measured
   // worst case, not a guess.
+  //
+  // The save now usually lands within a few hundred ms, so the first few
+  // checks come quickly rather than all waiting a full 800ms.
   let changes = initialStatus.elo_changes;
-  for (let attempt = 0; attempt < 20 && (changes === undefined || changes === null); attempt++) {
-    await new Promise((resolve) => setTimeout(resolve, 800));
+  for (let attempt = 0; attempt < 24 && (changes === undefined || changes === null); attempt++) {
+    await new Promise((resolve) => setTimeout(resolve, attempt < 5 ? 300 : 800));
     if (token !== eloRevealToken) return; // superseded by a newer game (e.g. a rematch)
     try {
       const fresh = await fetchJSON(`/api/status?room=${encodeURIComponent(currentRoomCode())}`);
@@ -182,6 +207,10 @@ async function revealEloChange(initialStatus) {
   // Account visit is correct from the very first paint instead of
   // flashing the old value first.
   prefetchAccountStats();
+
+  eloChangesGameId = initialStatus.game_id;
+  eloChangesForGame = changes || {};
+  showTableEloChanges(eloChangesForGame);
 
   const mine = changes && changes[game.myUsername];
   const profile = loadProfile();

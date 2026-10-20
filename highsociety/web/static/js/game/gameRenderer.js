@@ -307,7 +307,7 @@ export function renderOpponents(isSpectator) {
       // so the bid badge sits directly next to the name it belongs to,
       // rather than floating in its own slot between the timer and points.
       row.innerHTML = '<div class="opponent-header">'
-        + '<div class="opponent-header-left"><span class="name"></span><span class="bid-badge"></span></div>'
+        + '<div class="opponent-header-left"><span class="name"></span><span class="opp-elo"></span><span class="bid-badge"></span></div>'
         + '<div class="opponent-header-right"><span class="opp-timer"></span><span class="spent-tag"></span><span class="pts"></span></div>'
         + '</div>'
         + '<div class="chip-row small"></div>';
@@ -335,6 +335,11 @@ export function renderOpponents(isSpectator) {
     if (o.active === false) statusSuffix = ' (out)';
     else if (o.outOfAuction) statusSuffix = ' (passed)';
     row.querySelector('.name').textContent = `${o.name}${statusSuffix}`;
+    // Rated seats only (Google-linked players and the named bots) -- the
+    // number you'd see on their profile, so you know who you're up against.
+    const eloEl = row.querySelector('.opp-elo');
+    eloEl.textContent = o.elo != null ? o.elo : '';
+    eloEl.title = o.elo != null ? 'Elo rating' : '';
     row.querySelector('.pts').textContent = ptsLabel;
     renderSpentTag(row.querySelector('.spent-tag'), username);
 

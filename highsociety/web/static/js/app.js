@@ -69,7 +69,8 @@ function wireStaticHandlers() {
   $('btn-login-continue').addEventListener('click', onLoginUsernameContinue);
   $('login-username').addEventListener('keydown', (e) => { if (e.key === 'Enter') onLoginUsernameContinue(); });
   document.querySelectorAll('.home-tile').forEach((btn) => {
-    btn.addEventListener('click', () => showHomeTile(btn.dataset.homeTarget));
+    // "play" is its own screen (matchmaking), not a panel of this one.
+    btn.addEventListener('click', () => (btn.dataset.homeTarget === 'play' ? onPlayClick() : showHomeTile(btn.dataset.homeTarget)));
   });
   $('sidebar-play').addEventListener('click', () => navigateFromSidebar(onPlayClick));
   $('sidebar-join').addEventListener('click', () => navigateFromSidebar(() => {

@@ -858,6 +858,34 @@ def get_player_elo(username: str) -> int:
     return session.elo if session is not None else _DEFAULT_ELO
 
 
+def get_display_ratings(usernames: list) -> dict:
+    """{username: elo} for whichever of `usernames` are actually rated --
+    Google-linked humans and bot identities (see bot_roster) -- for showing
+    ratings at the table. Guests are left out, matching how the rest of the
+    app treats them as unrated. {} with no database or on any error."""
+    if not usernames or not is_configured():
+        return {}
+    ensure_schema()
+    if not _schema_ready:
+        return {}
+    conn = None
+    try:
+        conn = _connect()
+        with conn, conn.cursor() as cur:
+            cur.execute(
+                "SELECT p.username, p.elo FROM players p WHERE p.username = ANY(%s) "
+                "AND (p.google_id IS NOT NULL OR EXISTS (SELECT 1 FROM bots b WHERE b.player_id = p.id))",
+                (sorted(set(usernames)),),
+            )
+            return {username: elo for username, elo in cur.fetchall()}
+    except Exception as e:  # noqa: BLE001
+        LoggingManager.warning(f"game_history.get_display_ratings failed: {e}")
+        return {}
+    finally:
+        if conn is not None:
+            _release_connection(conn)
+
+
 def get_player_achievements(username: str) -> list:
     """
     Unlocked achievement ids for `username` -- always [] for a guest

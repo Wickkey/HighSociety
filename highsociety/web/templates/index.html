@@ -805,6 +805,21 @@
           <button type="button" id="btn-start-tutorial" class="primary">Play guided game</button>
         </div>
         <div id="home-tiles" class="home-tiles">
+          <!-- The sidebar's first item, and the quickest way into a game:
+               a rated match against similarly-rated players, with "fill
+               with bots" if nobody's around. -->
+          <button type="button" class="home-tile home-tile-primary" data-home-target="play">
+            <span class="home-tile-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M7 4.5v15l12-7.5z"/>
+              </svg>
+            </span>
+            <span class="home-tile-text">
+              <span class="home-tile-title">Play Now</span>
+              <span class="home-tile-sub">Quick match, or fill the table with bots</span>
+            </span>
+            <svg class="home-tile-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18l6-6-6-6"/></svg>
+          </button>
           <button type="button" class="home-tile" data-home-target="join">
             <span id="home-tile-live-badge" class="home-tile-live-badge hidden"></span>
             <span class="home-tile-icon">
@@ -820,7 +835,7 @@
             </span>
             <svg class="home-tile-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18l6-6-6-6"/></svg>
           </button>
-          <button type="button" class="home-tile home-tile-primary" data-home-target="host">
+          <button type="button" class="home-tile" data-home-target="host">
             <span class="home-tile-icon">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                 <path d="M4 18 L5 10 L8.5 13.5 L12 6.5 L15.5 13.5 L19 10 L20 18 Z"/>
@@ -1514,7 +1529,7 @@
             </div>
           </div>
 
-          <div class="card panel">
+          <div class="card panel opponents-panel">
             <div class="panel-header-row">
               <h3>Opponents</h3>
               <span class="panel-header-status">

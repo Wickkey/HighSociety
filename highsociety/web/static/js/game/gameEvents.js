@@ -17,10 +17,16 @@ import {
 import { appendChatLine } from '../ui/chat.js';
 import { refreshStatus } from '../lobby/lobby.js';
 import { revealSpectateLiveLayout } from '../lobby/playerList.js';
+import { setSessionStatus } from '../auth/profile.js';
 
 export function ensureGameScreenVisible(isSpectator) {
   const id = isSpectator ? 'screen-spectate' : 'screen-game';
-  if ($(id).classList.contains('hidden')) showScreen(id);
+  if ($(id).classList.contains('hidden')) {
+    showScreen(id);
+    // The game (or a rematch) has actually started -- the header badge
+    // said "Waiting for players" / "Game over" until now.
+    if (!isSpectator) setSessionStatus('playing');
+  }
   // A real game message is the same "this is actually live now" signal a
   // player's own screen implicitly relies on -- see index.html's own
   // comment on #spectate-lobby-wait for the bug this replaces. A no-op
@@ -94,6 +100,7 @@ export function applyGameMessage(msg, isSpectator) {
           o.name = d.name;
           o.active = d.active;
           o.statusCards = d.status_cards;
+          if (d.elo != null) o.elo = d.elo;
           renderOpponents(isSpectator);
         }
       } else if (d && d.event === 'player_resigned') {

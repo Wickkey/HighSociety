@@ -85,7 +85,7 @@ export function handlePlayerMessage(msg) {
         $('join-form').classList.add('hidden');
         $('join-waiting').classList.remove('hidden');
         setSpectateLinkLabel(true); // now seated -- the link means giving that seat up, so it says so
-        setSessionStatus('playing');
+        setSessionStatus('waiting'); // becomes 'playing' once the game screen opens (ensureGameScreenVisible)
         startWaitingRoomPolling();
         if (msg.data && msg.data.rejoin_token) {
           saveRejoinInfo(currentRoomCode(), msg.data.rejoin_token, pendingJoin.username, pendingJoin.name);

@@ -1998,3 +1998,21 @@ def test_first_login_token_for_an_unclaimed_guest(database_url):
     insert_query, insert_params = cursor.execute.call_args.args
     assert "INSERT INTO player_logins" in insert_query
     assert insert_params == (game_history._hash_login_token(token), 42)
+
+
+def test_display_ratings_cover_only_rated_players(database_url):
+    game_history._schema_ready = True
+    conn, cursor = _fake_connection()
+    cursor.fetchall.return_value = [("alice", 1110), ("__bot_ziggy__", 1012)]
+    with patch.object(game_history, "_connect", return_value=conn):
+        result = game_history.get_display_ratings(["alice", "guest1", "__bot_ziggy__", "alice"])
+    assert result == {"alice": 1110, "__bot_ziggy__": 1012}
+    query, (usernames,) = cursor.execute.call_args.args
+    assert "google_id IS NOT NULL" in query and "FROM bots" in query  # guests are unrated
+    assert usernames == ["__bot_ziggy__", "alice", "guest1"]
+
+
+def test_display_ratings_are_empty_on_a_database_error(database_url):
+    game_history._schema_ready = True
+    with patch.object(game_history, "_connect", side_effect=RuntimeError("down")):
+        assert game_history.get_display_ratings(["alice"]) == {}

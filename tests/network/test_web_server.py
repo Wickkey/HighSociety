@@ -141,11 +141,12 @@ class ReconnectingWSClient(ScriptedWSClient):
 @pytest.fixture(autouse=True)
 def login_checks_unavailable(monkeypatch):
     """Several tests pretend a database is configured (is_configured ->
-    True) without one existing; the login-token check would then try to
-    reach it. Answer "can't tell" -- the same as no database -- unless a
-    test sets its own."""
+    True) without one existing; the login-token check and the seat-rating
+    lookup would then try to reach it. Answer "can't tell" / "nobody's
+    rated" -- the same as no database -- unless a test sets its own."""
     monkeypatch.setattr(game_history, "login_token_matches", lambda username, token: None)
     monkeypatch.setattr(game_history, "issue_login_token", lambda username: f"token-for-{username}")
+    monkeypatch.setattr(game_history, "get_display_ratings", lambda usernames: {})
 
 
 @pytest.fixture
@@ -2555,3 +2556,22 @@ def test_a_pre_token_guest_profile_can_upgrade_once(monkeypatch):
     assert first.status_code == 200 and first.get_json() == {"login_token": "fresh-token"}
     second = client.post("/api/auth/upgrade", json={"username": "RoseErza750"})
     assert second.status_code == 403
+
+
+def test_rated_seats_show_their_elo_at_the_table(monkeypatch):
+    """Google-linked humans and roster bots carry their current Elo in the
+    seat list; a guest (not returned by get_display_ratings) doesn't."""
+    monkeypatch.setattr(game_history, "is_configured", lambda: True)
+    asked = []
+
+    def ratings(usernames):
+        asked.extend(usernames)
+        return {u: 1234 for u in usernames if u.startswith("__bot_")}
+
+    monkeypatch.setattr(game_history, "get_display_ratings", ratings)
+    status = web_server.app.test_client().post(
+        "/api/create_game", json={"seats": 3, "bot_mix": ["medium"]}
+    ).get_json()
+    (bot,) = status["joined"]
+    assert bot["elo"] == 1234
+    assert asked and asked[0].startswith("__bot_")  # looked up under its rated identity, not the seat name
