@@ -64,7 +64,12 @@ function canManageSeats(status) {
   // open to anyone, exactly matching web_server.py's _is_room_host.
   if (!status.host_username) return true;
   const profile = loadProfile();
-  return !!profile && profile.username === status.host_username;
+  if (!profile) return false;
+  if (profile.username === status.host_username) return true;
+  // The host left the lobby: anyone still seated takes over (same rule as
+  // web_server.py's _is_room_host), so the table can still be filled.
+  const humans = (status.joined || []).filter((p) => !p.is_bot).map((p) => p.username);
+  return !humans.includes(status.host_username) && humans.includes(profile.username);
 }
 
 function seatTileHtml(seat, index, canManage, selfUsername) {

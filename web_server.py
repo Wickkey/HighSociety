@@ -1459,7 +1459,13 @@ def _is_room_host(room: "GameRoom", requester_username: Optional[str]) -> bool:
     been — this only *adds* a restriction where a host is actually known,
     it never takes away access nothing previously required.
     """
-    return room.host_username is None or requester_username == room.host_username
+    if room.host_username is None or requester_username == room.host_username:
+        return True
+    # The host has left the lobby (closing their tab frees their seat):
+    # whoever is still seated takes over, or nobody could ever add a bot
+    # and the table would wait forever for strangers to fill it.
+    seated = {p.username for p in room.players if isinstance(p, NetworkPlayer)}
+    return room.host_username not in seated and requester_username in seated
 
 
 @app.route("/api/add_bot", methods=["POST"])
