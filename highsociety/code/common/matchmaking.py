@@ -19,7 +19,17 @@ import uuid
 from dataclasses import dataclass
 from typing import Callable, Optional
 
-TIMEOUT_SECONDS = 30.0
+# After this long without a match, the waiting screen offers "fill with bots".
+TIMEOUT_SECONDS = 15.0
+# A waiting browser polls status() every ~1.2s. A ticket not polled for this
+# long belongs to a closed tab (no cancel ever arrives from one) and leaves
+# the queue -- otherwise it stayed forever, inflating the queue count and,
+# worse, getting matched with a real player who then waited in a lobby for
+# someone who was never coming.
+STALE_SECONDS = 10.0
+# How long a matched ticket is kept so its owner's next poll can still read
+# the room code, before it's dropped.
+MATCHED_RETENTION_SECONDS = 300.0
 
 
 @dataclass
@@ -30,6 +40,7 @@ class Ticket:
     seats: int
     created_at: float
     room_code: Optional[str] = None
+    last_seen_at: float = 0.0  # last status() poll (or join); see STALE_SECONDS
 
 
 _lock = threading.Lock()
@@ -40,10 +51,28 @@ def join(username: str, elo: int, seats: int) -> str:
     """Queues a player for a `seats`-sized match. Returns a ticket_id the
     client polls via status()."""
     ticket_id = uuid.uuid4().hex
+    now = time.time()
     with _lock:
         _tickets[ticket_id] = Ticket(ticket_id=ticket_id, username=username, elo=elo,
-                                      seats=seats, created_at=time.time())
+                                      seats=seats, created_at=now, last_seen_at=now)
     return ticket_id
+
+
+def _prune() -> None:
+    """Must be called with _lock held. Drops abandoned waiting tickets and
+    long-matched ones (see STALE_SECONDS / MATCHED_RETENTION_SECONDS)."""
+    now = time.time()
+    for ticket_id, t in list(_tickets.items()):
+        if t.room_code is None and now - t.last_seen_at > STALE_SECONDS:
+            del _tickets[ticket_id]
+        elif t.room_code is not None and now - t.last_seen_at > MATCHED_RETENTION_SECONDS:
+            del _tickets[ticket_id]
+
+
+def ticket_owner(ticket_id: str) -> Optional[str]:
+    with _lock:
+        ticket = _tickets.get(ticket_id or "")
+        return ticket.username if ticket else None
 
 
 def queue_depth(seats: int) -> int:
@@ -52,6 +81,7 @@ def queue_depth(seats: int) -> int:
     waiting_count, but readable without holding a ticket, for the
     pre-join "N players searching" hint on the matchmaking setup screen."""
     with _lock:
+        _prune()
         return sum(1 for t in _tickets.values() if t.seats == seats and t.room_code is None)
 
 
@@ -80,6 +110,8 @@ def status(ticket_id: str, create_room_fn: Callable[[list], str]) -> Optional[di
         ticket = _tickets.get(ticket_id)
         if ticket is None:
             return None
+        ticket.last_seen_at = time.time()
+        _prune()
         if ticket.room_code is None:
             _try_match(ticket.seats, create_room_fn)
             ticket = _tickets.get(ticket_id)  # _try_match may have just matched it
@@ -92,6 +124,37 @@ def status(ticket_id: str, create_room_fn: Callable[[list], str]) -> Optional[di
             "timed_out": ticket.room_code is None and (time.time() - ticket.created_at) >= TIMEOUT_SECONDS,
             "waiting_count": waiting_count,
         }
+
+
+def fill_with_bots(ticket_id: str, create_room_fn: Callable[[list, int], str]) -> Optional[str]:
+    """
+    The waiting screen's "fill with bots": starts a game now for this ticket
+    AND whoever else is waiting for the same table size (closest Elo first),
+    with bots in the remaining seats -- it used to seat only the requester,
+    leaving the others to keep waiting alone, so two people looking for a
+    game together never got one. create_room_fn(usernames, bot_count)
+    returns the room code; every included ticket is marked matched with it,
+    so the others' next status() poll takes them there. Returns the room
+    code, or None for an unknown ticket.
+    """
+    with _lock:
+        ticket = _tickets.get(ticket_id)
+        if ticket is None:
+            return None
+        if ticket.room_code is not None:
+            return ticket.room_code
+        ticket.last_seen_at = time.time()
+        _prune()
+        others = sorted(
+            (t for t in _tickets.values()
+             if t is not ticket and t.seats == ticket.seats and t.room_code is None),
+            key=lambda t: abs(t.elo - ticket.elo),
+        )[:ticket.seats - 1]
+        group = [ticket] + others
+        room_code = create_room_fn([t.username for t in group], ticket.seats - len(group))
+        for t in group:
+            t.room_code = room_code
+        return room_code
 
 
 def _try_match(seats: int, create_room_fn: Callable[[list], str]) -> None:

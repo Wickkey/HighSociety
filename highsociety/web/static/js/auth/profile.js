@@ -5,6 +5,7 @@ import { PROFILE_STORAGE_KEY } from '../utils/constants.js';
 // Circular with lobby.js (lobby.js needs loadProfile) -- safe, both sides
 // only touch these inside function bodies, never at module-evaluation time.
 import { applyJoinIdentityDefaults, clearCurrentRoomCode } from '../lobby/lobby.js';
+import { confirmDialog } from '../ui/modals.js';
 
 function readCookie(key) {
   const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -210,7 +211,20 @@ function clearSavedProfile() {
   writeCookie(PROFILE_STORAGE_KEY, '', -1);
 }
 
-export function onLogout() {
+export async function onLogout() {
+  const profile = loadProfile();
+  if (profile && !profile.google_id) {
+    // A guest's name is reserved for them, but logging out throws away the
+    // only proof it's theirs (the login token) -- there's no way back to
+    // it or its game history afterwards, so say so first.
+    closeProfilePopover();
+    const ok = await confirmDialog(
+      `You're playing as a guest. If you log out, you can't get back to "${profile.username}" or its game history. `
+      + 'Sign in with Google next time to keep your account across devices.',
+      'Log out',
+    );
+    if (!ok) return;
+  }
   clearSavedProfile();
   closeProfilePopover();
   renderProfileChip();

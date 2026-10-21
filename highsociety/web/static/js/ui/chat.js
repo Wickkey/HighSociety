@@ -1,6 +1,6 @@
 // Player/spectator chat log + send handlers.
 import { $ } from '../utils/dom.js';
-import { ws } from '../network/websocket.js';
+import { sendIfOpen } from '../network/websocket.js';
 
 // A CHAT message is never echoed back to its own sender over the wire (see
 // docs/PLAYING.md) — that's a relay-layer rule to avoid double-delivery, not a
@@ -18,12 +18,15 @@ export function appendChatLine(elId, text) {
 export function onSpecChatSend() {
   const input = $('spec-chat-input');
   const text = input.value.trim();
-  if (!text || !ws) return;
+  if (!text) return;
   // See web_server.py's _spectator_chat_listener: "spectators" reaches only
   // other spectators, anything else (including omitting the field) reaches
   // everyone — players included.
   const target = $('spec-chat-target-toggle').checked ? 'spectators' : 'all';
-  ws.send(JSON.stringify({ message_type: 'CHAT', prompt: text, target }));
+  if (!sendIfOpen({ message_type: 'CHAT', prompt: text, target })) {
+    appendChatLine('spec-chat-log', 'Not connected, so that message wasn\'t sent.');
+    return;
+  }
   appendChatLine('spec-chat-log', `💬 You${target === 'spectators' ? ' (spectators only)' : ''}: ${text}`);
   input.value = '';
 }
@@ -31,12 +34,15 @@ export function onSpecChatSend() {
 export function onPlayerChatSend() {
   const input = $('player-chat-input');
   const text = input.value.trim();
-  if (!text || !ws) return;
+  if (!text) return;
   // Reaches every other player + all spectators (see web_server.py's
   // _relay_player_chat) — no "target" selector for players, unlike
   // spectators, since chatting to a subset of the table doesn't make sense
   // from a player's own seat.
-  ws.send(JSON.stringify({ message_type: 'CHAT', prompt: text }));
+  if (!sendIfOpen({ message_type: 'CHAT', prompt: text })) {
+    appendChatLine('player-chat-log', 'Not connected, so that message wasn\'t sent.');
+    return;
+  }
   appendChatLine('player-chat-log', `💬 You: ${text}`);
   input.value = '';
 }

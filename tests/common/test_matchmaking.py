@@ -113,3 +113,55 @@ def test_cancel_does_not_unmatch_an_already_matched_ticket():
 
     matchmaking.cancel(a)
     assert matchmaking.status(a, _no_room_expected)["matched"] is True
+
+
+def test_an_abandoned_ticket_leaves_the_queue():
+    """A closed tab never sends a cancel; a ticket that stops polling must
+    not keep counting as waiting, nor get matched with a real player."""
+    ghost = matchmaking.join("ghost", 1000, 2)
+    matchmaking._tickets[ghost].last_seen_at = time.time() - matchmaking.STALE_SECONDS - 1
+    real = matchmaking.join("real", 1000, 2)
+
+    result = matchmaking.status(real, _no_room_expected)
+
+    assert result["matched"] is False
+    assert matchmaking.queue_depth(2) == 1
+    assert matchmaking.status(ghost, _no_room_expected) is None
+
+
+def test_fill_with_bots_brings_everyone_waiting_for_that_table():
+    a = matchmaking.join("alice", 1000, 4)
+    matchmaking.join("bob", 1100, 4)
+    matchmaking.join("other-table", 1000, 3)
+    rooms = []
+
+    def create_room(usernames, bot_count):
+        rooms.append((sorted(usernames), bot_count))
+        return "ROOM1"
+
+    assert matchmaking.fill_with_bots(a, create_room) == "ROOM1"
+    assert rooms == [(["alice", "bob"], 2)]
+    assert matchmaking.queue_depth(4) == 0
+    assert matchmaking.queue_depth(3) == 1
+
+
+def test_fill_with_bots_takes_the_closest_ratings_up_to_the_table_size():
+    a = matchmaking.join("alice", 1000, 3)
+    for name, elo in (("far", 1600), ("near", 1010), ("mid", 1200)):
+        matchmaking.join(name, elo, 3)
+    seated = []
+    matchmaking.fill_with_bots(a, lambda usernames, bots: seated.extend(usernames) or "R")
+    assert sorted(seated) == ["alice", "mid", "near"]
+
+
+def test_fill_with_bots_alone_fills_every_other_seat():
+    a = matchmaking.join("alice", 1000, 3)
+    made = []
+    matchmaking.fill_with_bots(a, lambda usernames, bots: made.append((usernames, bots)) or "R")
+    assert made == [(["alice"], 2)]
+
+
+def test_fill_with_bots_for_an_already_matched_ticket_returns_its_room():
+    a = matchmaking.join("alice", 1000, 3)
+    matchmaking.fill_with_bots(a, lambda usernames, bots: "R1")
+    assert matchmaking.fill_with_bots(a, lambda usernames, bots: pytest.fail("no second room")) == "R1"

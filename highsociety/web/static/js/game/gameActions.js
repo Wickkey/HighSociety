@@ -1,7 +1,7 @@
 // User-initiated actions from the live game screen: bid, pass, discard,
 // resign, quick reactions.
 import { $, hide, showError } from '../utils/dom.js';
-import { ws, attemptReconnect, closeSocket } from '../network/websocket.js';
+import { ws, attemptReconnect, closeSocket, sendIfOpen } from '../network/websocket.js';
 import { game, answerMyPrompt } from './gameState.js';
 import { clearMoveTimer, renderMovePanel, updateSelectedBidTotal, renderOpponents, clearSelectedBidVisual } from './gameRenderer.js';
 import { confirmDialog } from '../ui/modals.js';
@@ -215,7 +215,6 @@ export async function onResign() {
 // *other* players/spectators (mirroring CHAT's "every other" reach), so the
 // sender shows their own bubble locally instead of waiting on a round trip.
 export function onQuickReactionClick(emoji) {
-  if (!ws || !game) return;
-  ws.send(JSON.stringify({ message_type: 'REACTION', emoji }));
+  if (!game || !sendIfOpen({ message_type: 'REACTION', emoji })) return;
   showReactionBubble(game.myUsername, emoji, false);
 }

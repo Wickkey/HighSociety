@@ -399,19 +399,38 @@ class NetworkPlayer(BasePlayer):
         # the same logical decision (see gameplay.py's own comment on
         # _current_move_seq).
         move_seq = getattr(self, '_current_move_seq', None)
+        # The room's per-move clock, set by gameplay.py the same way as
+        # _current_move_seq (None = untimed). This prompt used to have no
+        # clock at all, so in a timed room a player who walked away while
+        # owing a Faux Pas discard froze the whole table forever. When it
+        # runs out, the lowest painting goes -- the least costly choice.
+        timeout = getattr(self, '_current_move_timeout', None)
+        deadline = time.time() + timeout if timeout else None
+        self.discard_timed_out = False
         while True:
             try:
+                remaining = None if deadline is None else deadline - time.time()
+                if remaining is not None and remaining <= 0:
+                    self.discard_timed_out = True
+                    return min(paintings.values(), key=lambda p: p.value)
+                if remaining is not None:
+                    self.send_message(f"Time left: {remaining:.2f}s ⏰", message_type="PLAYER_MOVE_TIMER",
+                                       data={"seconds_remaining": remaining, "move_seq": move_seq})
                 self.send_message("Choose one to discard: ", message_type="PLAYER_MOVE", move_type="discard_painting",
                                    data={"move_seq": move_seq})
 
-                choice = self.transport.receive(timeout=None)
+                choice = self._receive_with_periodic_resync(remaining, move_seq)
 
                 if choice is None:
-                    # Connection closed or receiver stopped. No per-move
-                    # timer on this prompt, so the grace period is always
-                    # uncapped (remaining_turn_time=None) -- mirrors
-                    # get_bid()'s handling above, for the same reason.
-                    if self._wait_for_reconnect(None):
+                    if self.transport.is_connected:
+                        # The clock ran out with no answer (a disconnect is the
+                        # only other way to get None here).
+                        self.discard_timed_out = True
+                        return min(paintings.values(), key=lambda p: p.value)
+                    # Connection closed or receiver stopped -- mirrors
+                    # get_bid()'s handling above, bounded by whatever's left
+                    # of the clock (uncapped in an untimed room).
+                    if self._wait_for_reconnect(remaining):
                         continue  # re-sends "Choose one to discard" on the fresh transport
                     self.active = False
                     return None

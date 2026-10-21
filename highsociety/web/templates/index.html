@@ -1706,12 +1706,14 @@
               </div>
               <p id="rematch-bot-hint" class="hint"></p>
             </fieldset>
-            <p id="rematch-error" class="error hidden"></p>
             <div class="button-row">
               <button id="btn-send-rematch-request" class="primary">Send Rematch Request</button>
               <button id="btn-cancel-rematch-form" class="secondary">Cancel</button>
             </div>
           </div>
+          <!-- Outside the bot form so it can still show once that form is
+               closed (e.g. the connection dropped after a request). -->
+          <p id="rematch-error" class="error hidden"></p>
           <div id="rematch-status" class="rematch-status hidden">
             <p id="rematch-status-text"></p>
             <div id="rematch-vote-actions" class="button-row hidden">

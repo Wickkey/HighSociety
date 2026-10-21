@@ -182,18 +182,20 @@ export function onMatchmakingCancel() {
   startRoomsPolling();
 }
 
-// Reuses the normal host-a-game path (/api/create_game) rather than
-// inventing a second way to seat bots -- "medium" matches the web
-// lobby's own default difficulty for the waiting-room's "Add a bot"
-// picker, since this screen has no UI of its own to choose one.
+// Everyone else waiting for this table size comes along, and bots take
+// the remaining seats (see matchmaking.fill_with_bots) -- this used to
+// create a room for just this player, leaving the others to wait alone.
 export async function onMatchmakingAddBots() {
-  cancelMatchmakingTicketQuietly();
-  const seats = matchmakingSeats || 3;
+  const ticketId = matchmakingTicketId;
+  if (!ticketId) return;
+  stopMatchmakingPolling();
+  stopMatchmakingElapsedTimer();
+  matchmakingTicketId = null;
   try {
-    const room = await fetchJSON('/api/create_game', {
+    const room = await fetchJSON('/api/matchmaking/fill', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ seats, bot_mix: Array(seats - 1).fill('medium'), visibility: 'private' }),
+      body: JSON.stringify({ ticket_id: ticketId, login_token: loginToken() }),
     });
     await enterJustMatchedRoom(room.room_code);
   } catch (e) {

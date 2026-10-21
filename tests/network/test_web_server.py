@@ -2634,3 +2634,40 @@ def test_the_privacy_policy_is_readable_without_signing_in():
     html = page.get_data(as_text=True)
     assert "Privacy Policy" in html and "github.com/Wickkey/HighSociety/issues" in html
     assert 'href="/privacy"' in client.get("/").get_data(as_text=True)  # linked from the app
+
+
+def test_matchmaking_fill_needs_the_ticket_owners_login_token(monkeypatch):
+    monkeypatch.setattr(game_history, "login_token_matches", _only_token("alice-token"))
+    client = web_server.app.test_client()
+    ticket = client.post("/api/matchmaking/join", json={
+        "username": "alice", "seats": 3, "login_token": "alice-token"}).get_json()["ticket_id"]
+    assert client.post("/api/matchmaking/fill", json={"ticket_id": ticket, "login_token": "guess"}).status_code == 403
+    room_code = client.post("/api/matchmaking/fill", json={"ticket_id": ticket, "login_token": "alice-token"}).get_json()["room_code"]
+    room = web_server._rooms[room_code]
+    assert room.seats == 3 and room.bot_mix == ["medium", "medium"] and room.human_seats == 1
+
+
+def test_once_the_host_leaves_the_lobby_a_seated_player_can_fill_seats():
+    """Closing the host's tab frees their seat; without a takeover nobody
+    could add a bot and the table waited forever for strangers."""
+    from highsociety.code.gamecore.player.networkplayer import NetworkPlayer
+    client = web_server.app.test_client()
+    room_code = client.post(
+        "/api/create_game", json={"seats": 3, "bot_mix": [], "host_username": "alice"}
+    ).get_json()["room_code"]
+    room = web_server._rooms[room_code]
+    bob = MagicMock(spec=NetworkPlayer)
+    bob.username, bob.name, bob.active = "bob", "bob", True
+    room.players.append(bob)
+
+    outsider = client.post("/api/add_bot", json={"room": room_code, "bot_type": "greedy", "requester_username": "carol"})
+    assert outsider.status_code == 403
+    seated = client.post("/api/add_bot", json={"room": room_code, "bot_type": "greedy", "requester_username": "bob"})
+    assert seated.status_code == 200
+
+    # The host coming back takes it back: bob no longer can.
+    alice = MagicMock(spec=NetworkPlayer)
+    alice.username, alice.name, alice.active = "alice", "alice", True
+    room.players.append(alice)
+    assert not web_server._is_room_host(room, "bob")
+    assert web_server._is_room_host(room, "alice")

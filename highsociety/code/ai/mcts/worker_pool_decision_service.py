@@ -22,12 +22,15 @@ import multiprocessing
 import threading
 import time
 from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import TimeoutError as FutureTimeoutError
 
 from highsociety.code.ai.mcts.decision_service import BotDecisionService
 from highsociety.code.ai.mcts.stateless_decision import decide_bid
 from highsociety.code.common.logger_module.logger.logging_manager import LoggingManager
 
-_DEFAULT_REQUEST_TIMEOUT_SECONDS = 15.0
+# Only a safety ceiling for untimed rooms now (a timed room waits out its
+# own turn clock) -- see decide_bid.
+_DEFAULT_REQUEST_TIMEOUT_SECONDS = 120.0
 _DEFAULT_IDLE_TIMEOUT_SECONDS = 300.0
 
 
@@ -89,28 +92,44 @@ class WorkerPoolBotDecisionService(BotDecisionService):
 
     def decide_bid(self, auction_history, event_log, live_state, username, config, rng,
                     difficulty: str = "custom", timeout=None):
-        # The smaller of this service's own configured pool-request budget
-        # and the caller's *actual* remaining turn time (see
-        # BotDecisionService.decide_bid's own comment for why that exists
-        # at all) -- a slow pool must never be allowed to run past the
-        # real turn clock just because request_timeout_seconds alone would
-        # have permitted it.
-        wait = self.request_timeout_seconds if timeout is None else min(timeout, self.request_timeout_seconds)
+        # A slow answer is not a failed one. Under load, decisions queue for
+        # this difficulty's workers, and recomputing a queued decision
+        # locally (what a timeout used to trigger) left the original still
+        # queued and running too: the same move computed twice on an
+        # already saturated CPU, which made the next request slower still.
+        # Measured live at 10 simultaneous games: hard-bot turns of 40-50s
+        # instead of the ~15s worst case without the pool. So: wait as long
+        # as the turn allows (or request_timeout_seconds, a safety ceiling,
+        # in an untimed room); a turn clock running out resolves to "pass",
+        # exactly like the in-process path. Only a pool that genuinely
+        # fails (a crashed worker, a pickling error) is recomputed locally.
+        wait = self.request_timeout_seconds if timeout is None else timeout
         started_at = time.time()
+        future = None
         try:
             pool = self._get_pool(difficulty)
             future = pool.submit(decide_bid, auction_history, event_log, live_state, username, config, rng)
             return future.result(timeout=wait)
-        except Exception as e:  # noqa: BLE001 -- any pool failure degrades to local, never crashes the game
+        except FutureTimeoutError:
+            future.cancel()  # still queued -> dropped from the queue; already running -> finishes, result unused
+            if timeout is not None:
+                LoggingManager.warning(
+                    f"pooled bot decision for {username!r} (difficulty={difficulty!r}) used its whole "
+                    f"{timeout:.2f}s turn; passing"
+                )
+                return "pass"
             LoggingManager.warning(
-                f"worker pool decide_bid failed for difficulty={difficulty!r}, falling back to local: {e}"
+                f"pooled bot decision for {username!r} (difficulty={difficulty!r}) took over "
+                f"{wait:.0f}s with no turn clock; computing locally"
             )
-            # Bounded the same way the base class's own local path is, by
-            # whatever's actually left of this player's turn *after*
-            # however long the pool attempt above already spent waiting --
-            # passing the original, full timeout again here would let a
-            # slow pool plus a slow local fallback add up to roughly
-            # double the real turn budget instead of respecting it.
+            return super().decide_bid(auction_history, event_log, live_state, username, config, rng,
+                                       difficulty=difficulty, timeout=None)
+        except Exception as e:  # noqa: BLE001 -- a broken pool degrades to local, never crashes the game
+            LoggingManager.warning(
+                f"worker pool decide_bid failed for difficulty={difficulty!r}, falling back to local: {e!r}"
+            )
+            # Bounded by whatever's actually left of this player's turn
+            # after the pool attempt -- see BotDecisionService.decide_bid.
             remaining = None if timeout is None else max(0.0, timeout - (time.time() - started_at))
             return super().decide_bid(auction_history, event_log, live_state, username, config, rng,
                                        difficulty=difficulty, timeout=remaining)

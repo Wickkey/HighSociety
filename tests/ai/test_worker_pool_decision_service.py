@@ -102,25 +102,76 @@ class TestFallback:
                                      difficulty="easy")
         assert action == "pass" or (isinstance(action, list) and len(action) == 1 and isinstance(action[0], int))
 
-    def test_falls_back_when_the_future_times_out(self):
-        history, live_state = _history_and_live_state()
-        service = WorkerPoolBotDecisionService(pool_size=1, request_timeout_seconds=10.0)
+    @staticmethod
+    def _queued_forever_pool():
+        """A pool whose answer never arrives in time -- a long queue."""
+        cancelled = []
 
-        class NeverFinishes:
+        class Queued:
             def result(self, timeout=None):
-                import concurrent.futures
-                raise concurrent.futures.TimeoutError()
+                raise TimeoutError()
+
+            def cancel(self):
+                cancelled.append(True)
+                return True
 
         class SlowPool:
             def submit(self, *args, **kwargs):
-                return NeverFinishes()
+                return Queued()
 
-        service._pools["easy"] = SlowPool()
+        return SlowPool(), cancelled
+
+    def test_a_timed_turn_that_runs_out_passes_without_recomputing(self, monkeypatch):
+        """Recomputing a queued decision locally doubled the work on an
+        already saturated CPU (hard-bot turns of 40-50s at 10 games). When
+        the turn clock runs out, the bot passes -- like the in-process path
+        -- and the queued request is cancelled."""
+        history, live_state = _history_and_live_state()
+        service = WorkerPoolBotDecisionService(pool_size=1)
+        pool, cancelled = self._queued_forever_pool()
+        service._pools["hard"] = pool
+        service._last_used_at["hard"] = time.time()
+        monkeypatch.setattr("highsociety.code.ai.mcts.decision_service.BotDecisionService.decide_bid",
+                            lambda *a, **k: pytest.fail("must not recompute locally"))
+
+        action = service.decide_bid(history, [], live_state, "bot", _TINY_CONFIG, random.Random(1),
+                                     difficulty="hard", timeout=0.1)
+        assert action == "pass"
+        assert cancelled == [True]
+
+    def test_a_timed_turn_waits_for_the_pool_up_to_its_own_clock(self):
+        """Not request_timeout_seconds: a queued answer that arrives within
+        the turn is used, however long it took."""
+        history, live_state = _history_and_live_state()
+        service = WorkerPoolBotDecisionService(pool_size=1, request_timeout_seconds=0.01)
+        waited = []
+
+        class Answer:
+            def result(self, timeout=None):
+                waited.append(timeout)
+                return [4]
+
+        class Pool:
+            def submit(self, *args, **kwargs):
+                return Answer()
+
+        service._pools["hard"] = Pool()
+        service._last_used_at["hard"] = time.time()
+        assert service.decide_bid(history, [], live_state, "bot", _TINY_CONFIG, random.Random(1),
+                                   difficulty="hard", timeout=30.0) == [4]
+        assert waited == [30.0]
+
+    def test_an_untimed_room_falls_back_locally_only_past_the_safety_ceiling(self):
+        history, live_state = _history_and_live_state()
+        service = WorkerPoolBotDecisionService(pool_size=1, request_timeout_seconds=0.05)
+        pool, cancelled = self._queued_forever_pool()
+        service._pools["easy"] = pool
         service._last_used_at["easy"] = time.time()
 
         action = service.decide_bid(history, [], live_state, "bot", _TINY_CONFIG, random.Random(1),
                                      difficulty="easy")
         assert action == "pass" or (isinstance(action, list) and len(action) == 1 and isinstance(action[0], int))
+        assert cancelled == [True]
 
 
 class TestBaseServiceIgnoresDifficulty:
