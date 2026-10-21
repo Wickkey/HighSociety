@@ -23,6 +23,16 @@ export function wsUrl(path) {
   return `${proto}//${location.host}${path}`;
 }
 
+// Sends `payload` if the connection is open, and says whether it did. A
+// closed socket drops a send silently and a still-connecting one throws, so
+// a chat line or rematch vote sent through a dead connection either looked
+// sent or did nothing at all; callers now tell the player instead.
+export function sendIfOpen(payload) {
+  if (!ws || ws.readyState !== WebSocket.OPEN) return false;
+  ws.send(JSON.stringify(payload));
+  return true;
+}
+
 export function closeSocket() {
   if (ws) { ws.close(); ws = null; }
 }

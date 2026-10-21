@@ -13,7 +13,7 @@ import { $, hide, show, showError, showScreen } from '../utils/dom.js';
 import { escapeHtml } from '../utils/formatting.js';
 import { clearRejoinInfo, currentRoomCode, fetchJSON, lastStatus, loadRejoinInfo, setGameFinished } from './lobby.js';
 import { openProfileModal } from '../ui/modals.js';
-import { ws } from '../network/websocket.js';
+import { ws, sendIfOpen } from '../network/websocket.js';
 import { game, resetGameState, seedOpponents, applyRoomDisplaySettings, rememberNames, nameOf } from '../game/gameState.js';
 import { ensureGameScreenVisible } from '../game/gameEvents.js';
 import { renderOpponents } from '../game/gameRenderer.js';
@@ -356,17 +356,26 @@ export function onSendRematchRequest() {
   sendRematchRequest(botMix);
 }
 
+// The rematch panel only shows while the socket is open (see
+// renderRematchPanel), but the connection can still drop while it's on
+// screen -- a click then used to throw and silently do nothing.
+function sendRematchMessage(payload) {
+  if (sendIfOpen(payload)) return true;
+  showError($('rematch-error'), 'Connection lost, so the rematch can\'t go ahead. Return to Home to start a new game.');
+  return false;
+}
+
 function sendRematchRequest(botMix) {
   hide($('rematch-bot-form'));
-  ws.send(JSON.stringify({ message_type: 'REMATCH_REQUEST', data: { bot_mix: botMix } }));
+  sendRematchMessage({ message_type: 'REMATCH_REQUEST', data: { bot_mix: botMix } });
 }
 
 export function onAcceptRematch() {
-  ws.send(JSON.stringify({ message_type: 'REMATCH_VOTE', data: { accept: true } }));
+  sendRematchMessage({ message_type: 'REMATCH_VOTE', data: { accept: true } });
 }
 
 export function onDeclineRematch() {
-  ws.send(JSON.stringify({ message_type: 'REMATCH_VOTE', data: { accept: false } }));
+  sendRematchMessage({ message_type: 'REMATCH_VOTE', data: { accept: false } });
 }
 
 function showRematchDeclinedNotice(declinedBy) {
