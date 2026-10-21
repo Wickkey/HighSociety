@@ -969,7 +969,7 @@ def api_auth_username_change():
 
 # --------------------------------------------------------- matchmaking --
 
-def _create_matchmaking_room(usernames: list[str]) -> str:
+def _create_matchmaking_room(usernames: list[str], bot_count: int = 0) -> str:
     """
     The create_room_fn matchmaking.py's status()/_try_match() call once
     enough similarly-rated players are waiting -- this is the one place
@@ -979,8 +979,9 @@ def _create_matchmaking_room(usernames: list[str]) -> str:
     code, no bots (every seat is a real matched human), no turn timer by
     default -- same as a plain hosted game.
     """
-    room = _create_room(seats=len(usernames), bot_mix=[], seed=None, bot_think_time=1.5,
-                         visibility="private")
+    room = _create_room(seats=len(usernames) + bot_count, bot_mix=["medium"] * bot_count, seed=None,
+                         bot_think_time=1.5, visibility="private")
+    _refresh_seat_ratings(room)
     return room.room_code
 
 
@@ -1013,6 +1014,24 @@ def api_matchmaking_status():
     if result is None:
         return jsonify({"error": "Unknown or cancelled matchmaking ticket."}), 404
     return jsonify(result)
+
+
+@app.route("/api/matchmaking/fill", methods=["POST"])
+def api_matchmaking_fill():
+    """The waiting screen's "fill with bots and start" -- see
+    matchmaking.fill_with_bots: everyone waiting for this table size comes
+    along, and bots ("medium", the lobby's default) take the rest."""
+    body = request.get_json(silent=True) or {}
+    ticket_id = body.get("ticket_id")
+    owner = matchmaking.ticket_owner(ticket_id)
+    if owner is None:
+        return jsonify({"error": "Unknown or cancelled matchmaking ticket."}), 404
+    if _identity_rejected(owner, body.get("login_token")):
+        return jsonify({"error": _SIGN_IN_AGAIN}), 403
+    room_code = matchmaking.fill_with_bots(ticket_id, _create_matchmaking_room)
+    if room_code is None:
+        return jsonify({"error": "Unknown or cancelled matchmaking ticket."}), 404
+    return jsonify({"room_code": room_code})
 
 
 @app.route("/api/matchmaking/cancel", methods=["POST"])

@@ -2634,3 +2634,14 @@ def test_the_privacy_policy_is_readable_without_signing_in():
     html = page.get_data(as_text=True)
     assert "Privacy Policy" in html and "github.com/Wickkey/HighSociety/issues" in html
     assert 'href="/privacy"' in client.get("/").get_data(as_text=True)  # linked from the app
+
+
+def test_matchmaking_fill_needs_the_ticket_owners_login_token(monkeypatch):
+    monkeypatch.setattr(game_history, "login_token_matches", _only_token("alice-token"))
+    client = web_server.app.test_client()
+    ticket = client.post("/api/matchmaking/join", json={
+        "username": "alice", "seats": 3, "login_token": "alice-token"}).get_json()["ticket_id"]
+    assert client.post("/api/matchmaking/fill", json={"ticket_id": ticket, "login_token": "guess"}).status_code == 403
+    room_code = client.post("/api/matchmaking/fill", json={"ticket_id": ticket, "login_token": "alice-token"}).get_json()["room_code"]
+    room = web_server._rooms[room_code]
+    assert room.seats == 3 and room.bot_mix == ["medium", "medium"] and room.human_seats == 1
