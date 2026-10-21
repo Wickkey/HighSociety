@@ -972,6 +972,10 @@ class PlayGame():
 
         if paintings:
             player._current_move_seq = self._next_move_sequence()
+            # The room's per-move clock applies to this decision too (an
+            # attribute, like _current_move_seq, so only a player that can
+            # actually block -- NetworkPlayer -- needs to look at it).
+            player._current_move_timeout = self.__TURN_DURATION
             started = time.monotonic()
             chosen = player.choose_painting_to_discard()
             if chosen is None:
@@ -979,7 +983,8 @@ class PlayGame():
                 return False
             player.discard_painting_card(chosen.value)
             self._log_action(player, "discard", chosen.value,
-                             think_ms=int((time.monotonic() - started) * 1000))
+                             think_ms=int((time.monotonic() - started) * 1000),
+                             reason="timeout" if getattr(player, "discard_timed_out", False) else None)
             self._pace_toast_event()
             self.host.send_message(
                 f"🎨 {player.username} discarded a painting due to Faux Pas.",

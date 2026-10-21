@@ -114,6 +114,35 @@ def test_choose_painting_to_discard_parses_the_response_dict_correctly(player_an
     assert chosen.value == 7
 
 
+def test_a_timed_discard_with_no_answer_drops_the_lowest_painting(player_and_peer):
+    """In a timed room the discard prompt used to wait forever, freezing
+    the table when the player walked away. Now the room's clock applies, and
+    running out of it discards the least valuable painting."""
+    player, _peer = player_and_peer
+    player.add_status_card(Painting(value=7))
+    player.add_status_card(Painting(value=3))
+    player.add_status_card(Painting(value=9))
+    player._current_move_timeout = 0.3
+
+    chosen = player.choose_painting_to_discard()
+
+    assert chosen.value == 3
+    assert player.discard_timed_out is True
+
+
+def test_a_timed_discard_answered_in_time_is_used(player_and_peer):
+    player, peer = player_and_peer
+    player.add_status_card(Painting(value=7))
+    player.add_status_card(Painting(value=3))
+    player._current_move_timeout = 5.0
+
+    _send_response(peer, "7")
+    chosen = player.choose_painting_to_discard()
+
+    assert chosen.value == 7
+    assert player.discard_timed_out is False
+
+
 def test_choose_painting_to_discard_reprompts_on_invalid_choice(player_and_peer):
     player, peer = player_and_peer
     player.add_status_card(Painting(value=5))
