@@ -139,6 +139,10 @@ def _cache_versioned_assets(response):
 # its own way (Render/Railway/etc.), so this only ever matters for local dev.
 load_dotenv()
 
+# Set the logger up now, on the importing thread, rather than lazily from
+# whichever request or game thread logs first (see LoggingManager.__new__).
+LoggingManager._ensure_initialized()
+
 # No-op unless DATABASE_URL is set (see game_history's module docstring) —
 # safe to call unconditionally on every process start, including once per
 # gunicorn worker in production.
@@ -356,21 +360,26 @@ class GameRoom:
             # Elo reveal data would otherwise be readable as if it belonged
             # to the game that's only just starting now.
             self.elo_changes = None
-            game = PlayGame(players=self.players, spectators=self.spectators,
-                             mode='network', game_id=self.game_id, seed=self.seed,
-                             turn_duration=self.turn_time_limit,
-                             auction_history=self.auction_history)
-            self.game = game
-            # A player who joined before someone else otherwise has no way
-            # to know that other seat exists until some in-auction event
-            # happens to name them by chance (see _send_opponent_roster) —
-            # tell everyone about the full, already-seated table up front.
-            for p in self.players:
-                if isinstance(p, NetworkPlayer):
-                    _send_opponent_roster(p, self)
-            _broadcast_spectator_count(self)
-            self.state = "in_progress"
+            # Setting the game up is inside the same guard as playing it: a
+            # failure here used to escape the thread entirely, leaving the
+            # room "starting" forever with every player waiting on a game
+            # that would never begin (seen live: a logger race right after a
+            # restart killed 9 of 10 simultaneously starting games).
             try:
+                game = PlayGame(players=self.players, spectators=self.spectators,
+                                mode='network', game_id=self.game_id, seed=self.seed,
+                                turn_duration=self.turn_time_limit,
+                                auction_history=self.auction_history)
+                self.game = game
+                # A player who joined before someone else otherwise has no way
+                # to know that other seat exists until some in-auction event
+                # happens to name them by chance (see _send_opponent_roster) —
+                # tell everyone about the full, already-seated table up front.
+                for p in self.players:
+                    if isinstance(p, NetworkPlayer):
+                        _send_opponent_roster(p, self)
+                _broadcast_spectator_count(self)
+                self.state = "in_progress"
                 game.play_game()
             except Exception:
                 # A crash in the game thread must not strand the room

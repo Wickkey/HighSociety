@@ -2671,3 +2671,29 @@ def test_once_the_host_leaves_the_lobby_a_seated_player_can_fill_seats():
     room.players.append(alice)
     assert not web_server._is_room_host(room, "bob")
     assert web_server._is_room_host(room, "alice")
+
+
+def test_a_failure_while_setting_up_the_game_also_closes_the_room(running_web_server, monkeypatch):
+    """PlayGame's own construction used to sit outside the game thread's
+    crash guard: a failure there (a logger race right after a restart, seen
+    live) left the room 'starting' forever with its players waiting."""
+    port = running_web_server
+
+    def broken_init(self, *args, **kwargs):
+        raise AttributeError("simulated setup failure")
+
+    monkeypatch.setattr(web_server.PlayGame, "__init__", broken_init)
+    room_code = web_server.app.test_client().post(
+        "/api/create_game", json={"seats": 2, "bot_mix": ["pass"], "seed": 42, "bot_think_time": 0}
+    ).get_json()["room_code"]
+
+    player = ScriptedWSClient(_ws_url(port, f"/ws?room={room_code}"), "alice")
+    player.handshake()
+    player.start()
+
+    room = web_server._rooms[room_code]
+    deadline = time.time() + 10
+    while time.time() < deadline and room.state != "finished":
+        threading.Event().wait(0.1)
+    assert room.state == "finished"
+    player.close()
