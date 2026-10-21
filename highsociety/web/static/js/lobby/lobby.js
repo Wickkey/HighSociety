@@ -22,7 +22,8 @@ import { ws, closeSocket, attemptReconnect, connectPlayerSocket, connectSpectato
 import { setPendingJoin, setPendingSpectate } from '../network/messages.js';
 import { confirmDialog } from '../ui/modals.js';
 import { renderFinished } from './rematch.js';
-import { renderLobby, showSpectateForStatus } from './playerList.js';
+import { renderLobby, setSpectateLinkLabel, showSpectateForStatus } from './playerList.js';
+import { showToast } from '../ui/notifications.js';
 // Circular with account.js (which imports fetchJSON from here) -- safe by
 // this project's established convention (see gameState.js's identical
 // note): only ever used inside a function body below (refreshTutorialCta),
@@ -447,14 +448,24 @@ export function renderForStatus(status) {
       }
     }
     stopPolling();
+    if (hasResigned) {
+      // Straight into watching the rest of the game (results included) --
+      // it used to drop the player on this room's join screen, invite link
+      // and all, with the header badge still saying "Playing".
+      showToast('You resigned. Watching the rest of the game.');
+      onSpectateJoin();
+      return;
+    }
     showScreen('screen-join');
     $('join-form').classList.add('hidden');
     $('join-waiting').classList.add('hidden');
     hide($('lobby-seats-wrap')); // no real seat data worth showing once a game's already running
+    // Nor an invite box: there's no seat left to invite anyone to.
+    hide($('room-code-display'));
+    hide($('room-link-row'));
+    setSpectateLinkLabel(false); // no seat of yours to leave, either
     show($('lobby-status'));
-    $('lobby-status').textContent = hasResigned
-      ? "You resigned from this game. You can watch as a spectator."
-      : 'A game is already in progress. You can watch as a spectator.';
+    $('lobby-status').textContent = 'A game is already in progress. You can watch as a spectator.';
   }
 }
 
