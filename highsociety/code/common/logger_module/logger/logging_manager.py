@@ -41,8 +41,15 @@ class LoggingManager:
             with  cls._lock:
                 if cls._instance is None:
                     # another thread could have created the instance before we acquired the lock. So check that the instance is still nonexistent.
-                    cls._instance = super().__new__(cls)
+                    instance = super().__new__(cls)
                     cls._initialize(*args, **kwargs)
+                    # Published only once the loggers exist. Setting
+                    # _instance first let another thread see "initialized",
+                    # skip _ensure_initialized and log through a logger that
+                    # wasn't there yet -- an AttributeError that killed game
+                    # threads when several games started right after a
+                    # restart. Until this line, other threads wait on _lock.
+                    cls._instance = instance
         return cls._instance
 
     @classmethod
@@ -95,8 +102,13 @@ class LoggingManager:
         cls._generic_logger.addHandler(console_handler)
         cls._security_logger.addHandler(console_handler)
 
-        LoggingManager.set_level(log_level)
-        LoggingManager.info("Logger successfully initialized")
+        # Directly on the loggers, not via set_level()/info(): those call
+        # _ensure_initialized(), and _instance isn't published yet (see
+        # __new__) -- they'd try to initialize all over again.
+        level = logging._nameToLevel.get(str(log_level).upper(), logging.INFO)
+        cls._generic_logger.setLevel(level)
+        cls._security_logger.setLevel(level)
+        cls._generic_logger.info("Logger successfully initialized")
     
     def get_instance(cls):
         return cls._instance
