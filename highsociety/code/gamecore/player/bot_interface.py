@@ -51,7 +51,7 @@ class BotInterface(ABC):
     # there was paced by bot decision speed alone.
     MIN_THINK_TIME_SECONDS = 1.8
 
-    def _pace_think_time(self, timeout: Optional[float] = None) -> None:
+    def _pace_think_time(self, timeout: Optional[float] = None, started_at: Optional[float] = None) -> None:
         """
         Every bot subclass should call this instead of sleeping on its own
         `_think_time` directly, so the floor above is enforced in exactly
@@ -67,11 +67,20 @@ class BotInterface(ABC):
         larger than a short turn_time_limit) -- respecting the actual
         deadline takes priority over this pause's own "feels human"
         polish, so it's capped, never skipped outright.
+
+        started_at: when the decision began (time.time()), for a bot that
+        computes first and paces after -- the pause then only covers what's
+        left of the floor, so the floor and the thinking overlap instead of
+        adding up (see MCTSBot.get_bid). `timeout` is then the turn's full
+        budget, measured from that same moment.
         """
         desired = max(getattr(self, "_think_time", 0), self.MIN_THINK_TIME_SECONDS)
         if timeout is not None:
             desired = min(desired, max(timeout, 0))
-        time.sleep(desired)
+        if started_at is not None:
+            desired -= time.time() - started_at
+        if desired > 0:
+            time.sleep(desired)
 
     def get_auction_history(self) -> list[dict]:
         """

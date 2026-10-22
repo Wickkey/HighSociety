@@ -2,6 +2,7 @@ import time
 
 import pytest
 
+from highsociety.code.ai.mcts import decision_service
 from highsociety.code.ai.mcts.search import MCTSConfig
 from highsociety.code.ai.mcts_bot import DIFFICULTY_PRESETS, EasyMCTSBot, HardMCTSBot, MCTSBot, MediumMCTSBot
 from highsociety.code.ai.pass_bot import PassBot
@@ -78,7 +79,49 @@ class TestGetBid:
         game = _wire(slow_bot, other)
         _set_live_auction(game, Painting(value=5))
         slow_bot.get_bid()
-        assert 1.8 in sleeps
+        # Whatever's left of the 1.8s floor after the (tiny) search.
+        assert len(sleeps) == 1 and 1.5 < sleeps[0] <= 1.8
+
+    @staticmethod
+    def _bot_whose_search_takes(monkeypatch, search_seconds):
+        """A bot whose decision takes `search_seconds` of (fake) clock time."""
+        clock = {"now": 100.0}
+        monkeypatch.setattr(time, "time", lambda: clock["now"])
+        sleeps = []
+        monkeypatch.setattr(time, "sleep", lambda seconds: sleeps.append(seconds))
+
+        def decide(**kwargs):
+            clock["now"] += search_seconds
+            return "pass"
+
+        monkeypatch.setattr(decision_service.default_decision_service, "decide_bid", decide)
+        bot = MCTSBot(name="Bot", username="bot", config=_TINY_CONFIG, think_time=1.5)
+        _wire(bot, PassBot(name="Other", username="other"))
+        return bot, sleeps
+
+    def test_the_pause_overlaps_the_search_instead_of_adding_to_it(self, monkeypatch):
+        """A turn takes max(floor, search), not floor + search: a hard bot
+        used to wait the full 1.8s and only then search."""
+        bot, sleeps = self._bot_whose_search_takes(monkeypatch, 1.1)
+        assert bot.get_bid() == "pass"
+        assert sleeps == [pytest.approx(0.7)]
+
+    def test_a_search_longer_than_the_floor_adds_no_pause(self, monkeypatch):
+        bot, sleeps = self._bot_whose_search_takes(monkeypatch, 2.5)
+        bot.get_bid()
+        assert sleeps == []
+
+    def test_the_search_gets_the_whole_turn_budget(self, monkeypatch):
+        """With the pause after the search, the search is no longer handed
+        a budget already shortened by the pause."""
+        seen = []
+        monkeypatch.setattr(time, "sleep", lambda seconds: None)
+        monkeypatch.setattr(decision_service.default_decision_service, "decide_bid",
+                            lambda **kwargs: seen.append(kwargs["timeout"]) or "pass")
+        bot = MCTSBot(name="Bot", username="bot", config=_TINY_CONFIG)
+        _wire(bot, PassBot(name="Other", username="other"))
+        bot.get_bid(timeout=15.0)
+        assert seen == [15.0]
 
 
 class TestChoosePaintingToDiscard:

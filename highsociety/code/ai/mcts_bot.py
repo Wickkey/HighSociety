@@ -67,14 +67,11 @@ class MCTSBot(BasePlayer):
         pass
 
     def get_bid(self, timeout: Optional[float] = None) -> Union[list[int], str, None]:
+        # Search first, then wait out only what's left of the pacing floor:
+        # the turn takes max(floor, search) rather than floor + search. A
+        # hard bot used to pause the full 1.8s floor and only *then* search
+        # (~1.1s on the live server) -- a 2.9s turn that's now ~1.8s.
         started_at = time.time()
-        self._pace_think_time(timeout)
-        # Whatever's left of this turn's own budget *after* the pacing
-        # pause above -- passing the original, full timeout again here
-        # would let the pause and the actual search each separately run
-        # close to the full deadline, adding up to roughly double the
-        # real turn budget instead of respecting it.
-        remaining_timeout = None if timeout is None else max(0.0, timeout - (time.time() - started_at))
         # A fresh Random() per call, not a shared instance reused across
         # calls: this may cross a process boundary now (see
         # WorkerPoolBotDecisionService) -- pickling a shared rng sends a
@@ -99,7 +96,7 @@ class MCTSBot(BasePlayer):
         # silently did nothing -- no worker processes ever spawned, no
         # error either, since the code just kept quietly calling the
         # original in-process BotDecisionService instead.
-        return decision_service.default_decision_service.decide_bid(
+        decision = decision_service.default_decision_service.decide_bid(
             auction_history=self.get_current_auction_history(),
             event_log=self.get_auction_history(),
             live_state=self.get_live_auction_state(),
@@ -107,8 +104,10 @@ class MCTSBot(BasePlayer):
             config=self._config,
             rng=rng,
             difficulty=self._difficulty,
-            timeout=remaining_timeout,
+            timeout=timeout,
         )
+        self._pace_think_time(timeout, started_at=started_at)
+        return decision
 
     def choose_painting_to_discard(self) -> Optional[Painting]:
         my_status_cards = [summarize_card(c) for c in self.status_cards]
