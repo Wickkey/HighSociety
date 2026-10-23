@@ -9,18 +9,22 @@ _CARD_ROWS = [("Painting", v, 100 + v) for v in range(1, 11)] + [
     ("Prestige", 0, 111), ("FauxPas", 0, 112), ("Passe", 0, 113), ("Scandale", 0, 114)]
 
 
-def save_connection(players=None, bots=None, win_counts=None, leaderboard_rows=()):
+def save_connection(players=None, bots=None, win_counts=None, career=None, leaderboard_rows=()):
     """A fake connection for record_finished_game that answers each
     statement by what it is, not by call order (its writes are batched, so
     one statement covers every seat). `players`: username -> (player_id,
     google_id, elo) for the players upsert (unlisted usernames get fresh
     guest ids from 10 at 1000 elo); `bots`: bot_key -> (player_id, elo) for
     the bots lookup (unlisted keys are simply not found); `win_counts`:
-    player_id -> wins for the win-count milestones (default 1);
+    player_id -> wins for the win-count milestones (default 0); `career`:
+    player_id -> (games_played, wins, recent_wins) for every career
+    milestone at once (overrides win_counts; default: games = wins, all
+    of them recent);
     `leaderboard_rows` answers _warm_leaderboard_cache's query."""
     players = dict(players or {})
     bots = bots or {}
     win_counts = win_counts or {}
+    career = career or {}
     next_player_id = iter(range(10, 1000))
     next_round_id = iter(range(700, 1000))
     pending = {"one": [], "all": []}
@@ -37,8 +41,10 @@ def save_connection(players=None, bots=None, win_counts=None, leaderboard_rows=(
             rows = [(key, *bots[key]) for key in params[0] if key in bots]
         elif q.startswith("INSERT INTO games"):
             one = [(1,)]
-        elif "count(*) FROM player_games" in q:
-            rows = [(player_id, win_counts.get(player_id, 1)) for player_id in dict.fromkeys(params[0])]
+        elif "FROM player_games WHERE player_id = ANY" in q:
+            for player_id in dict.fromkeys(params[1]):
+                wins = win_counts.get(player_id, 0)
+                rows.append((player_id, *career.get(player_id, (wins, wins, min(wins, params[0])))))
         elif "FROM cards GROUP BY" in q:
             rows = list(_CARD_ROWS)
         elif q.startswith("INSERT INTO game_rounds"):

@@ -156,3 +156,77 @@ def test_fearless_not_awarded_if_the_winner_ever_passed():
     ]
     result = detect_per_game_achievements(_standings("alice", "bob"), {"bob"}, auctions, [])
     assert "fearless" not in result.get("bob", set())
+
+
+def _painting_win(username, value, paid, auction_type="normal"):
+    return {
+        "auction_type": auction_type, "card": {"type": "Painting", "value": value},
+        "recipient": username, "money_spent": {username: paid},
+        "events": [{"player": username, "action": "bid", "amount": paid}],
+    }
+
+
+def _scored(*rows):
+    """rows: (username, points, money_left, eliminated)"""
+    return [{"username": u, "points": p, "money_left": m, "active": True, "eliminated": e} for u, p, m, e in rows]
+
+
+def test_masterpiece_for_the_top_painting_only():
+    result = detect_per_game_achievements(_standings("alice", "bob"), set(),
+                                          [_painting_win("alice", 10, 4), _painting_win("bob", 9, 4)], [])
+    assert "masterpiece" in result["alice"]
+    assert "masterpiece" not in result.get("bob", set())
+
+
+def test_high_roller_needs_20_on_one_card():
+    result = detect_per_game_achievements(_standings("alice", "bob"), set(),
+                                          [_painting_win("alice", 5, 20), _painting_win("bob", 5, 19)], [])
+    assert "high_roller" in result["alice"]
+    assert "high_roller" not in result.get("bob", set())
+
+
+def test_clean_hands_lost_by_taking_a_disgrace_card():
+    disgrace = {
+        "auction_type": "disgrace", "card": {"type": "Passe", "value": 0},
+        "recipient": "bob", "money_spent": {"bob": 0}, "events": [{"player": "bob", "action": "pass"}],
+    }
+    result = detect_per_game_achievements(_standings("alice", "bob"), {"alice", "bob"}, [disgrace], [])
+    assert "clean_hands" in result["alice"]
+    assert "clean_hands" not in result["bob"]
+
+
+def test_landslide_and_photo_finish_margins_ignore_the_eliminated_player():
+    standings = _scored(("alice", 30, 10, False), ("bob", 20, 8, False), ("carol", 40, 1, True))
+    result = detect_per_game_achievements(standings, {"alice"}, [], ["easy", "easy"])
+    assert "landslide" in result["alice"]
+    assert "photo_finish" not in result["alice"]
+
+    standings = _scored(("alice", 21, 10, False), ("bob", 20, 8, False), ("carol", 40, 1, True))
+    result = detect_per_game_achievements(standings, {"alice"}, [], [])
+    assert "photo_finish" in result["alice"]
+    assert "landslide" not in result["alice"]
+
+
+def test_a_shared_win_is_a_photo_finish_for_both():
+    standings = _scored(("alice", 20, 10, False), ("bob", 20, 8, False))
+    result = detect_per_game_achievements(standings, {"alice", "bob"}, [], [])
+    assert "photo_finish" in result["alice"] and "photo_finish" in result["bob"]
+
+
+def test_narrow_escape_is_one_money_above_the_eliminated_player():
+    standings = _scored(("alice", 10, 5, False), ("bob", 10, 6, False), ("carol", 10, 4, True))
+    result = detect_per_game_achievements(standings, set(), [], [])
+    assert "narrow_escape" in result["alice"]
+    assert "narrow_escape" not in result.get("bob", set())
+
+
+def test_good_company_needs_another_human_and_hard_times_two_hard_bots():
+    standings = _standings("alice", "bob", "hard-1")
+    result = detect_per_game_achievements(standings, {"alice"}, [], ["hard"])
+    assert "good_company" in result["alice"]
+    assert "hard_times" not in result["alice"]
+
+    standings = _standings("alice", "hard-1", "hard-2")
+    result = detect_per_game_achievements(standings, {"alice"}, [], ["hard", "hard"])
+    assert "good_company" not in result["alice"]
+    assert "hard_times" in result["alice"]
