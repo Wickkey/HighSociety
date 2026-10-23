@@ -7,11 +7,12 @@ Two kinds of achievement, handled in two different places on purpose:
 - Per-game ones (everything except the win-count milestones below) are
   fully decidable from a single just-finished game's own data -- see
   detect_per_game_achievements.
-- Career ones (win counts, games played, a win streak) are cumulative
-  across a player's whole history, which only the database knows -- see
-  game_history.py's record_finished_game, which checks WIN_COUNT_MILESTONES,
-  GAMES_PLAYED_MILESTONES and WIN_STREAK against that player's totals after
-  this game's own row is already inserted.
+- Career ones (win/loss counts, games played, a win streak, Elo levels)
+  are cumulative across a player's whole history, which only the database
+  knows -- see game_history.py's record_finished_game, which checks
+  WIN_COUNT_MILESTONES, LOSS_COUNT_MILESTONES, GAMES_PLAYED_MILESTONES,
+  WIN_STREAK and ELO_MILESTONES against that player's totals and new
+  rating after this game's own row is already inserted.
 
 Every achievement needs data that only exists on the live game object
 (PlayGame.auction_rounds is never persisted -- see PlayGame.get_auction_
@@ -54,6 +55,20 @@ ACHIEVEMENTS: list[Achievement] = [
     Achievement("narrow_escape", "Narrow Escape", "Escape elimination with just 1 more money than the poorest player."),
     Achievement("good_company", "Good Company", "Win a game against another person."),
     Achievement("hard_times", "Hard Times", "Win a game with two or more Hard bots at the table."),
+    # Losing has its moments too.
+    Achievement("good_sport", "Good Sport", "Finish a game you didn't win."),
+    Achievement("thick_skin", "Thick Skin", "Lose 10 games."),
+    Achievement("so_close", "So Close", "Lose a game by a single point."),
+    Achievement("spent_it_all", "Spent It All", "Score the most points at the table, then get eliminated for having the least money."),
+    Achievement("bankrupt", "Bankrupt", "Finish a game with no money left."),
+    Achievement("wallflower", "Wallflower", "Finish a game without winning a single auction."),
+    Achievement("social_pariah", "Social Pariah", "Take a Faux Pas, a Passe and a Scandale in one game."),
+    Achievement("in_the_red", "In the Red", "Finish a game with a negative score."),
+    # Elo levels (players start at 1000).
+    Achievement("rising_star", "Rising Star", "Reach a rating of 1100."),
+    Achievement("connoisseur", "Connoisseur", "Reach a rating of 1200."),
+    Achievement("aristocrat", "Aristocrat", "Reach a rating of 1300."),
+    Achievement("living_legend", "Living Legend", "Reach a rating of 1500."),
 ]
 
 # username (cumulative win count) -> achievement id. Checked by
@@ -75,6 +90,18 @@ GAMES_PLAYED_MILESTONES: dict[int, str] = {
     50: "veteran",
 }
 WIN_STREAK: tuple[int, str] = (3, "on_a_roll")
+# Games finished without winning (games played minus wins).
+LOSS_COUNT_MILESTONES: dict[int, str] = {
+    10: "thick_skin",
+}
+# Rating after this game's own Elo change. Kept once reached, like every
+# other achievement, even if the rating later drops back below.
+ELO_MILESTONES: dict[int, str] = {
+    1100: "rising_star",
+    1200: "connoisseur",
+    1300: "aristocrat",
+    1500: "living_legend",
+}
 
 _PRESTIGE_CARDS_FOR_FULL_SET = 3
 _NON_BID_ACTIONS = {"pass", "fold", "quit"}
@@ -107,6 +134,7 @@ def detect_per_game_achievements(
     unlocked: dict[str, set[str]] = {s["username"]: set() for s in final_standings}
     won_types: dict[str, set[str]] = {u: set() for u in unlocked}
     took_disgrace: dict[str, bool] = {u: False for u in unlocked}
+    auctions_won: dict[str, int] = {u: 0 for u in unlocked}
     prestige_wins: dict[str, int] = {u: 0 for u in unlocked}
     ever_passed_or_folded: dict[str, bool] = {u: False for u in unlocked}
     offered_types = {a["card"]["type"] for a in auction_rounds}
@@ -122,6 +150,8 @@ def detect_per_game_achievements(
 
         card = auction["card"]
         won_types[recipient].add(card["type"])
+        if auction["auction_type"] == "normal":
+            auctions_won[recipient] += 1
         if card["type"] == "PrestigeCard":
             prestige_wins[recipient] += 1
         if card["type"] in _DISGRACE_CARD_TYPES:
@@ -148,6 +178,8 @@ def detect_per_game_achievements(
             unlocked[recipient].add("high_roller")
 
     for username in unlocked:
+        if won_types[username] >= _DISGRACE_CARD_TYPES:
+            unlocked[username].add("social_pariah")
         if prestige_wins[username] >= _PRESTIGE_CARDS_FOR_FULL_SET:
             unlocked[username].add("full_set")
         if offered_types and won_types[username] >= offered_types:
@@ -188,5 +220,29 @@ def detect_per_game_achievements(
                 unlocked[username].add("landslide")
             if margin <= _PHOTO_FINISH_MARGIN:
                 unlocked[username].add("photo_finish")
+
+    # Losing ones -- only for someone who stayed to the end (a player who
+    # quit didn't really "finish" anything) and only in a game that had a
+    # winner at all.
+    best_contender_points = max(contenders.values(), default=None)
+    top_points = max((s["points"] for s in final_standings), default=None)
+    for s in final_standings:
+        username = s["username"]
+        if not s.get("active", True):
+            continue
+        if s["money_left"] == 0:
+            unlocked[username].add("bankrupt")
+        if s["points"] < 0:
+            unlocked[username].add("in_the_red")
+        if auction_rounds and auctions_won[username] == 0:
+            unlocked[username].add("wallflower")
+        if username in winner_usernames or not winner_usernames:
+            continue
+        unlocked[username].add("good_sport")
+        if s.get("eliminated"):
+            if s["points"] == top_points:
+                unlocked[username].add("spent_it_all")
+        elif best_contender_points is not None and s["points"] == best_contender_points - 1:
+            unlocked[username].add("so_close")
 
     return {u: ids for u, ids in unlocked.items() if ids}

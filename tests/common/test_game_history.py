@@ -2053,5 +2053,30 @@ def test_record_finished_game_awards_games_played_and_win_streak_milestones(data
 
     achievements = set(_rows(cursor, "INSERT INTO player_achievements", 2))
     assert {(10, "dynasty"), (10, "veteran"), (10, "socialite"), (10, "on_a_roll")} <= achievements
-    # A loser's games still count toward games played, but nothing else.
-    assert {a for p, a in achievements if p == 11} == {"socialite"}
+    # bob's 10 games without a win count as both games played and losses.
+    assert {a for p, a in achievements if p == 11} == {"socialite", "thick_skin"}
+
+
+def test_record_finished_game_awards_elo_levels_from_the_new_rating(database_url):
+    game_history._schema_ready = True
+    # alice crosses 1100 with this win; bob is still above 1200 after
+    # losing some rating this game.
+    conn, cursor = _save_connection(players={"alice": (10, "g-alice", 1095), "bob": (11, "g-bob", 1250)})
+    participants = [
+        {"is_bot": False, "username": "alice", "name": "Alice",
+         "points": 15, "money_left": 5, "is_winner": True, "eliminated": False},
+        {"is_bot": False, "username": "bob", "name": "Bob",
+         "points": 5, "money_left": 0, "is_winner": False, "eliminated": False},
+    ]
+    with patch.object(game_history, "_connect", return_value=conn):
+        game_history.record_finished_game(
+            room_code="ABCDE", seats=2, bot_mix=[],
+            started_at=datetime.datetime.now(datetime.timezone.utc),
+            finished_at=datetime.datetime.now(datetime.timezone.utc),
+            participants=participants,
+        )
+
+    achievements = set(_rows(cursor, "INSERT INTO player_achievements", 2))
+    assert (10, "rising_star") in achievements and (10, "connoisseur") not in achievements
+    assert {(11, "rising_star"), (11, "connoisseur")} <= achievements
+    assert (11, "aristocrat") not in achievements

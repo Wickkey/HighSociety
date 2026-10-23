@@ -39,7 +39,9 @@ import time
 from typing import Callable, Optional
 
 from highsociety.code.common import bot_roster, elo
-from highsociety.code.common.achievements import GAMES_PLAYED_MILESTONES, WIN_COUNT_MILESTONES, WIN_STREAK
+from highsociety.code.common.achievements import (
+    ELO_MILESTONES, GAMES_PLAYED_MILESTONES, LOSS_COUNT_MILESTONES, WIN_COUNT_MILESTONES, WIN_STREAK,
+)
 from highsociety.code.common.logger_module.logger.logging_manager import LoggingManager
 
 _DATABASE_URL_ENV = "DATABASE_URL"
@@ -1862,9 +1864,10 @@ def record_finished_game(*, room_code: str, seats: int, bot_mix: list,
     Only actually written for a participant whose players row has a
     google_id (see achievements.py's own module docstring for why guests
     are excluded), and only after also checking the career milestones
-    (WIN_COUNT_MILESTONES, GAMES_PLAYED_MILESTONES, WIN_STREAK) against
-    that player's totals, which by this point already include the row this
-    same call just inserted.
+    (WIN_COUNT_MILESTONES, LOSS_COUNT_MILESTONES, GAMES_PLAYED_MILESTONES,
+    WIN_STREAK) against that player's totals, which by this point already
+    include the row this same call just inserted, and ELO_MILESTONES
+    against the rating this game leaves them on.
 
     Elo ratings update the same way, for the same reason: only players
     with a google_id get a rating change (see elo.py's own docstring) --
@@ -2138,18 +2141,11 @@ def record_finished_game(*, room_code: str, seats: int, bot_mix: list,
                     for threshold, achievement_id in GAMES_PLAYED_MILESTONES.items():
                         if games_played >= threshold:
                             achievement_rows.append((player_id, achievement_id))
+                    for threshold, achievement_id in LOSS_COUNT_MILESTONES.items():
+                        if games_played - win_count >= threshold:
+                            achievement_rows.append((player_id, achievement_id))
                     if recent_wins >= streak_length:
                         achievement_rows.append((player_id, streak_achievement))
-            achievement_rows = list(dict.fromkeys(achievement_rows))
-            if achievement_rows:
-                cur.execute(
-                    f"""
-                    INSERT INTO player_achievements (player_id, achievement_id)
-                    VALUES {_values_placeholder(len(achievement_rows), 2)}
-                    ON CONFLICT (player_id, achievement_id) DO NOTHING
-                    """,
-                    _flatten(achievement_rows),
-                )
 
             # Two or more bot seats of the same difficulty share one
             # player_id (the bots table's whole design), so rated_standings
@@ -2219,6 +2215,26 @@ def record_finished_game(*, room_code: str, seats: int, bot_mix: list,
                     VALUES {_values_placeholder(len(rating_rows), 5)}
                     """,
                     _flatten(rating_rows),
+                )
+
+            # Elo levels go by the rating this game leaves each linked
+            # player on, so the achievements insert waits until the
+            # ratings above are worked out.
+            new_rating_by_player_id = {row[0]: row[3] for row in rating_rows}
+            for player_id in linked_ids_to_count:
+                rating = new_rating_by_player_id.get(player_id, elo_before_by_player_id.get(player_id))
+                for threshold, achievement_id in ELO_MILESTONES.items():
+                    if rating is not None and rating >= threshold:
+                        achievement_rows.append((player_id, achievement_id))
+            achievement_rows = list(dict.fromkeys(achievement_rows))
+            if achievement_rows:
+                cur.execute(
+                    f"""
+                    INSERT INTO player_achievements (player_id, achievement_id)
+                    VALUES {_values_placeholder(len(achievement_rows), 2)}
+                    ON CONFLICT (player_id, achievement_id) DO NOTHING
+                    """,
+                    _flatten(achievement_rows),
                 )
 
             seat_by_game_username = {p["game_username"]: p["seat"] for p in participants

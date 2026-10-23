@@ -2,7 +2,7 @@ from highsociety.code.common.achievements import ACHIEVEMENTS, detect_per_game_a
 
 
 def _standings(*usernames):
-    return [{"username": u, "points": 0, "money_left": 0, "active": True, "eliminated": False} for u in usernames]
+    return [{"username": u, "points": 0, "money_left": 10, "active": True, "eliminated": False} for u in usernames]
 
 
 def test_every_achievement_id_is_unique():
@@ -230,3 +230,36 @@ def test_good_company_needs_another_human_and_hard_times_two_hard_bots():
     result = detect_per_game_achievements(standings, {"alice"}, [], ["hard", "hard"])
     assert "good_company" not in result["alice"]
     assert "hard_times" in result["alice"]
+
+
+def test_losing_achievements_for_the_players_who_did_not_win():
+    standings = _scored(("alice", 30, 10, False), ("bob", 29, 0, False), ("carol", 35, -1, True))
+    standings[2]["money_left"] = 0  # carol: most points, but eliminated for money
+    result = detect_per_game_achievements(standings, {"alice"}, [_painting_win("alice", 5, 3)], [])
+    assert {"good_sport", "so_close", "bankrupt", "wallflower"} <= result["bob"]
+    assert {"good_sport", "spent_it_all", "wallflower"} <= result["carol"]
+    assert "so_close" not in result["carol"]
+    assert not {"good_sport", "wallflower"} & result["alice"]
+
+
+def test_a_player_who_quit_gets_no_losing_achievements():
+    standings = _scored(("alice", 30, 10, False), ("bob", 29, 0, False))
+    standings[1]["active"] = False
+    result = detect_per_game_achievements(standings, {"alice"}, [], [])
+    assert "bob" not in result
+
+
+def test_in_the_red_for_a_negative_score():
+    standings = _scored(("alice", 10, 5, False), ("bob", -5, 6, False))
+    result = detect_per_game_achievements(standings, {"alice"}, [], [])
+    assert "in_the_red" in result["bob"]
+
+
+def test_social_pariah_needs_all_three_disgrace_cards():
+    def disgrace(card_type):
+        return {"auction_type": "disgrace", "card": {"type": card_type, "value": 0},
+                "recipient": "bob", "money_spent": {"bob": 0}, "events": [{"player": "bob", "action": "pass"}]}
+    two = [disgrace("FauxPas"), disgrace("Passe")]
+    assert "social_pariah" not in detect_per_game_achievements(_standings("bob"), set(), two, []).get("bob", set())
+    three = two + [disgrace("Scandale")]
+    assert "social_pariah" in detect_per_game_achievements(_standings("bob"), set(), three, [])["bob"]

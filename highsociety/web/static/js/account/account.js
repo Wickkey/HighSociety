@@ -14,7 +14,7 @@ import { createEloChartController, fetchRatingHistory } from '../ui/eloChart.js'
 import { swr } from '../utils/swrCache.js';
 
 // Static catalog mirroring highsociety/code/common/achievements.py's
-// ACHIEVEMENTS -- small enough to duplicate client-side (24 entries) rather
+// ACHIEVEMENTS -- small enough to duplicate client-side (36 entries) rather
 // than round-trip it over the network; ids must stay in sync with the
 // backend's, since those ids are what /api/achievements returns as unlocked.
 // Icons are 24x24 stroke line-art, same design language as the sidebar/
@@ -41,6 +41,16 @@ const ACHIEVEMENTS = [
     icon: '<path d="M8 3h8l-.6 5a3.4 3.4 0 0 1-6.8 0z"/><path d="M12 11.4V20"/><path d="M8.5 20.5h7"/>' },
   { id: 'veteran', name: 'Veteran', description: 'Play 50 games.',
     icon: '<path d="M8 3l2.5 6M16 3l-2.5 6"/><circle cx="12" cy="14.5" r="5.5"/><circle cx="12" cy="14.5" r="2.3"/>' },
+  { id: 'rising_star', name: 'Rising Star', description: 'Reach a rating of 1100.',
+    icon: '<path d="M10 6.5l1.5 3.1 3.4.5-2.5 2.4.6 3.4-3-1.6-3 1.6.6-3.4-2.5-2.4 3.4-.5z"/><path d="M18 21V9M15.5 11.5L18 9l2.5 2.5"/>' },
+  { id: 'connoisseur', name: 'Connoisseur', description: 'Reach a rating of 1200.',
+    icon: '<circle cx="10" cy="11" r="5.5"/><path d="M14 15l4 5.5"/><path d="M8 9.5a2.4 2.4 0 0 1 2-1"/>' },
+  { id: 'aristocrat', name: 'Aristocrat', description: 'Reach a rating of 1300.',
+    icon: '<path d="M8 15V5h8v10"/><path d="M4 18c0-1.7 3.6-3 8-3s8 1.3 8 3-3.6 2-8 2-8-.3-8-2z"/><path d="M8 12h8"/>' },
+  { id: 'living_legend', name: 'Living Legend', description: 'Reach a rating of 1500.',
+    icon: '<path d="M8 20c-3.5-2-5-6-4-11"/><path d="M16 20c3.5-2 5-6 4-11"/>'
+        + '<path d="M5.2 13.5l-2.2-.5M6.6 16.6l-2 .3M4.6 10.2l-1.8-1M18.8 13.5l2.2-.5M17.4 16.6l2 .3M19.4 10.2l1.8-1"/>'
+        + '<path d="M12 6l1 2.1 2.3.3-1.7 1.6.4 2.3-2-1.1-2 1.1.4-2.3-1.7-1.6 2.3-.3z"/>' },
   { id: 'giant_slayer', name: 'Giant Slayer', description: 'Win a game with a Hard bot at the table.',
     icon: '<path d="M12 2v12.3"/><path d="M9 14.3h6"/><path d="M12 15v2.3"/><circle cx="12" cy="18.6" r="1.1" fill="currentColor" stroke="none"/>' },
   { id: 'hard_times', name: 'Hard Times', description: 'Win a game with two or more Hard bots at the table.',
@@ -86,6 +96,27 @@ const ACHIEVEMENTS = [
         + '<circle cx="9" cy="10.5" r="1" fill="currentColor" stroke="none"/>'
         + '<circle cx="15" cy="10.5" r="1" fill="currentColor" stroke="none"/>'
         + '<path d="M9 16c1.5-1.3 4.5-1.3 6 0"/>' },
+  // Losing has its moments too.
+  { id: 'good_sport', name: 'Good Sport', description: "Finish a game you didn't win.",
+    icon: '<path d="M7 11v9H4v-9z"/><path d="M7 11l4-7c1.5 0 2.5 1 2.2 2.6L12.6 10H18a2 2 0 0 1 2 2.3l-1 6A2 2 0 0 1 17 20H7"/>' },
+  { id: 'thick_skin', name: 'Thick Skin', description: 'Lose 10 games.',
+    icon: '<rect x="3" y="5" width="18" height="14" rx="1"/>'
+        + '<path d="M3 9.7h18M3 14.3h18M9 5v4.7M15 5v4.7M6 9.7v4.6M12 9.7v4.6M18 9.7v4.6M9 14.3V19M15 14.3V19"/>' },
+  { id: 'so_close', name: 'So Close', description: 'Lose a game by a single point.',
+    icon: '<path d="M12 4v16"/><path d="M4 12h5M15 12h5"/><path d="M7 9.5L9.5 12 7 14.5M17 9.5L14.5 12 17 14.5"/>' },
+  { id: 'spent_it_all', name: 'Spent It All', description: 'Score the most points at the table, then get eliminated for having the least money.',
+    icon: '<path d="M8 4h8v5a4 4 0 0 1-8 0z"/><path d="M8 6H5a3 3 0 0 0 3 4M16 6h3a3 3 0 0 1-3 4"/>'
+        + '<path d="M12 13v3.5M9 20h6"/><path d="M11 4.5l2 2.5-1.5 2"/>' },
+  { id: 'bankrupt', name: 'Bankrupt', description: 'Finish a game with no money left.',
+    icon: '<path d="M4 7.5A2.5 2.5 0 0 1 6.5 5H18v2.5"/><rect x="4" y="7.5" width="16" height="12" rx="2"/><path d="M16 13.5h4"/>' },
+  { id: 'wallflower', name: 'Wallflower', description: 'Finish a game without winning a single auction.',
+    icon: '<circle cx="12" cy="8.5" r="1.6"/><circle cx="12" cy="4.8" r="1.9"/><circle cx="15.7" cy="8.5" r="1.9"/>'
+        + '<circle cx="8.3" cy="8.5" r="1.9"/><circle cx="12" cy="12.2" r="1.9"/>'
+        + '<path d="M12 14.1V21M12 18.5c-1.5-2-3.5-2.5-5-2 .5 1.8 2.5 2.7 5 2"/>' },
+  { id: 'social_pariah', name: 'Social Pariah', description: 'Take a Faux Pas, a Passe and a Scandale in one game.',
+    icon: '<circle cx="10" cy="8" r="3.2"/><path d="M4 20c0-3.4 2.7-6 6-6 1.3 0 2.5.4 3.4 1"/><path d="M16 15l4 4M20 15l-4 4"/>' },
+  { id: 'in_the_red', name: 'In the Red', description: 'Finish a game with a negative score.',
+    icon: '<path d="M3 6l6 6 4-4 8 8"/><path d="M15 16h6v-6"/>' },
 ];
 
 // Same lock glyph used both as the front's small icon-badge pin and (per
