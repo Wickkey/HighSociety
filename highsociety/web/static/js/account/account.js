@@ -14,7 +14,7 @@ import { createEloChartController, fetchRatingHistory } from '../ui/eloChart.js'
 import { swr } from '../utils/swrCache.js';
 
 // Static catalog mirroring highsociety/code/common/achievements.py's
-// ACHIEVEMENTS -- small enough to duplicate client-side (12 entries) rather
+// ACHIEVEMENTS -- small enough to duplicate client-side (36 entries) rather
 // than round-trip it over the network; ids must stay in sync with the
 // backend's, since those ids are what /api/achievements returns as unlocked.
 // Icons are 24x24 stroke line-art, same design language as the sidebar/
@@ -33,8 +33,37 @@ const ACHIEVEMENTS = [
         + '<circle cx="12" cy="6.3" r="1" fill="currentColor" stroke="none"/>'
         + '<circle cx="6" cy="9.8" r="0.85" fill="currentColor" stroke="none"/>'
         + '<circle cx="18" cy="9.8" r="0.85" fill="currentColor" stroke="none"/>' },
+  { id: 'dynasty', name: 'Dynasty', description: 'Win 25 games.',
+    icon: '<path d="M4 21h16"/><path d="M6 21V5h2.5v2h2V5h3v2h2V5H18v16"/><path d="M10.5 21v-4a1.5 1.5 0 0 1 3 0v4"/>' },
+  { id: 'on_a_roll', name: 'On a Roll', description: 'Win 3 games in a row.',
+    icon: '<path d="M12 3c.5 3.5 5 5.5 5 10.5a5 5 0 0 1-10 0c0-2.4 1.3-3.8 2.5-5 .2 1.6 1 2.6 2 3 0-3 .3-5.8.5-8.5z"/>' },
+  { id: 'socialite', name: 'Socialite', description: 'Play 10 games.',
+    icon: '<path d="M8 3h8l-.6 5a3.4 3.4 0 0 1-6.8 0z"/><path d="M12 11.4V20"/><path d="M8.5 20.5h7"/>' },
+  { id: 'veteran', name: 'Veteran', description: 'Play 50 games.',
+    icon: '<path d="M8 3l2.5 6M16 3l-2.5 6"/><circle cx="12" cy="14.5" r="5.5"/><circle cx="12" cy="14.5" r="2.3"/>' },
+  { id: 'rising_star', name: 'Rising Star', description: 'Reach a rating of 1100.',
+    icon: '<path d="M10 6.5l1.5 3.1 3.4.5-2.5 2.4.6 3.4-3-1.6-3 1.6.6-3.4-2.5-2.4 3.4-.5z"/><path d="M18 21V9M15.5 11.5L18 9l2.5 2.5"/>' },
+  { id: 'connoisseur', name: 'Connoisseur', description: 'Reach a rating of 1200.',
+    icon: '<circle cx="10" cy="11" r="5.5"/><path d="M14 15l4 5.5"/><path d="M8 9.5a2.4 2.4 0 0 1 2-1"/>' },
+  { id: 'aristocrat', name: 'Aristocrat', description: 'Reach a rating of 1300.',
+    icon: '<path d="M8 15V5h8v10"/><path d="M4 18c0-1.7 3.6-3 8-3s8 1.3 8 3-3.6 2-8 2-8-.3-8-2z"/><path d="M8 12h8"/>' },
+  { id: 'living_legend', name: 'Living Legend', description: 'Reach a rating of 1500.',
+    icon: '<path d="M8 20c-3.5-2-5-6-4-11"/><path d="M16 20c3.5-2 5-6 4-11"/>'
+        + '<path d="M5.2 13.5l-2.2-.5M6.6 16.6l-2 .3M4.6 10.2l-1.8-1M18.8 13.5l2.2-.5M17.4 16.6l2 .3M19.4 10.2l1.8-1"/>'
+        + '<path d="M12 6l1 2.1 2.3.3-1.7 1.6.4 2.3-2-1.1-2 1.1.4-2.3-1.7-1.6 2.3-.3z"/>' },
   { id: 'giant_slayer', name: 'Giant Slayer', description: 'Win a game with a Hard bot at the table.',
     icon: '<path d="M12 2v12.3"/><path d="M9 14.3h6"/><path d="M12 15v2.3"/><circle cx="12" cy="18.6" r="1.1" fill="currentColor" stroke="none"/>' },
+  { id: 'hard_times', name: 'Hard Times', description: 'Win a game with two or more Hard bots at the table.',
+    icon: '<path d="M4 4l12 12M20 4L8 16"/><path d="M13.5 17.5l3-3M10.5 17.5l-3-3"/><path d="M16 18l2.5 2.5M8 18l-2.5 2.5"/>' },
+  { id: 'good_company', name: 'Good Company', description: 'Win a game against another person.',
+    icon: '<circle cx="9" cy="8" r="3"/><path d="M3.5 20c0-3.3 2.5-6 5.5-6s5.5 2.7 5.5 6"/>'
+        + '<circle cx="16.5" cy="9" r="2.5"/><path d="M15.5 14.2c3 0 5 2.4 5 5.8"/>' },
+  { id: 'landslide', name: 'Landslide', description: 'Win a game by 10 or more points.',
+    icon: '<path d="M3 19l6-10 4 6 2.5-3.5L21 19z"/>' },
+  { id: 'photo_finish', name: 'Photo Finish', description: 'Win a game by 1 point or less (a shared win counts).',
+    icon: '<rect x="3" y="7" width="18" height="12" rx="2"/><path d="M8.5 7l1.5-2.5h4L15.5 7"/><circle cx="12" cy="13" r="3.3"/>' },
+  { id: 'clean_hands', name: 'Clean Hands', description: 'Win a game without taking a single disgrace card.',
+    icon: '<path d="M11 3c.6 4.2 2.8 6.4 7 7-4.2.6-6.4 2.8-7 7-.6-4.2-2.8-6.4-7-7 4.2-.6 6.4-2.8 7-7z"/><path d="M19 15.5v4M17 17.5h4"/>' },
   { id: 'sniper', name: 'Sniper', description: 'Win an auction that only ever had one bid -- yours.',
     icon: '<circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="1.2" fill="currentColor" stroke="none"/>'
         + '<path d="M12 3v3.5M12 17.5V21M3 12h3.5M17.5 12H21"/>' },
@@ -42,6 +71,18 @@ const ACHIEVEMENTS = [
     icon: '<circle cx="12" cy="12" r="8"/><path d="M5 19L19 5"/>' },
   { id: 'minimalist', name: 'Minimalist', description: 'Win an auction for the lowest-value Painting.',
     icon: '<circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none"/>' },
+  { id: 'masterpiece', name: 'Masterpiece', description: 'Win the 10-value Painting.',
+    icon: '<rect x="3.5" y="5" width="17" height="14" rx="1"/><rect x="6.5" y="8" width="11" height="8"/>'
+        + '<path d="M6.5 14.5l3-3 2.5 2.5 2-2 3.5 3.5"/>' },
+  { id: 'high_roller', name: 'High Roller', description: 'Pay 20 or more for a single card.',
+    icon: '<rect x="4" y="4" width="16" height="16" rx="3"/>'
+        + '<circle cx="8.5" cy="8.5" r="1.1" fill="currentColor" stroke="none"/>'
+        + '<circle cx="15.5" cy="8.5" r="1.1" fill="currentColor" stroke="none"/>'
+        + '<circle cx="12" cy="12" r="1.1" fill="currentColor" stroke="none"/>'
+        + '<circle cx="8.5" cy="15.5" r="1.1" fill="currentColor" stroke="none"/>'
+        + '<circle cx="15.5" cy="15.5" r="1.1" fill="currentColor" stroke="none"/>' },
+  { id: 'narrow_escape', name: 'Narrow Escape', description: 'Escape elimination with just 1 more money than the poorest player.',
+    icon: '<path d="M6.5 3h11M6.5 21h11"/><path d="M7.5 3c0 5 4.5 6 4.5 9s-4.5 4-4.5 9"/><path d="M16.5 3c0 5-4.5 6-4.5 9s4.5 4 4.5 9"/>' },
   { id: 'full_set', name: 'Full Set', description: 'Collect all 3 Prestige cards in one game.',
     icon: '<path d="M5 9l3 3-3 3-3-3z"/><path d="M12 9l3 3-3 3-3-3z"/><path d="M19 9l3 3-3 3-3-3z"/>' },
   { id: 'collector', name: 'Collector', description: 'Win at least one of every card type offered in a game.',
@@ -55,6 +96,27 @@ const ACHIEVEMENTS = [
         + '<circle cx="9" cy="10.5" r="1" fill="currentColor" stroke="none"/>'
         + '<circle cx="15" cy="10.5" r="1" fill="currentColor" stroke="none"/>'
         + '<path d="M9 16c1.5-1.3 4.5-1.3 6 0"/>' },
+  // Losing has its moments too.
+  { id: 'good_sport', name: 'Good Sport', description: "Finish a game you didn't win.",
+    icon: '<path d="M7 11v9H4v-9z"/><path d="M7 11l4-7c1.5 0 2.5 1 2.2 2.6L12.6 10H18a2 2 0 0 1 2 2.3l-1 6A2 2 0 0 1 17 20H7"/>' },
+  { id: 'thick_skin', name: 'Thick Skin', description: 'Lose 10 games.',
+    icon: '<rect x="3" y="5" width="18" height="14" rx="1"/>'
+        + '<path d="M3 9.7h18M3 14.3h18M9 5v4.7M15 5v4.7M6 9.7v4.6M12 9.7v4.6M18 9.7v4.6M9 14.3V19M15 14.3V19"/>' },
+  { id: 'so_close', name: 'So Close', description: 'Lose a game by a single point.',
+    icon: '<path d="M12 4v16"/><path d="M4 12h5M15 12h5"/><path d="M7 9.5L9.5 12 7 14.5M17 9.5L14.5 12 17 14.5"/>' },
+  { id: 'spent_it_all', name: 'Spent It All', description: 'Score the most points at the table, then get eliminated for having the least money.',
+    icon: '<path d="M8 4h8v5a4 4 0 0 1-8 0z"/><path d="M8 6H5a3 3 0 0 0 3 4M16 6h3a3 3 0 0 1-3 4"/>'
+        + '<path d="M12 13v3.5M9 20h6"/><path d="M11 4.5l2 2.5-1.5 2"/>' },
+  { id: 'bankrupt', name: 'Bankrupt', description: 'Finish a game with no money left.',
+    icon: '<path d="M4 7.5A2.5 2.5 0 0 1 6.5 5H18v2.5"/><rect x="4" y="7.5" width="16" height="12" rx="2"/><path d="M16 13.5h4"/>' },
+  { id: 'wallflower', name: 'Wallflower', description: 'Finish a game without winning a single auction.',
+    icon: '<circle cx="12" cy="8.5" r="1.6"/><circle cx="12" cy="4.8" r="1.9"/><circle cx="15.7" cy="8.5" r="1.9"/>'
+        + '<circle cx="8.3" cy="8.5" r="1.9"/><circle cx="12" cy="12.2" r="1.9"/>'
+        + '<path d="M12 14.1V21M12 18.5c-1.5-2-3.5-2.5-5-2 .5 1.8 2.5 2.7 5 2"/>' },
+  { id: 'social_pariah', name: 'Social Pariah', description: 'Take a Faux Pas, a Passe and a Scandale in one game.',
+    icon: '<circle cx="10" cy="8" r="3.2"/><path d="M4 20c0-3.4 2.7-6 6-6 1.3 0 2.5.4 3.4 1"/><path d="M16 15l4 4M20 15l-4 4"/>' },
+  { id: 'in_the_red', name: 'In the Red', description: 'Finish a game with a negative score.',
+    icon: '<path d="M3 6l6 6 4-4 8 8"/><path d="M15 16h6v-6"/>' },
 ];
 
 // Same lock glyph used both as the front's small icon-badge pin and (per
