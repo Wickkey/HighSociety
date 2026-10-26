@@ -13,6 +13,7 @@
 // evaluation, so load order never matters.
 import { $, hide, show, showError, showScreen, setScreenPath, pollWhileVisible } from '../utils/dom.js';
 import { escapeHtml } from '../utils/formatting.js';
+import { showHowToPlay, stopHowToPlayVideo } from './howToPlay.js';
 import {
   ensureProfileSet, loadProfile, loginToken, renderProfileChip, saveProfile, setSessionStatus,
 } from '../auth/profile.js';
@@ -162,9 +163,12 @@ export function showHomeTile(target) {
   // after it. That pushed Join/Host/How to Play a full --screen-top-gap
   // lower than Play/Leaderboard/Account, which never had this extra
   // empty wrapper sitting above them.
+  const hash = location.hash;
   hide($('home-grid'));
   HOME_TILE_TARGETS.forEach((t) => $(`home-panel-${t}`).classList.toggle('hidden', t !== target));
   setScreenPath(`/${target}`); // 'join'/'host'/'rules' -- matches web_server.py's static routes exactly
+  if (target === 'rules') showHowToPlay(hash);
+  else stopHowToPlayVideo();
   // One less click for the single most common thing to do on this panel --
   // Join's whole reason for existing, for anyone who already has a code in
   // hand (e.g. pasted from a chat message) rather than picking a public
@@ -173,6 +177,7 @@ export function showHomeTile(target) {
   if (target === 'join') $('join-room-code').focus();
 }
 export function showHomeTiles() {
+  stopHowToPlayVideo();
   show($('home-grid'));
   HOME_TILE_TARGETS.forEach((t) => hide($(`home-panel-${t}`)));
   setScreenPath('/');

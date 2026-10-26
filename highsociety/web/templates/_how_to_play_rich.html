@@ -1,15 +1,8 @@
-<!-- The rich, visual How to Play content -- dedicated-screen only (see
-     index.html's own comment on #home-panel-rules): the Join screen's
+<!-- The rich, visual How to Play content -- the How to Play screen's
+     "Read the Rules" tab (see index.html's #home-panel-rules): the Join screen's
      collapsed summary keeps using the plain _how_to_play_body.html
      partial instead, since cramming card art and a scripted demo into a
      tiny <details> mid-flow would be more clutter than help there. -->
-
-<div class="htp-jump-links">
-  <a href="#htp2-goal">Goal</a>
-  <a href="#htp2-auctions">Auctions</a>
-  <a href="#htp2-cards">Cards</a>
-  <a href="#htp2-demo">Try it</a>
-</div>
 
 <p id="htp2-goal">
   <strong>Goal:</strong> End the game with the most points — but there's a catch.
@@ -118,7 +111,7 @@
   <p>Green cards can end the game early: the instant the 4th green card (Prestige or Scandale) is revealed, the game stops right there — even mid-round.</p>
 </div>
 
-<h3 id="htp2-demo" class="rules-section-heading">Try it: a scripted walkthrough</h3>
+<h3 id="htp2-demo" class="rules-section-heading">See one auction step by step</h3>
 <p class="hint">Not a real game — a fixed, step-by-step example so you can see how each auction actually plays out.</p>
 
 <div class="rules-demo-toggle" id="rules-demo-toggle">
@@ -136,23 +129,5 @@
     <button type="button" id="btn-rules-demo-prev" class="secondary" disabled>← Prev</button>
     <span id="rules-demo-step-label" class="muted"></span>
     <button type="button" id="btn-rules-demo-next" class="primary">Next →</button>
-  </div>
-</div>
-
-<!-- The walkthrough above is scripted narration, not a real game -- this is
-     the real thing: an actual 3-seat game (you + 2 scripted bots) played
-     through the real engine, on a curated seed that's guaranteed to hit a
-     disgrace auction, a green card, and a natural ending within one short
-     game (see web_server.py's _TUTORIAL_SEED). Never touches Elo/history/
-     leaderboard/achievements -- see onStartTutorial's own comment. -->
-<div class="rules-cue-card rules-cue-card-tutorial">
-  <span class="rules-cue-card-icon" aria-hidden="true">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-      <path d="M5 3l14 9-14 9V3z"/>
-    </svg>
-  </span>
-  <div>
-    <p>Ready to play for real? Try a real 3-seat game against two scripted opponents, with on-screen tips the first time each key moment comes up.</p>
-    <button type="button" id="btn-play-tutorial" class="primary">Play a guided first game</button>
   </div>
 </div>
