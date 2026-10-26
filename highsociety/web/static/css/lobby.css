@@ -248,6 +248,20 @@
 .account-connection-badge-google { background: #fff; color: #3c4043; border: 1px solid var(--panel-border); }
 .account-connection-badge-google svg { width: 14px; height: 14px; flex-shrink: 0; }
 .account-connection-badge-guest { background: var(--panel-bg-soft); color: var(--muted); border: 1px solid var(--panel-border); }
+/* "Connect Google" for a guest, on Account and Achievements. The button
+   slot keeps Google's button height even before its script has rendered
+   into it, so nothing below shifts when it appears. */
+.connect-google {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.5rem;
+  margin: 0.6rem 0 0.4rem;
+  max-width: 34rem;
+}
+.connect-google p { margin: 0; }
+.connect-google-button { min-height: 44px; }
+.account-connect-google { margin: -0.6rem 0 1.4rem; }
 /* The one number this whole screen exists to show off -- see
    account.js's loadAccountStats -- previously a single muted inline
    word easy to miss entirely. */

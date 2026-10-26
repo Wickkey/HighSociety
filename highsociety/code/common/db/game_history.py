@@ -39,6 +39,7 @@ import time
 from typing import Callable, Optional
 
 from highsociety.code.common import bot_roster, elo
+from highsociety.code.common import achievements as achievement_catalog
 from highsociety.code.common.achievements import (
     ELO_MILESTONES, GAMES_PLAYED_MILESTONES, LOSS_COUNT_MILESTONES, WIN_COUNT_MILESTONES, WIN_STREAK,
 )
@@ -464,6 +465,18 @@ _SCHEMA_STATEMENTS = [
     )
     """,
     "CREATE INDEX IF NOT EXISTS idx_player_logins_player ON player_logins (player_id)",
+    """
+    CREATE TABLE IF NOT EXISTS app_state (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+    """,
+    """
+    INSERT INTO meta (table_name, description) VALUES
+        ('app_state', 'Small server bookkeeping values, e.g. which achievement catalog version past games were last back-filled for.')
+    ON CONFLICT (table_name) DO NOTHING
+    """,
     """
     INSERT INTO meta (table_name, description) VALUES
         ('player_logins', 'One row per signed-in device: SHA-256 of the login token it was issued, and whose it is. Required to play as, or rename, that player.')
@@ -937,6 +950,302 @@ def get_player_achievements(username: str) -> list:
     finally:
         if conn is not None:
             _release_connection(conn)
+
+
+_NEEDS_BY_ACHIEVEMENT = {a.id: a.needs for a in achievement_catalog.ACHIEVEMENTS}
+_DISGRACE_TYPES = {"FauxPas", "Passe", "Scandale"}
+_AUCTION_ACTIONS = {"bid", "pass", "fold", "quit"}
+
+
+def _seat_key(player_id, seat, index) -> str:
+    """Stand-in username for one seat of a stored game: the detection code
+    only needs seats told apart, and a bot without a roster identity has no
+    players row, so it goes by its seat."""
+    if player_id is not None:
+        return f"p{player_id}"
+    return f"s{seat}" if seat is not None else f"i{index}"
+
+
+def _stored_game_unlocks(player_id: int, seats: list, bot_mix: list, rounds: list, actions: list) -> set:
+    """
+    The per-game achievements `player_id` earned in one stored game, decided
+    by the same achievements.detect_per_game_achievements a live game uses.
+
+    seats: [(player_id, seat, points, money_left, is_winner, eliminated)].
+    rounds: [(round_number, card_type, card_value, winner_id, winner_seat,
+    winning_bid, {player_id: amount_paid})] -- empty for a game saved before
+    game_rounds existed. actions: [(round, player_id, seat, action)] in
+    order -- likewise empty for an older game.
+
+    Achievements whose data this game doesn't have are dropped (see
+    achievements.py's CAREER/STANDINGS/ROUNDS/ACTIONS). Whether someone quit
+    isn't stored, so every seat counts as having finished.
+    """
+    key_by_seat = {}
+    standings, winners = [], set()
+    for index, (pid, seat, points, money_left, is_winner, eliminated) in enumerate(seats):
+        key = _seat_key(pid, seat, index)
+        if seat is not None:
+            key_by_seat[seat] = key
+        standings.append({"username": key, "points": points, "money_left": money_left,
+                          "active": True, "eliminated": bool(eliminated)})
+        if is_winner:
+            winners.add(key)
+    me = f"p{player_id}"
+
+    events_by_round: dict = {}
+    for round_number, pid, seat, action in actions:
+        action = (action or "").lower()
+        if action in _AUCTION_ACTIONS:
+            key = f"p{pid}" if pid is not None else key_by_seat.get(seat, f"s{seat}")
+            events_by_round.setdefault(round_number, []).append({"player": key, "action": action})
+
+    auction_rounds = []
+    for round_number, card_type, card_value, winner_id, winner_seat, winning_bid, paid in rounds:
+        if winner_id is not None:
+            recipient = f"p{winner_id}"
+        elif winner_seat is not None:
+            recipient = key_by_seat.get(winner_seat)
+        else:
+            recipient = None
+        money_spent = {f"p{pid}": amount or 0 for pid, amount in paid.items()}
+        disgrace = card_type in _DISGRACE_TYPES
+        if recipient is not None and not disgrace and winning_bid is not None:
+            money_spent.setdefault(recipient, winning_bid)
+        auction_rounds.append({
+            "auction_type": "disgrace" if disgrace else "normal",
+            "card": {"type": card_type, "value": card_value},
+            "recipient": recipient,
+            "money_spent": money_spent,
+            "events": events_by_round.get(round_number, []),
+        })
+
+    available = {achievement_catalog.STANDINGS}
+    if rounds:
+        available.add(achievement_catalog.ROUNDS)
+        if actions:
+            available.add(achievement_catalog.ACTIONS)
+    earned = achievement_catalog.detect_per_game_achievements(standings, winners, auction_rounds, bot_mix)
+    return {a for a in earned.get(me, ()) if _NEEDS_BY_ACHIEVEMENT.get(a) in available}
+
+
+def _career_unlocks(games: list, ratings: list, current_elo: Optional[int]) -> dict:
+    """
+    {achievement_id: when} for the career achievements, each dated by the
+    game that crossed its threshold. games: [(finished_at, is_winner)]
+    oldest first; ratings: [(new_rating, created_at)] oldest first.
+    """
+    unlocked: dict = {}
+    played = wins = losses = run = 0
+    streak_length, streak_id = WIN_STREAK
+    for finished_at, is_winner in games:
+        played += 1
+        if is_winner:
+            wins += 1
+            run += 1
+        else:
+            losses += 1
+            run = 0
+        for milestones, count in ((GAMES_PLAYED_MILESTONES, played), (WIN_COUNT_MILESTONES, wins),
+                                  (LOSS_COUNT_MILESTONES, losses)):
+            achievement_id = milestones.get(count)
+            if achievement_id is not None:
+                unlocked.setdefault(achievement_id, finished_at)
+        if run >= streak_length:
+            unlocked.setdefault(streak_id, finished_at)
+    for threshold, achievement_id in ELO_MILESTONES.items():
+        reached = next((at for rating, at in ratings if rating >= threshold), None)
+        if reached is None and current_elo is not None and current_elo >= threshold:
+            reached = datetime.datetime.now(datetime.timezone.utc)
+        if reached is not None:
+            unlocked[achievement_id] = reached
+    return unlocked
+
+
+def recompute_achievements(player_ids: Optional[list] = None) -> Optional[int]:
+    """
+    Unlocks every achievement Google-linked players have earned across
+    their stored games, dated by the game that earned it -- for a guest who
+    just connected Google (their guest games never counted), and for every
+    linked player when a new achievement is added (see
+    backfill_achievements_if_catalog_changed). Never removes anything.
+    `player_ids` limits it to those players (non-linked ones are ignored);
+    None means every linked player. Returns how many new unlocks were
+    written, or None when it couldn't run (no database, or a failure).
+    """
+    if not is_configured():
+        return None
+    ensure_schema()
+    if not _schema_ready:
+        return None
+    conn = None
+    try:
+        conn = _connect()
+        with conn, conn.cursor() as cur:
+            if player_ids is None:
+                cur.execute("SELECT id, elo FROM players WHERE google_id IS NOT NULL")
+            else:
+                cur.execute("SELECT id, elo FROM players WHERE google_id IS NOT NULL AND id = ANY(%s)",
+                            (list(player_ids),))
+            elo_by_player = dict(cur.fetchall())
+            if not elo_by_player:
+                return 0
+            ids = list(elo_by_player)
+
+            cur.execute(
+                "SELECT pg.player_id, g.id, g.finished_at, pg.is_winner FROM player_games pg "
+                "JOIN games g ON g.id = pg.game_id WHERE pg.player_id = ANY(%s) ORDER BY g.finished_at, g.id",
+                (ids,),
+            )
+            games_by_player: dict = {}
+            finished_at_by_game = {}
+            for pid, game_id, finished_at, is_winner in cur.fetchall():
+                games_by_player.setdefault(pid, []).append((game_id, finished_at, is_winner))
+                finished_at_by_game[game_id] = finished_at
+            game_ids = list(finished_at_by_game)
+
+            seats_by_game: dict = {}
+            bot_mix_by_game = {}
+            rounds_by_game: dict = {}
+            actions_by_game: dict = {}
+            if game_ids:
+                # Which seats were bots, and how hard: games saved before
+                # late August 2026 list it in games.bot_mix; later ones leave
+                # that empty and record each bot seat's identity instead,
+                # whose difficulty the bots table holds. (Checked against
+                # production: no game mixes the two, none has neither.)
+                cur.execute(
+                    "SELECT pg.game_id, pg.player_id, pg.seat, pg.points, pg.money_left, pg.is_winner, "
+                    "pg.eliminated, g.bot_mix, pg.bot_name, b.difficulty, b.player_id IS NOT NULL "
+                    "FROM player_games pg JOIN games g ON g.id = pg.game_id "
+                    "LEFT JOIN bots b ON b.player_id = pg.player_id "
+                    "WHERE pg.game_id = ANY(%s) ORDER BY pg.game_id, pg.seat NULLS LAST, pg.id",
+                    (game_ids,),
+                )
+                seat_difficulties: dict = {}
+                for (game_id, pid, seat, points, money_left, is_winner, eliminated, stored_mix, bot_name,
+                     difficulty, is_bot_identity) in cur.fetchall():
+                    seats_by_game.setdefault(game_id, []).append(
+                        (pid, seat, points, money_left, is_winner, eliminated))
+                    stored_mix = stored_mix if isinstance(stored_mix, list) else json.loads(stored_mix or "[]")
+                    if stored_mix:
+                        bot_mix_by_game[game_id] = stored_mix
+                    elif bot_name is not None or is_bot_identity:
+                        seat_difficulties.setdefault(game_id, []).append(difficulty or "unknown")
+                for game_id, difficulties in seat_difficulties.items():
+                    bot_mix_by_game.setdefault(game_id, difficulties)
+
+                cur.execute("SELECT round_id, player_id, amount_paid FROM round_players WHERE game_id = ANY(%s)",
+                            (game_ids,))
+                paid_by_round: dict = {}
+                for round_id, pid, amount in cur.fetchall():
+                    paid_by_round.setdefault(round_id, {})[pid] = amount
+                cur.execute(
+                    "SELECT r.game_id, r.id, r.round_number, c.type, c.value, r.winner_id, r.winner_seat, "
+                    "r.winning_bid FROM game_rounds r LEFT JOIN cards c ON c.card_id = r.card_id "
+                    "WHERE r.game_id = ANY(%s) ORDER BY r.game_id, r.round_number",
+                    (game_ids,),
+                )
+                for game_id, round_id, number, card_type, value, winner_id, winner_seat, bid in cur.fetchall():
+                    rounds_by_game.setdefault(game_id, []).append(
+                        (number, card_type, value, winner_id, winner_seat, bid, paid_by_round.get(round_id, {})))
+                cur.execute(
+                    "SELECT game_id, round, player_id, seat, action_type FROM game_actions "
+                    "WHERE game_id = ANY(%s) ORDER BY game_id, seq NULLS LAST, id",
+                    (game_ids,),
+                )
+                for game_id, number, pid, seat, action in cur.fetchall():
+                    actions_by_game.setdefault(game_id, []).append((number, pid, seat, action))
+
+            cur.execute("SELECT user_id, new_rating, created_at FROM ratings WHERE user_id = ANY(%s) "
+                        "ORDER BY created_at, id", (ids,))
+            ratings_by_player: dict = {}
+            for pid, rating, created_at in cur.fetchall():
+                ratings_by_player.setdefault(pid, []).append((rating, created_at))
+
+            rows = []  # (player_id, achievement_id, unlocked_at)
+            for pid in ids:
+                games = games_by_player.get(pid, [])
+                earned = _career_unlocks([(at, won) for _, at, won in games],
+                                         ratings_by_player.get(pid, []), elo_by_player[pid])
+                for game_id, finished_at, _ in games:
+                    for achievement_id in _stored_game_unlocks(
+                            pid, seats_by_game.get(game_id, []), bot_mix_by_game.get(game_id, []),
+                            rounds_by_game.get(game_id, []), actions_by_game.get(game_id, [])):
+                        earned.setdefault(achievement_id, finished_at)
+                rows += [(pid, achievement_id, at) for achievement_id, at in sorted(earned.items())]
+            if not rows:
+                return 0
+            cur.execute(
+                f"""
+                INSERT INTO player_achievements (player_id, achievement_id, unlocked_at)
+                VALUES {_values_placeholder(len(rows), 3)}
+                ON CONFLICT (player_id, achievement_id) DO NOTHING
+                RETURNING id
+                """,
+                _flatten(rows),
+            )
+            return len(cur.fetchall())
+    except Exception as e:  # noqa: BLE001 -- a back-fill must never break the request or startup that ran it
+        LoggingManager.warning(f"game_history.recompute_achievements failed: {e}")
+        return None
+    finally:
+        if conn is not None:
+            _release_connection(conn)
+
+
+_CATALOG_STATE_KEY = "achievements_catalog"
+
+
+def backfill_achievements_if_catalog_changed() -> Optional[int]:
+    """
+    Run once at startup (web_server.py, in the background): when the
+    achievement catalog differs from the one past games were last
+    back-filled for, unlocks the new achievements for every linked player
+    from their stored games, then records the new version. So adding an
+    achievement needs no manual database work. Returns how many unlocks it
+    wrote, or None when nothing needed doing (or it couldn't check).
+    """
+    if not is_configured():
+        return None
+    ensure_schema()
+    if not _schema_ready:
+        return None
+    version = achievement_catalog.catalog_version()
+    conn = None
+    try:
+        conn = _connect()
+        with conn, conn.cursor() as cur:
+            cur.execute("SELECT value FROM app_state WHERE key = %s", (_CATALOG_STATE_KEY,))
+            row = cur.fetchone()
+        if row is not None and row[0] == version:
+            return None
+    except Exception as e:  # noqa: BLE001
+        LoggingManager.warning(f"game_history.backfill_achievements_if_catalog_changed failed: {e}")
+        return None
+    finally:
+        if conn is not None:
+            _release_connection(conn)
+
+    written = recompute_achievements()
+    if written is None:
+        return None  # version left unrecorded, so the next startup tries again
+    conn = None
+    try:
+        conn = _connect()
+        with conn, conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO app_state (key, value) VALUES (%s, %s) "
+                "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()",
+                (_CATALOG_STATE_KEY, version),
+            )
+    except Exception as e:  # noqa: BLE001
+        LoggingManager.warning(f"game_history: couldn't record the achievement catalog version: {e}")
+    finally:
+        if conn is not None:
+            _release_connection(conn)
+    print(f"game_history: achievement catalog {version} back-filled, {written} new unlocks.")
+    return written
 
 
 def get_player_profile_stats(username: str) -> Optional[dict]:
@@ -1532,6 +1841,137 @@ def rename_player(old_username: str, new_username: str) -> bool:
     except Exception as e:  # noqa: BLE001 -- includes a uniqueness-constraint race, deliberately not special-cased
         LoggingManager.warning(f"game_history.rename_player failed: {e}")
         return False
+    finally:
+        if conn is not None:
+            _release_connection(conn)
+
+
+def taken_usernames(candidates: list) -> set:
+    """Which of `candidates` already belong to a players row, in one query --
+    for suggesting a free variant of a first-time Google user's name. No
+    database means nothing is taken; a failed lookup reports every candidate
+    as taken (same fail-safe direction as username_is_taken)."""
+    if not candidates or not is_configured():
+        return set()
+    ensure_schema()
+    if not _schema_ready:
+        return set(candidates)
+    conn = None
+    try:
+        conn = _connect()
+        with conn, conn.cursor() as cur:
+            cur.execute("SELECT username FROM players WHERE username = ANY(%s)", (list(candidates),))
+            return {row[0] for row in cur.fetchall()}
+    except Exception as e:  # noqa: BLE001
+        LoggingManager.warning(f"game_history.taken_usernames failed: {e}")
+        return set(candidates)
+    finally:
+        if conn is not None:
+            _release_connection(conn)
+
+
+# Every column that points at a players row and isn't cascaded away with it,
+# moved over when a guest merges into an existing Google account (see
+# link_google_account). Tables keyed by (something, player) drop the guest's
+# copy first wherever the Google account already has one.
+_MERGE_PLAIN_COLUMNS = [
+    ("player_games", "player_id"), ("game_rounds", "winner_id"), ("game_actions", "player_id"),
+    ("games", "host_player_id"), ("games", "winner_id"),
+    ("games", "player_1"), ("games", "player_2"), ("games", "player_3"), ("games", "player_4"), ("games", "player_5"),
+    ("ratings", "user_id"),
+]
+_MERGE_KEYED_COLUMNS = [
+    ("round_players", "player_id", "round_id"),
+    ("game_results", "user_id", "game_id"),
+    ("player_achievements", "player_id", "achievement_id"),
+]
+
+
+def link_google_account(username: str, google_id: str, email: Optional[str], allow_merge: bool = True) -> dict:
+    """
+    Connects a Google account to the guest account `username` -- see
+    web_server.py's /api/auth/google/link, which has already checked the
+    guest's login token and the Google sign-in.
+
+    - That Google account has never signed in: the guest's own players row
+      simply gains the google_id, so the username, every past game and
+      every login stay exactly as they were.
+    - It already has an account (signed in with Google on another device):
+      the guest's games, rounds, actions and results move into that
+      account and the guest row is deleted. The Google account keeps its
+      own username and rating. Only allowed when `allow_merge` (the caller
+      refuses while the guest is seated in a live game, whose result would
+      otherwise be saved under a username that no longer exists).
+      A game where the guest and that account sat at the same table
+      (one person on two devices) keeps both seats, now under one player.
+
+    Returns {"status": "linked" | "merged" | "already_linked", "player_id",
+    "username", "display_name"} or {"error": "not_found" | "other_google" |
+    "in_game" | "failed"}.
+    """
+    if not is_configured():
+        return {"error": "failed"}
+    ensure_schema()
+    if not _schema_ready:
+        return {"error": "failed"}
+    conn = None
+    try:
+        conn = _connect()
+        with conn, conn.cursor() as cur:
+            cur.execute(
+                "SELECT id, display_name, google_id, games_played, games_won FROM players "
+                "WHERE username = %s FOR UPDATE",
+                (username,),
+            )
+            guest = cur.fetchone()
+            if guest is None:
+                return {"error": "not_found"}
+            guest_id, guest_display, guest_google, guest_played, guest_won = guest
+            if guest_google is not None:
+                if guest_google != google_id:
+                    return {"error": "other_google"}
+                return {"status": "already_linked", "player_id": guest_id,
+                        "username": username, "display_name": guest_display}
+
+            cur.execute("SELECT id, username, display_name FROM players WHERE google_id = %s FOR UPDATE",
+                        (google_id,))
+            existing = cur.fetchone()
+            if existing is None:
+                cur.execute("UPDATE players SET google_id = %s, email = %s, last_seen_at = now() WHERE id = %s",
+                            (google_id, email, guest_id))
+                result = {"status": "linked", "player_id": guest_id,
+                          "username": username, "display_name": guest_display}
+            else:
+                if not allow_merge:
+                    return {"error": "in_game"}
+                target_id, target_username, target_display = existing
+                for table, column, key in _MERGE_KEYED_COLUMNS:
+                    cur.execute(
+                        f"DELETE FROM {table} g WHERE g.{column} = %s AND EXISTS "
+                        f"(SELECT 1 FROM {table} t WHERE t.{column} = %s AND t.{key} = g.{key})",
+                        (guest_id, target_id),
+                    )
+                    cur.execute(f"UPDATE {table} SET {column} = %s WHERE {column} = %s", (target_id, guest_id))
+                for table, column in _MERGE_PLAIN_COLUMNS:
+                    cur.execute(f"UPDATE {table} SET {column} = %s WHERE {column} = %s", (target_id, guest_id))
+                cur.execute(
+                    "UPDATE players SET games_played = games_played + %s, games_won = games_won + %s, "
+                    "last_seen_at = now() WHERE id = %s",
+                    (guest_played, guest_won, target_id),
+                )
+                cur.execute("DELETE FROM players WHERE id = %s", (guest_id,))
+                result = {"status": "merged", "player_id": target_id,
+                          "username": target_username, "display_name": target_display}
+        # Same cache reasons as rename_player: the guest name may no longer
+        # exist, and either account's cached rating/id may now be wrong.
+        _invalidate_leaderboard_cache()
+        with _player_sessions_lock:
+            _player_sessions.pop(username, None)
+            _player_sessions.pop(result["username"], None)
+        return result
+    except Exception as e:  # noqa: BLE001 -- e.g. that Google email already on another account
+        LoggingManager.warning(f"game_history.link_google_account failed: {e}")
+        return {"error": "failed"}
     finally:
         if conn is not None:
             _release_connection(conn)

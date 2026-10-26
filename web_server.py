@@ -663,6 +663,11 @@ def _keep_database_awake() -> None:
 
 if game_history.is_configured():
     threading.Thread(target=_keep_database_awake, daemon=True, name="DatabasePing").start()
+    # A deploy that adds achievements unlocks them from everyone's past
+    # games (see backfill_achievements_if_catalog_changed) -- in the
+    # background, so it never delays the server coming up.
+    threading.Thread(target=game_history.backfill_achievements_if_catalog_changed, daemon=True,
+                     name="AchievementBackfill").start()
 
 
 def _is_valid_identify_ack(data: dict, game_id: str) -> bool:
@@ -811,7 +816,26 @@ def api_auth_google():
     existing = game_history.find_player_by_google_id(claims["sub"])
     if existing:
         return jsonify({**existing, "login_token": game_history.issue_login_token(existing["username"])})
-    return jsonify({"needs_username": True, "suggested_display_name": claims.get("name") or ""})
+    name = claims.get("name") or ""
+    return jsonify({"needs_username": True, "suggested_display_name": name,
+                    "suggested_username": _free_username_like(name)})
+
+
+def _free_username_like(name: str) -> str:
+    """`name` itself if nobody has it, else the first free "name 2",
+    "name 3", ... -- pre-filled for a first-time Google sign-in so a taken
+    Google name doesn't cost them a failed attempt. Still just a suggestion
+    (the box stays editable and claim_username re-checks); "" when there's
+    no name or nothing free nearby, which leaves the box empty."""
+    base = " ".join(name.split())[:_MAX_USERNAME_LENGTH]
+    if not base:
+        return ""
+    candidates = [base]
+    for n in range(2, 100):
+        suffix = f" {n}"
+        candidates.append(base[:_MAX_USERNAME_LENGTH - len(suffix)].rstrip() + suffix)
+    taken = game_history.taken_usernames(candidates) | _active_usernames()
+    return next((c for c in candidates if c not in taken), "")
 
 
 @app.route("/api/auth/google/claim_username", methods=["POST"])
@@ -856,6 +880,57 @@ def api_auth_google_claim_username():
 
     return jsonify({"username": username, "display_name": display_name,
                     "login_token": game_history.issue_login_token(username)})
+
+
+@app.route("/api/auth/google/link", methods=["POST"])
+def api_auth_google_link():
+    """
+    "Connect Google" for a guest: attaches the Google account to the guest
+    account the browser is signed in as -- proven by its login token, the
+    same proof every other guest action needs -- keeping the username and
+    every past game (see game_history.link_google_account, including what
+    happens when that Google account already exists). Then unlocks every
+    achievement their past games earned, since games played as a guest
+    never counted. Returns the account the browser should now be signed in
+    as, with a fresh login token for it.
+    """
+    body = request.get_json(silent=True) or {}
+    token = body.get("id_token")
+    username = (body.get("username") or "").strip()
+    if not isinstance(token, str) or not token or not username:
+        return jsonify({"error": "id_token and username are required"}), 400
+    if not game_history.is_configured():
+        return jsonify({"error": "Connecting Google isn't available right now."}), 503
+
+    owns = game_history.login_token_matches(username, body.get("login_token"))
+    if owns is None:
+        return jsonify({"error": "Couldn't reach the server's database. Please try again."}), 503
+    if not owns:
+        return jsonify({"error": _SIGN_IN_AGAIN}), 403
+
+    claims = _verify_google_id_token(token)
+    if claims is None:
+        return jsonify({"error": "Invalid or expired Google sign-in. Please try again."}), 401
+
+    result = game_history.link_google_account(username, claims["sub"], claims.get("email"),
+                                              allow_merge=username not in _active_usernames())
+    error = result.get("error")
+    if error == "other_google":
+        return jsonify({"error": "This account is already connected to a different Google account."}), 409
+    if error == "in_game":
+        return jsonify({"error": "That Google account already has a profile. Finish your current game, "
+                                 "then connect again to move this guest's games into it."}), 409
+    if error:
+        return jsonify({"error": "Couldn't connect your Google account. Please try again."}), 500
+
+    unlocked = game_history.recompute_achievements([result["player_id"]]) or 0
+    return jsonify({
+        "username": result["username"],
+        "display_name": result["display_name"],
+        "login_token": game_history.issue_login_token(result["username"]),
+        "merged": result["status"] == "merged",
+        "achievements_unlocked": unlocked,
+    })
 
 
 def _active_usernames() -> set[str]:
