@@ -35,7 +35,14 @@ import { swr } from '../utils/swrCache.js';
 export async function fetchJSON(url, opts) {
   const res = await fetch(url, opts);
   const body = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
+  if (!res.ok) {
+    // The parsed body rides along for callers that read more than the
+    // message (e.g. a taken username's `suggestion`).
+    const err = new Error(body.error || `HTTP ${res.status}`);
+    err.status = res.status;
+    err.body = body;
+    throw err;
+  }
   return body;
 }
 

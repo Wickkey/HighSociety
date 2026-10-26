@@ -138,6 +138,15 @@
 
 .login-panel { text-align: center; }
 .login-panel h2 { margin-bottom: 0.5rem; }
+.login-crest {
+  width: 52px; height: 52px; margin: 0.2rem auto 0.8rem;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  border: 1px solid rgba(185, 138, 47, 0.35);
+  color: var(--accent);
+  font-size: 1.6rem; line-height: 1;
+}
 .login-tagline { margin: 0 auto 1.4rem; max-width: 34ch; color: var(--muted); font-size: 0.95rem; line-height: 1.45; }
 .login-notice {
   margin: -0.6rem 0 1.2rem; padding: 0.6rem 0.8rem; border-radius: 10px;
@@ -151,13 +160,35 @@
                         shifts once it actually renders in (see GIS's own
                         onload -- initGoogleSignIn in app.js) */
 }
-.google-signin-container:empty { min-height: 0; }
+
+/* The small line under each sign-in option. Under Google it also reports
+   "Signing you in" / a failure in the same slot, so its height is fixed. */
+.login-option-hint {
+  margin: 0.5rem auto 0;
+  max-width: 36ch;
+  min-height: 2.6em; /* two lines: the perk text wraps to two on most widths */
+  color: var(--muted);
+  font-size: 0.8rem;
+  line-height: 1.3;
+}
+.login-option-hint.is-busy::before {
+  content: "";
+  display: inline-block;
+  width: 0.8em; height: 0.8em;
+  margin-right: 0.45em;
+  vertical-align: -0.1em;
+  border-radius: 50%;
+  border: 2px solid var(--panel-border);
+  border-top-color: var(--accent);
+  animation: rules-spinner-rotate 0.8s linear infinite;
+}
+.login-option-hint.is-error { color: var(--danger); font-weight: 600; }
 
 .login-divider {
   display: flex;
   align-items: center;
   gap: 0.8rem;
-  margin: 1.2rem 0;
+  margin: 1.1rem 0;
   color: var(--muted);
   font-size: 0.78rem;
   text-transform: uppercase;
@@ -169,36 +200,167 @@
   height: 1px;
   background: var(--panel-border);
 }
-/* No divider (nothing to divide against) when the Google button never
-   rendered at all -- an empty container means GOOGLE_CLIENT_ID wasn't
-   configured, matching today's guest-only default. */
-.google-signin-container:empty + .login-divider { display: none; }
 
 /* Gold-accented rather than the generic grey .secondary treatment (used
    elsewhere for Cancel/Back) -- on this screen it's a real, equally-weighted
-   choice next to Google, not a de-emphasized fallback action. */
+   choice next to Google, not a de-emphasized fallback action. Pill-shaped
+   and as tall as Google's button above it, so the two read as a pair. */
 #btn-continue-guest {
   width: 100%;
+  max-width: 400px;
+  min-height: 44px;
+  border-radius: 999px;
   border-color: var(--accent-light);
   color: var(--accent-strong);
   font-weight: 600;
 }
-#btn-continue-guest:hover { background: var(--accent-soft); }
+#btn-continue-guest:hover:not(:disabled) { background: var(--accent-soft); }
 
-#login-username-form { margin-top: 1.1rem; text-align: left; }
+/* Step 2: picking a username. */
+#login-step-name { text-align: left; }
+#login-step-name h2, #login-step-name .login-tagline { text-align: center; }
+#login-step-name .login-tagline { margin-bottom: 1.2rem; }
+.login-google-identity {
+  display: flex; align-items: center; justify-content: center; gap: 0.45rem;
+  width: fit-content; max-width: 100%;
+  margin: 0 auto 0.9rem;
+  padding: 0.3rem 0.75rem 0.3rem 0.5rem;
+  border-radius: 999px;
+  background: var(--panel-bg-soft);
+  border: 1px solid var(--panel-border);
+  font-size: 0.82rem; color: var(--muted);
+}
+.login-google-identity span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.login-google-g { width: 15px; height: 15px; flex: 0 0 auto; }
+.login-continue { width: 100%; min-height: 44px; margin-top: 0.4rem; }
 
+/* ---------------- username field (login + Account rename) ----------------
+   An input with a person icon on the left and, on the right, whatever the
+   live availability check last said (see ui/usernameField.js): a spinner
+   while checking, a tick when free, a cross when not. */
+.username-label { display: block; margin-bottom: 0.3rem; font-size: 0.9rem; font-weight: 500; }
 .username-input-row { display: flex; gap: 0.5rem; margin-top: 0.3rem; }
-.username-input-row input { flex: 1 1 auto; margin-top: 0; }
+.username-label + .username-input-row { margin-top: 0; }
+.username-field {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--panel-border);
+  background: var(--panel-bg-soft);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.username-field:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.username-field[data-state="ok"] { border-color: var(--chip-money); }
+.username-field[data-state="ok"]:focus-within { box-shadow: 0 0 0 3px rgba(31, 122, 77, 0.14); }
+.username-field[data-state="bad"] { border-color: var(--danger); }
+.username-field[data-state="bad"]:focus-within { box-shadow: 0 0 0 3px var(--danger-soft); }
+.username-field-icon {
+  position: absolute; left: 0.7rem;
+  width: 18px; height: 18px;
+  color: var(--muted);
+  pointer-events: none;
+}
+.username-field:focus-within .username-field-icon { color: var(--accent-strong); }
+.username-field input,
+label .username-field input {
+  flex: 1 1 auto;
+  min-width: 0;
+  width: 100%;
+  margin: 0;
+  padding: 0.6rem 2.3rem 0.6rem 2.3rem;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  font-size: 1rem;
+  font-weight: 400;
+}
+.username-field input:focus { outline: none; }
+.username-field-state {
+  position: absolute; right: 0.7rem;
+  width: 18px; height: 18px;
+  display: flex; align-items: center; justify-content: center;
+  pointer-events: none;
+}
+.username-field[data-state="checking"] .username-field-state::after {
+  content: "";
+  width: 14px; height: 14px;
+  border-radius: 50%;
+  border: 2px solid var(--panel-border);
+  border-top-color: var(--accent);
+  animation: rules-spinner-rotate 0.8s linear infinite;
+}
+.username-field[data-state="ok"] .username-field-state,
+.username-field[data-state="bad"] .username-field-state {
+  border-radius: 50%;
+  color: #fff;
+  animation: username-state-pop 0.18s ease-out;
+}
+.username-field[data-state="ok"] .username-field-state { background: var(--chip-money); }
+.username-field[data-state="bad"] .username-field-state { background: var(--danger); }
+.username-field[data-state="ok"] .username-field-state::after {
+  content: ""; width: 4px; height: 8px; margin-top: -2px;
+  border: solid #fff; border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+.username-field[data-state="bad"] .username-field-state::after {
+  content: "\00d7"; font-size: 15px; font-weight: 700; line-height: 1;
+}
+@keyframes username-state-pop { from { transform: scale(0.4); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+@media (prefers-reduced-motion: reduce) {
+  .username-field-state, .username-field-state::after { animation: none !important; }
+}
+
+/* One line, always -- so "Checking…" / "Available" / "Taken" swapping in
+   never moves the button below. */
+.username-status-row {
+  display: flex; align-items: flex-start; gap: 0.6rem;
+  min-height: 1.35rem;
+  margin: 0.4rem 0 0.7rem;
+}
+.username-status { flex: 1 1 auto; margin: 0; font-size: 0.8rem; line-height: 1.35; color: var(--muted); }
+.username-status-ok { color: var(--chip-money); font-weight: 600; }
+.username-status-bad { color: var(--danger); font-weight: 600; }
+.username-suggestion {
+  display: inline; width: auto; margin: 0; padding: 0;
+  border: 0; background: none; box-shadow: none;
+  color: var(--accent-strong); font: inherit; font-weight: 700;
+  text-decoration: underline; text-underline-offset: 2px;
+  cursor: pointer;
+}
+.username-suggestion:hover { color: var(--accent); background: none; }
+.username-count { flex: 0 0 auto; font-size: 0.75rem; color: var(--muted); font-variant-numeric: tabular-nums; line-height: 1.35rem; }
+.username-count-near { color: var(--accent-strong); font-weight: 600; }
+
 .shuffle-btn {
   flex: 0 0 auto;
   width: auto;
   margin-top: 0;
-  padding: 0.5rem 0.7rem;
+  padding: 0.5rem 0.75rem;
   display: inline-flex;
   align-items: center;
   justify-content: center;
 }
-.shuffle-btn svg { width: 17px; height: 17px; }
+.shuffle-btn svg { width: 17px; height: 17px; transition: transform 0.35s ease; }
+.shuffle-btn.is-spinning svg { transform: rotate(180deg); }
+
+/* A submit button mid-request: its label plus a spinner, not clickable. */
+button.is-busy { pointer-events: none; }
+button.is-busy:disabled { opacity: 0.85; }
+button.is-busy::before {
+  content: "";
+  display: inline-block;
+  width: 0.85em; height: 0.85em;
+  margin-right: 0.5em;
+  vertical-align: -0.12em;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.45);
+  border-top-color: #fff;
+  animation: rules-spinner-rotate 0.8s linear infinite;
+}
 
 /* ---------------- account screen ---------------- */
 
@@ -290,7 +452,8 @@
 .account-meta-item { display: flex; align-items: center; gap: 0.35rem; font-size: 0.78rem; color: var(--muted); }
 .account-meta-item svg { width: 14px; height: 14px; flex-shrink: 0; }
 .account-meta-row.loading .account-meta-item span { animation: stat-skeleton-pulse 1.4s ease-in-out infinite; }
-#account-username-edit { margin-top: 1rem; }
+#account-username-edit { margin: 1rem 0 1.4rem; }
+#account-username-edit .button-row { margin-top: 0; }
 .account-saved { color: var(--chip-money); font-weight: 600; margin: 0.4rem 0 0; }
 
 .account-stats-row {
