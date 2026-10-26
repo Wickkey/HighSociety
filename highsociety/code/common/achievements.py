@@ -20,7 +20,21 @@ history()'s own docstring), so detection has to happen at game-end, right
 where web_server.py's _record_game_history already runs, before the room
 is torn down.
 """
+import hashlib
 from dataclasses import dataclass
+
+# What an achievement needs to be decided from a stored game (see
+# game_history.recompute_achievements, which rebuilds past games):
+# - CAREER: totals across a player's history -- never per game.
+# - STANDINGS: final points/money/winner/elimination and the bot mix, which
+#   every stored game has.
+# - ROUNDS: who took which card and what they paid (game_rounds), which only
+#   newer games have.
+# - ACTIONS: every bid and pass in order (game_actions), likewise newer only.
+# A stored game without the data an achievement needs is skipped for it,
+# never counted as "nothing happened" -- otherwise a game with no round data
+# would award Clean Hands simply because no disgrace card was recorded.
+CAREER, STANDINGS, ROUNDS, ACTIONS = "career", "standings", "rounds", "actions"
 
 
 @dataclass(frozen=True)
@@ -28,47 +42,48 @@ class Achievement:
     id: str
     name: str
     description: str
+    needs: str = STANDINGS
 
 
 ACHIEVEMENTS: list[Achievement] = [
-    Achievement("first_win", "First Victory", "Win your first game."),
-    Achievement("hat_trick", "Hat Trick", "Win 3 games."),
-    Achievement("high_society_regular", "High Society Regular", "Win 5 games."),
-    Achievement("old_money", "Old Money", "Win 10 games."),
+    Achievement("first_win", "First Victory", "Win your first game.", CAREER),
+    Achievement("hat_trick", "Hat Trick", "Win 3 games.", CAREER),
+    Achievement("high_society_regular", "High Society Regular", "Win 5 games.", CAREER),
+    Achievement("old_money", "Old Money", "Win 10 games.", CAREER),
     Achievement("giant_slayer", "Giant Slayer", "Win a game with a Hard bot at the table."),
-    Achievement("sniper", "Sniper", "Win an auction that only ever had one bid -- yours."),
-    Achievement("free_lunch", "Free Lunch", "Win an auction paying nothing."),
-    Achievement("minimalist", "Minimalist", "Win an auction for the lowest-value Painting."),
-    Achievement("full_set", "Full Set", "Collect every Prestige card in a single game."),
-    Achievement("collector", "Collector", "Win at least one of every card type offered in a game."),
-    Achievement("fearless", "Fearless", "Win a game without ever passing or folding on an auction."),
-    Achievement("master_of_disgrace", "Master of Disgrace", "Win a disgrace auction."),
-    Achievement("dynasty", "Dynasty", "Win 25 games."),
-    Achievement("socialite", "Socialite", "Play 10 games."),
-    Achievement("veteran", "Veteran", "Play 50 games."),
-    Achievement("on_a_roll", "On a Roll", "Win 3 games in a row."),
+    Achievement("sniper", "Sniper", "Win an auction that only ever had one bid -- yours.", ACTIONS),
+    Achievement("free_lunch", "Free Lunch", "Win an auction paying nothing.", ROUNDS),
+    Achievement("minimalist", "Minimalist", "Win an auction for the lowest-value Painting.", ROUNDS),
+    Achievement("full_set", "Full Set", "Collect every Prestige card in a single game.", ROUNDS),
+    Achievement("collector", "Collector", "Win at least one of every card type offered in a game.", ROUNDS),
+    Achievement("fearless", "Fearless", "Win a game without ever passing or folding on an auction.", ACTIONS),
+    Achievement("master_of_disgrace", "Master of Disgrace", "Win a disgrace auction.", ROUNDS),
+    Achievement("dynasty", "Dynasty", "Win 25 games.", CAREER),
+    Achievement("socialite", "Socialite", "Play 10 games.", CAREER),
+    Achievement("veteran", "Veteran", "Play 50 games.", CAREER),
+    Achievement("on_a_roll", "On a Roll", "Win 3 games in a row.", CAREER),
     Achievement("landslide", "Landslide", "Win a game by 10 or more points."),
     Achievement("photo_finish", "Photo Finish", "Win a game by 1 point or less."),
-    Achievement("clean_hands", "Clean Hands", "Win a game without taking a single disgrace card."),
-    Achievement("masterpiece", "Masterpiece", "Win the 10-value Painting."),
-    Achievement("high_roller", "High Roller", "Pay 20 or more for a single card."),
+    Achievement("clean_hands", "Clean Hands", "Win a game without taking a single disgrace card.", ROUNDS),
+    Achievement("masterpiece", "Masterpiece", "Win the 10-value Painting.", ROUNDS),
+    Achievement("high_roller", "High Roller", "Pay 20 or more for a single card.", ROUNDS),
     Achievement("narrow_escape", "Narrow Escape", "Escape elimination with just 1 more money than the poorest player."),
     Achievement("good_company", "Good Company", "Win a game against another person."),
     Achievement("hard_times", "Hard Times", "Win a game with two or more Hard bots at the table."),
     # Losing has its moments too.
     Achievement("good_sport", "Good Sport", "Finish a game you didn't win."),
-    Achievement("thick_skin", "Thick Skin", "Lose 10 games."),
+    Achievement("thick_skin", "Thick Skin", "Lose 10 games.", CAREER),
     Achievement("so_close", "So Close", "Lose a game by a single point."),
     Achievement("spent_it_all", "Spent It All", "Score the most points at the table, then get eliminated for having the least money."),
     Achievement("bankrupt", "Bankrupt", "Finish a game with no money left."),
-    Achievement("wallflower", "Wallflower", "Finish a game without winning a single auction."),
-    Achievement("social_pariah", "Social Pariah", "Take a Faux Pas, a Passe and a Scandale in one game."),
+    Achievement("wallflower", "Wallflower", "Finish a game without winning a single auction.", ROUNDS),
+    Achievement("social_pariah", "Social Pariah", "Take a Faux Pas, a Passe and a Scandale in one game.", ROUNDS),
     Achievement("in_the_red", "In the Red", "Finish a game with a negative score."),
     # Elo levels (players start at 1000).
-    Achievement("rising_star", "Rising Star", "Reach a rating of 1100."),
-    Achievement("connoisseur", "Connoisseur", "Reach a rating of 1200."),
-    Achievement("aristocrat", "Aristocrat", "Reach a rating of 1300."),
-    Achievement("living_legend", "Living Legend", "Reach a rating of 1500."),
+    Achievement("rising_star", "Rising Star", "Reach a rating of 1100.", CAREER),
+    Achievement("connoisseur", "Connoisseur", "Reach a rating of 1200.", CAREER),
+    Achievement("aristocrat", "Aristocrat", "Reach a rating of 1300.", CAREER),
+    Achievement("living_legend", "Living Legend", "Reach a rating of 1500.", CAREER),
 ]
 
 # username (cumulative win count) -> achievement id. Checked by
@@ -246,3 +261,16 @@ def detect_per_game_achievements(
             unlocked[username].add("so_close")
 
     return {u: ids for u, ids in unlocked.items() if ids}
+
+
+def catalog_version() -> str:
+    """Changes whenever an achievement is added or its data needs change --
+    game_history stores the last version it back-filled for, and re-runs the
+    back-fill on startup when this differs. Bump RULES_REVISION by hand when
+    an existing achievement's rule changes in a way that could unlock it for
+    more past games."""
+    key = ";".join(f"{a.id}:{a.needs}" for a in sorted(ACHIEVEMENTS, key=lambda a: a.id))
+    return f"{RULES_REVISION}-{hashlib.sha256(key.encode()).hexdigest()[:12]}"
+
+
+RULES_REVISION = 1

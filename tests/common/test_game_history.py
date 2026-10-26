@@ -2080,3 +2080,76 @@ def test_record_finished_game_awards_elo_levels_from_the_new_rating(database_url
     assert (10, "rising_star") in achievements and (10, "connoisseur") not in achievements
     assert {(11, "rising_star"), (11, "connoisseur")} <= achievements
     assert (11, "aristocrat") not in achievements
+
+
+# ------------------------------------------- achievements from stored games --
+
+_T = [datetime.datetime(2026, 1, d, tzinfo=datetime.timezone.utc) for d in range(1, 29)]
+
+
+def test_career_unlocks_are_dated_by_the_game_that_crossed_the_threshold():
+    games = [(_T[i], won) for i, won in enumerate([False, True, True, True] + [False] * 8)]
+    unlocked = game_history._career_unlocks(games, ratings=[(1050, _T[1]), (1110, _T[3])], current_elo=1090)
+    assert unlocked["first_win"] == _T[1]
+    assert unlocked["hat_trick"] == _T[3] and unlocked["on_a_roll"] == _T[3]
+    assert unlocked["socialite"] == _T[9]  # 10th game
+    assert "thick_skin" not in unlocked  # 9 losses
+    # Peak rating counts, even though the current one is back under 1100.
+    assert unlocked["rising_star"] == _T[3]
+
+
+def _seat(pid, seat, points, money, winner=False, eliminated=False):
+    return (pid, seat, points, money, winner, eliminated)
+
+
+def test_stored_game_without_round_data_awards_only_standings_achievements():
+    seats = [_seat(1, 0, 30, 10, winner=True), _seat(None, 1, 18, 9), _seat(None, 2, 40, 0, eliminated=True)]
+    unlocked = game_history._stored_game_unlocks(1, seats, ["hard", "hard"], rounds=[], actions=[])
+    assert {"landslide", "giant_slayer", "hard_times"} <= unlocked
+    # No rounds stored: never "took no disgrace card" / "never passed".
+    assert not {"clean_hands", "fearless", "wallflower"} & unlocked
+
+
+def test_stored_game_rebuilds_auctions_from_rounds_and_actions():
+    seats = [_seat(1, 0, 30, 10, winner=True), _seat(2, 1, 18, 9)]
+    rounds = [(1, "Painting", 10, 1, 0, 20, {1: 20, 2: 0}),
+              (2, "Passe", -5, None, 1, None, {1: 0, 2: 0})]  # bot-less seat 1 took the Passe, by seat
+    actions = [(1, 1, 0, "BID"), (1, 2, 1, "PASS"), (2, 2, 1, "PASS")]
+    unlocked = game_history._stored_game_unlocks(1, seats, [], rounds, actions)
+    assert {"masterpiece", "high_roller", "sniper", "clean_hands"} <= unlocked
+    assert "fearless" in unlocked  # player 1 never passed
+
+
+def test_stored_game_with_rounds_but_no_actions_skips_action_achievements():
+    seats = [_seat(1, 0, 30, 10, winner=True), _seat(2, 1, 18, 9)]
+    rounds = [(1, "Painting", 10, 1, 0, 5, {1: 5})]
+    unlocked = game_history._stored_game_unlocks(1, seats, [], rounds, actions=[])
+    assert "masterpiece" in unlocked
+    assert not {"sniper", "fearless"} & unlocked
+
+
+def test_backfill_skips_when_the_catalog_version_is_unchanged(database_url):
+    game_history._schema_ready = True
+    conn, cursor = _fake_connection()
+    cursor.fetchone.side_effect = None
+    cursor.fetchone.return_value = (game_history.achievement_catalog.catalog_version(),)
+    with patch.object(game_history, "_connect", return_value=conn), \
+            patch.object(game_history, "recompute_achievements") as recompute:
+        assert game_history.backfill_achievements_if_catalog_changed() is None
+    recompute.assert_not_called()
+
+
+def test_backfill_records_the_version_only_after_a_successful_rebuild(database_url):
+    game_history._schema_ready = True
+    conn, cursor = _fake_connection()
+    cursor.fetchone.side_effect = None
+    cursor.fetchone.return_value = ("old-version",)
+    with patch.object(game_history, "_connect", return_value=conn), \
+            patch.object(game_history, "recompute_achievements", return_value=None):
+        assert game_history.backfill_achievements_if_catalog_changed() is None
+    assert not _queries(cursor, "INSERT INTO app_state")
+
+    with patch.object(game_history, "_connect", return_value=conn), \
+            patch.object(game_history, "recompute_achievements", return_value=5):
+        assert game_history.backfill_achievements_if_catalog_changed() == 5
+    assert _queries(cursor, "INSERT INTO app_state")

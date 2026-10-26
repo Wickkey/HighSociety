@@ -12,6 +12,7 @@ import { fetchJSON } from '../lobby/lobby.js';
 import { fetchGamesPage, renderIfChanged } from '../lobby/gameHistory.js';
 import { createEloChartController, fetchRatingHistory } from '../ui/eloChart.js';
 import { swr } from '../utils/swrCache.js';
+import { googleSignInConfigured } from '../ui/googleButton.js';
 
 // Static catalog mirroring highsociety/code/common/achievements.py's
 // ACHIEVEMENTS -- small enough to duplicate client-side (36 entries) rather
@@ -305,7 +306,7 @@ export function onEloChartRangeClick(e) { eloChartController.onRangeClick(e); }
 // the whole tile).
 async function loadEloChart(profile) {
   if (!profile || !profile.google_id) {
-    eloChartController.showUnavailable('Sign in with Google to start tracking your Elo rating.');
+    eloChartController.showUnavailable('Connect Google to start tracking your Elo rating.');
     return;
   }
   await eloChartController.load(`/api/profile/${encodeURIComponent(profile.username)}/rating_history`, {
@@ -382,6 +383,7 @@ async function loadAchievements() {
     renderAchievementsIfChanged(grid, new Set());
     if (!profile) return;
     show(guestNote); // the screen's own note -- a toast saying the same thing on top of it was a double nag
+    $('achievements-connect-google').classList.toggle('hidden', !googleSignInConfigured());
     return;
   }
   hide(guestNote);
@@ -411,6 +413,7 @@ export function showAccountScreen() {
   // Unrated/numeric split above already uses.
   $('account-google-badge').classList.toggle('hidden', !(profile && profile.google_id));
   $('account-guest-badge').classList.toggle('hidden', !(profile && !profile.google_id));
+  $('account-connect-google').classList.toggle('hidden', !(profile && !profile.google_id && googleSignInConfigured()));
   hide($('account-username-edit')); // collapsed by default -- see onAccountEditUsernameClick
   hide($('account-error'));
   hide($('account-saved'));

@@ -3,7 +3,9 @@ import { $, hide, show, showError, showScreen } from '../utils/dom.js';
 import {
   fetchJSON, currentRoomCode, refreshStatus, startPolling, showHomeTiles, showHomeTile, startRoomsPolling,
 } from '../lobby/lobby.js';
-import { saveProfile, renderProfileChip } from './profile.js';
+import { loadProfile, loginToken, saveProfile, renderProfileChip } from './profile.js';
+import { renderGoogleButtons } from '../ui/googleButton.js';
+import { showToast } from '../ui/notifications.js';
 import { prefetchAccountStats, showAccountScreen, showAchievementsScreen } from '../account/account.js';
 import { showLeaderboardScreen } from '../lobby/leaderboard.js';
 import { showGameHistoryScreen } from '../lobby/gameHistory.js';
@@ -174,6 +176,11 @@ export async function onLoginUsernameContinue() {
 // (and can't meaningfully) verify itself; /api/auth/google does that
 // server-side before this client trusts anything in it.
 async function handleGoogleCredential(response) {
+  const current = loadProfile();
+  if (current && !current.google_id) {
+    connectGoogleToGuest(response.credential, current);
+    return;
+  }
   hide($('login-username-error'));
   try {
     const result = await fetchJSON('/api/auth/google', {
@@ -183,7 +190,7 @@ async function handleGoogleCredential(response) {
     });
     if (result.needs_username) {
       _pendingGoogleIdToken = response.credential;
-      showLoginUsernameForm(result.suggested_display_name, false);
+      showLoginUsernameForm(result.suggested_username || result.suggested_display_name, false);
     } else {
       saveProfile(result.username, result.username, decodeJwtPayload(response.credential).sub, result.login_token || null);
       proceedPastLogin();
@@ -192,6 +199,32 @@ async function handleGoogleCredential(response) {
     _pendingGoogleIdToken = null;
     showLoginUsernameForm('', false);
     showError($('login-username-error'), e.message);
+  }
+}
+
+// "Connect Google" from a guest account (Account or Achievements screen):
+// the guest keeps its username and every past game, and the achievements
+// those games earned unlock now (see /api/auth/google/link). If this Google
+// account already had a profile, the guest's games move into it and this
+// browser switches to that profile instead.
+async function connectGoogleToGuest(credential, profile) {
+  try {
+    const result = await fetchJSON('/api/auth/google/link', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id_token: credential, username: profile.username, login_token: loginToken() }),
+    });
+    saveProfile(result.username, result.username, decodeJwtPayload(credential).sub, result.login_token || null);
+    renderProfileChip();
+    const n = result.achievements_unlocked || 0;
+    const unlocked = n ? ` ${n} achievement${n === 1 ? '' : 's'} unlocked from your past games.` : '';
+    showToast(result.merged
+      ? `Google connected. Your guest games are now part of ${result.username}.${unlocked}`
+      : `Google connected.${unlocked}`, 5000);
+    if (!$('screen-achievements').classList.contains('hidden')) showAchievementsScreen();
+    else if (!$('screen-account').classList.contains('hidden')) showAccountScreen();
+  } catch (e) {
+    showToast(e.message, 5000);
   }
 }
 
@@ -204,9 +237,7 @@ async function handleGoogleCredential(response) {
 export function initGoogleSignIn() {
   if (!window.GOOGLE_CLIENT_ID || !window.google || !window.google.accounts) return;
   google.accounts.id.initialize({ client_id: window.GOOGLE_CLIENT_ID, callback: handleGoogleCredential });
-  google.accounts.id.renderButton($('google-signin-container'), {
-    theme: 'filled_black', size: 'large', width: 280, text: 'continue_with',
-  });
+  renderGoogleButtons();
 }
 // index.html's inline onload="window.initGoogleSignIn && initGoogleSignIn()"
 // calls this by name on `window` -- ES module top-level functions are not

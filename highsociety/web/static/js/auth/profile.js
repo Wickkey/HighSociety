@@ -220,7 +220,7 @@ export async function onLogout() {
     closeProfilePopover();
     const ok = await confirmDialog(
       `You're playing as a guest. If you log out, you can't get back to "${profile.username}" or its game history. `
-      + 'Sign in with Google next time to keep your account across devices.',
+      + 'To keep it, connect Google from your Account page first.',
       'Log out',
     );
     if (!ok) return;

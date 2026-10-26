@@ -1841,7 +1841,25 @@ def test_auth_google_reports_needs_username_for_a_first_time_account(monkeypatch
     resp = web_server.app.test_client().post("/api/auth/google", json={"id_token": "valid"})
     body = resp.get_json()
     assert resp.status_code == 200
-    assert body == {"needs_username": True, "suggested_display_name": "Alice A"}
+    assert body == {"needs_username": True, "suggested_display_name": "Alice A", "suggested_username": "Alice A"}
+
+
+def test_auth_google_suggests_a_free_variant_when_the_google_name_is_taken(monkeypatch):
+    monkeypatch.setattr(web_server, "_verify_google_id_token",
+                         lambda token: {"sub": "g-123", "email": "a@example.com", "name": "Alice A"})
+    monkeypatch.setattr(game_history, "find_player_by_google_id", lambda google_id: None)
+    monkeypatch.setattr(game_history, "taken_usernames", lambda names: {"Alice A", "Alice A 2"} & set(names))
+
+    resp = web_server.app.test_client().post("/api/auth/google", json={"id_token": "valid"})
+    assert resp.get_json()["suggested_username"] == "Alice A 3"
+
+
+def test_free_username_variant_stays_within_the_length_limit(monkeypatch):
+    long_name = "A" * 40
+    base = "A" * web_server._MAX_USERNAME_LENGTH
+    monkeypatch.setattr(game_history, "taken_usernames", lambda names: {base} & set(names))
+    suggestion = web_server._free_username_like(long_name)
+    assert suggestion.endswith(" 2") and len(suggestion) <= web_server._MAX_USERNAME_LENGTH
 
 
 def test_auth_google_returns_the_existing_account_when_already_linked(monkeypatch):
@@ -2697,3 +2715,84 @@ def test_a_failure_while_setting_up_the_game_also_closes_the_room(running_web_se
         threading.Event().wait(0.1)
     assert room.state == "finished"
     player.close()
+
+
+# ------------------------------------------------- /api/auth/google/link --
+
+@pytest.fixture
+def linkable(monkeypatch):
+    """A configured database where `guest-1` holds a valid login token and
+    the Google token is valid; link/recompute calls are recorded."""
+    calls = {}
+    monkeypatch.setattr(game_history, "is_configured", lambda: True)
+    monkeypatch.setattr(game_history, "login_token_matches",
+                        lambda username, token: username == "guest-1" and token == "tok")
+    monkeypatch.setattr(web_server, "_verify_google_id_token",
+                        lambda token: {"sub": "g-9", "email": "g@example.com", "name": "G"})
+
+    def link(username, google_id, email, allow_merge=True):
+        calls["link"] = (username, google_id, email, allow_merge)
+        return calls.get("link_result", {"status": "linked", "player_id": 42,
+                                         "username": username, "display_name": username})
+    monkeypatch.setattr(game_history, "link_google_account", link)
+
+    def recompute(player_ids=None):
+        calls["recompute"] = player_ids
+        return 3
+    monkeypatch.setattr(game_history, "recompute_achievements", recompute)
+    return calls
+
+
+def _link(body):
+    return web_server.app.test_client().post("/api/auth/google/link", json=body)
+
+
+def test_link_connects_the_guest_and_unlocks_past_achievements(linkable):
+    resp = _link({"id_token": "valid", "username": "guest-1", "login_token": "tok"})
+    assert resp.status_code == 200
+    assert resp.get_json() == {"username": "guest-1", "display_name": "guest-1", "login_token": "token-for-guest-1",
+                               "merged": False, "achievements_unlocked": 3}
+    assert linkable["link"] == ("guest-1", "g-9", "g@example.com", True)
+    assert linkable["recompute"] == [42]
+
+
+def test_link_requires_the_guests_own_login_token(linkable):
+    resp = _link({"id_token": "valid", "username": "guest-1", "login_token": "someone-elses"})
+    assert resp.status_code == 403
+    assert "link" not in linkable
+
+
+def test_link_rejects_an_invalid_google_token(linkable, monkeypatch):
+    monkeypatch.setattr(web_server, "_verify_google_id_token", lambda token: None)
+    resp = _link({"id_token": "garbage", "username": "guest-1", "login_token": "tok"})
+    assert resp.status_code == 401
+    assert "link" not in linkable
+
+
+def test_link_waits_when_the_database_cant_confirm_the_guest(linkable, monkeypatch):
+    monkeypatch.setattr(game_history, "login_token_matches", lambda username, token: None)
+    resp = _link({"id_token": "valid", "username": "guest-1", "login_token": "tok"})
+    assert resp.status_code == 503
+    assert "link" not in linkable
+
+
+def test_link_into_an_existing_google_account_switches_the_browser_to_it(linkable):
+    linkable["link_result"] = {"status": "merged", "player_id": 7, "username": "alice", "display_name": "Alice"}
+    body = _link({"id_token": "valid", "username": "guest-1", "login_token": "tok"}).get_json()
+    assert body["username"] == "alice" and body["login_token"] == "token-for-alice" and body["merged"] is True
+    assert linkable["recompute"] == [7]
+
+
+def test_link_does_not_merge_while_the_guest_is_seated_in_a_game(linkable, monkeypatch):
+    monkeypatch.setattr(web_server, "_active_usernames", lambda: {"guest-1"})
+    linkable["link_result"] = {"error": "in_game"}
+    resp = _link({"id_token": "valid", "username": "guest-1", "login_token": "tok"})
+    assert linkable["link"][3] is False
+    assert resp.status_code == 409
+
+
+def test_link_refuses_an_account_tied_to_another_google_account(linkable):
+    linkable["link_result"] = {"error": "other_google"}
+    resp = _link({"id_token": "valid", "username": "guest-1", "login_token": "tok"})
+    assert resp.status_code == 409
+    assert "recompute" not in linkable

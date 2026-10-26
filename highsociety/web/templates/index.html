@@ -227,7 +227,7 @@
         <p class="login-tagline">The classic auction card game for 2–5 players. Outbid friends or bots for points, free, right in your browser.</p>
         <p id="login-notice" class="login-notice hidden"></p>
 
-        <div id="google-signin-container" class="google-signin-container"></div>
+        <div id="google-signin-container" class="google-signin-container" data-google-button></div>
 
         <div class="login-divider"><span>or</span></div>
 
@@ -349,6 +349,15 @@
           <p id="account-error" class="error hidden"></p>
         </div>
         <p id="account-saved" class="account-saved hidden">Saved.</p>
+
+        <!-- A guest connects Google here and keeps this username and every
+             past game (see login.js's connectGoogleToGuest). Full panel
+             width, below the header, so Google's fixed-width button fits on
+             a phone. -->
+        <div id="account-connect-google" class="connect-google account-connect-google hidden">
+          <p class="muted">Connect Google to use this account on any device and start earning a rating. Achievements from your past games unlock right away.</p>
+          <div class="connect-google-button" data-google-button></div>
+        </div>
 
         <!-- Stats and the Elo chart side by side (see this tile's own
              top comment) -- both smaller than their old standalone-tile
@@ -722,7 +731,10 @@
       <div class="card panel account-panel">
         <button type="button" class="screen-back" id="btn-achievements-back">← Back</button>
         <h2>Achievements</h2>
-        <p id="account-achievements-guest-note" class="muted hidden">Sign in with Google to start unlocking achievements.</p>
+        <div id="account-achievements-guest-note" class="connect-google hidden">
+          <p class="muted">Connect Google to unlock the achievements your games have already earned.</p>
+          <div id="achievements-connect-google" class="connect-google-button" data-google-button></div>
+        </div>
         <div id="achievements-grid" class="achievements-grid"></div>
       </div>
     </section>
@@ -1677,7 +1689,7 @@
           <span id="elo-reveal-delta" class="elo-reveal-delta"></span>
         </div>
         <p id="elo-reveal-guest-note" class="hint elo-reveal-guest-note hidden">
-          Sign in with Google to start tracking your rating like this.
+          Connect Google from your Account page to start tracking your rating like this.
         </p>
 
         <div id="standings-table"></div>
