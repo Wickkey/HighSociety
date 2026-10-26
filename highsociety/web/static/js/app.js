@@ -40,6 +40,9 @@ import {
 import { onPlayClick, onFindMatch, onMatchmakingCancel, onMatchmakingAddBots, onMatchmakingSeatButtonClick } from './lobby/matchmaking.js';
 import { showRulesDemo, onRulesDemoToggleClick, onRulesDemoPrevClick, onRulesDemoNextClick } from './lobby/rulesDemo.js';
 import {
+  onHowToPlayTabClick, onHowToPlayTabKeydown, onHowToPlayGotoClick, playHowToPlayVideo,
+} from './lobby/howToPlay.js';
+import {
   onRequestRematchClick, onCancelRematchForm, onSendRematchRequest, onAcceptRematch, onDeclineRematch,
   onStandingsTableClick,
 } from './lobby/rematch.js';
@@ -101,6 +104,10 @@ function wireStaticHandlers() {
   // rulesDemo.js), so it's safe to render once at boot rather than only
   // when the Rules panel is actually opened.
   $('rules-demo-toggle').addEventListener('click', onRulesDemoToggleClick);
+  document.querySelector('.htp-tabs').addEventListener('click', onHowToPlayTabClick);
+  document.querySelector('.htp-tabs').addEventListener('keydown', onHowToPlayTabKeydown);
+  $('home-panel-rules').addEventListener('click', onHowToPlayGotoClick);
+  $('btn-htp-video-play').addEventListener('click', playHowToPlayVideo);
   $('btn-rules-demo-prev').addEventListener('click', onRulesDemoPrevClick);
   $('btn-rules-demo-next').addEventListener('click', onRulesDemoNextClick);
   showRulesDemo('normal');

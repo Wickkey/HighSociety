@@ -8,6 +8,7 @@ import {
 } from './constants.js';
 import { cancelMatchmakingTicketQuietly } from '../lobby/matchmaking.js';
 import { loadHomeGlobalStats } from '../lobby/lobby.js';
+import { stopHowToPlayVideo } from '../lobby/howToPlay.js';
 
 export const $ = (id) => document.getElementById(id);
 
@@ -69,6 +70,7 @@ export function setScreenPath(path) {
 }
 
 export function showScreen(id) {
+  if (id !== 'screen-host-setup') stopHowToPlayVideo(); // the video lives on that screen's How to Play panel
   // See lobby/matchmaking.js's cancelMatchmakingTicketQuietly own comment --
   // catches every way off this screen that isn't the Cancel/Add-bots
   // buttons themselves.
