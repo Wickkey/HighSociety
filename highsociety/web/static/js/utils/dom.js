@@ -51,6 +51,11 @@ function setSidebarActive(itemId) {
 
 export function setScreenPath(path) {
   if (location.pathname !== path) history.replaceState(null, '', path);
+  // Same per-screen titles the server put in <title> (web_server.py's
+  // _PAGE_META), so the tab and history match whatever screen is showing.
+  const titles = window.PAGE_TITLES || {};
+  const titleKey = path.replace(/^\/(account|players)\/.*/, '/$1');
+  if (titles[titleKey]) document.title = titles[titleKey];
   // Unconditional, unlike the history write above -- a direct visit/
   // refresh at e.g. /join already has location.pathname === '/join' before
   // this ever runs, so gating this on the same "did it change" check would
