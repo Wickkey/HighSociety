@@ -2054,6 +2054,68 @@ def test_guest_claim_handles_a_uniqueness_race_at_the_database_level(monkeypatch
     assert resp.status_code == 409
 
 
+def test_guest_claim_of_a_taken_name_suggests_a_free_one(monkeypatch):
+    monkeypatch.setattr(game_history, "is_configured", lambda: True)
+    monkeypatch.setattr(game_history, "username_is_taken", lambda username: True)
+    monkeypatch.setattr(game_history, "taken_usernames", lambda names: {"alice", "alice 2"} & set(names))
+    resp = web_server.app.test_client().post("/api/auth/guest/claim", json={"username": "alice"})
+    assert resp.status_code == 409
+    assert resp.get_json()["suggestion"] == "alice 3"
+
+
+def test_auth_google_falls_back_to_a_random_name_without_a_google_name(monkeypatch):
+    monkeypatch.setattr(web_server, "_verify_google_id_token", lambda token: {"sub": "g-123", "name": ""})
+    monkeypatch.setattr(game_history, "find_player_by_google_id", lambda google_id: None)
+    monkeypatch.setattr(game_history, "is_configured", lambda: False)
+    monkeypatch.setattr(web_server, "generate_guest_username", lambda: "CoralGoku222")
+    resp = web_server.app.test_client().post("/api/auth/google", json={"id_token": "valid"})
+    assert resp.get_json()["suggested_username"] == "CoralGoku222"
+
+
+# --------------------------------------------------- /api/auth/username/check --
+
+def _check(**params):
+    return web_server.app.test_client().get("/api/auth/username/check", query_string=params).get_json()
+
+
+def test_username_check_reports_a_free_name(monkeypatch):
+    monkeypatch.setattr(game_history, "is_configured", lambda: True)
+    monkeypatch.setattr(game_history, "username_is_taken", lambda username: False)
+    assert _check(username="  alice ") == {"available": True, "username": "alice"}
+
+
+def test_username_check_reports_a_taken_name_with_a_free_variant(monkeypatch):
+    monkeypatch.setattr(game_history, "is_configured", lambda: True)
+    monkeypatch.setattr(game_history, "username_is_taken", lambda username: username == "alice")
+    monkeypatch.setattr(game_history, "taken_usernames", lambda names: {"alice", "alice 2"} & set(names))
+    body = _check(username="alice")
+    assert body["available"] is False and body["suggestion"] == "alice 3"
+
+
+def test_username_check_counts_your_own_name_as_available(monkeypatch):
+    monkeypatch.setattr(game_history, "is_configured", lambda: True)
+    monkeypatch.setattr(game_history, "username_is_taken", lambda username: True)
+    assert _check(username="alice", current="alice")["available"] is True
+    assert _check(username="bob", current="alice")["available"] is False
+
+
+def test_username_check_rejects_empty_and_too_long_names():
+    assert _check(username="   ")["available"] is False
+    assert _check(username="a" * (web_server._MAX_USERNAME_LENGTH + 1))["available"] is False
+
+
+def test_username_check_treats_a_name_seated_in_a_live_room_as_taken(monkeypatch, running_web_server):
+    from highsociety.code.gamecore.player.networkplayer import NetworkPlayer
+
+    monkeypatch.setattr(game_history, "is_configured", lambda: False)
+    client = web_server.app.test_client()
+    room = client.post("/api/create_game", json={"seats": 2, "bot_mix": []}).get_json()
+    web_server._rooms[room["room_code"]].players.append(
+        NetworkPlayer(name="Seated", username="Seated", transport=MagicMock(), game_id=room["room_code"]))
+    assert _check(username="Seated")["available"] is False
+    assert _check(username="Someone Else")["available"] is True
+
+
 # --------------------------------------------------- /api/auth/username/change --
 
 def test_username_change_requires_a_non_empty_new_username():

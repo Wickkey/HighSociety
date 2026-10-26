@@ -221,33 +221,69 @@
     <!-- ===================== LOGIN ===================== -->
     <section id="screen-login" class="screen hidden">
       <div class="card panel login-panel">
-        <h2>Welcome to High Society</h2>
-        <!-- The first thing a visitor from a shared link sees -- says what
-             this is before asking them to pick a name. -->
-        <p class="login-tagline">The classic auction card game for 2–5 players. Outbid friends or bots for points, free, right in your browser.</p>
-        <p id="login-notice" class="login-notice hidden"></p>
+        <!-- Step 1: how to sign in. Step 2 (#login-step-name) replaces it
+             when a name is needed -- a guest's, or a first-time Google
+             account's (see login.js's showNameStep). -->
+        <div id="login-step-choose">
+          <div class="login-crest" aria-hidden="true">♠</div>
+          <h2>Welcome to High Society</h2>
+          <!-- The first thing a visitor from a shared link sees -- says what
+               this is before asking them to pick a name. -->
+          <p class="login-tagline">The classic auction card game for 2–5 players. Outbid friends or bots for points, free, right in your browser.</p>
+          <p id="login-notice" class="login-notice hidden"></p>
 
-        <div id="google-signin-container" class="google-signin-container" data-google-button></div>
+          <!-- Hidden as a whole (with its divider) when this deployment has
+               no GOOGLE_CLIENT_ID -- see login.js's showChooseStep. -->
+          <div id="login-google-block" class="login-google-block">
+            <div id="google-signin-container" class="google-signin-container" data-google-button="fill"></div>
+            <!-- One slot, three messages: the perk line at rest, "Signing
+                 you in" while the server checks the Google account, or why
+                 it failed -- so nothing below it ever moves. -->
+            <p id="login-google-status" class="login-option-hint" aria-live="polite"></p>
+            <div class="login-divider"><span>or</span></div>
+          </div>
 
-        <div class="login-divider"><span>or</span></div>
+          <button type="button" id="btn-continue-guest" class="secondary login-option-btn">Continue as Guest</button>
+          <p class="login-option-hint">Play right away. Connect Google later to keep your progress.</p>
+        </div>
 
-        <button type="button" id="btn-continue-guest" class="secondary">Continue as Guest</button>
+        <div id="login-step-name" class="hidden">
+          <button type="button" class="screen-back" id="btn-login-back">← Back</button>
+          <div id="login-google-identity" class="login-google-identity hidden">
+            <svg class="login-google-g" viewBox="0 0 48 48" aria-hidden="true">
+              <path fill="#4285F4" d="M45.12 24.5c0-1.56-.14-3.06-.4-4.5H24v8.51h11.84c-.51 2.75-2.06 5.08-4.39 6.64v5.52h7.11c4.16-3.83 6.56-9.47 6.56-16.17z"/>
+              <path fill="#34A853" d="M24 46c5.94 0 10.92-1.97 14.56-5.33l-7.11-5.52c-1.97 1.32-4.49 2.1-7.45 2.1-5.73 0-10.58-3.87-12.31-9.07H4.34v5.7C7.96 41.07 15.4 46 24 46z"/>
+              <path fill="#FBBC05" d="M11.69 28.18C11.25 26.86 11 25.45 11 24s.25-2.86.69-4.18v-5.7H4.34C2.85 17.09 2 20.45 2 24s.85 6.91 2.34 9.88l7.35-5.7z"/>
+              <path fill="#EA4335" d="M24 10.75c3.23 0 6.13 1.11 8.41 3.29l6.31-6.31C34.91 4.18 29.93 2 24 2 15.4 2 7.96 6.93 4.34 14.12l7.35 5.7c1.73-5.2 6.58-9.07 12.31-9.07z"/>
+            </svg>
+            <span id="login-google-email"></span>
+          </div>
+          <h2 id="login-name-title">Pick a guest name</h2>
+          <p id="login-name-sub" class="login-tagline"></p>
 
-        <div id="login-username-form" class="hidden">
-          <label>Username
-            <div class="username-input-row">
-              <input type="text" id="login-username" placeholder="e.g. alex" autocomplete="off" maxlength="24">
-              <button type="button" id="btn-shuffle-username" class="secondary shuffle-btn hidden" title="Get a different name" aria-label="Get a different name">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                  <path d="M3 6h3.5c2 0 3 1 4 2.5l5 8c1 1.5 2 2.5 4 2.5H21"/>
-                  <path d="M3 18h3.5c2 0 3-1 4-2.5"/>
-                  <polyline points="18 3 21 6 18 9"/>
-                  <polyline points="18 15 21 18 18 21"/>
-                </svg>
-              </button>
+          <label for="login-username" class="username-label">Username</label>
+          <div class="username-input-row">
+            <div id="login-username-field" class="username-field">
+              <svg class="username-field-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <circle cx="12" cy="8.5" r="3.8"/><path d="M4.5 20c.9-3.6 3.9-5.8 7.5-5.8s6.6 2.2 7.5 5.8"/>
+              </svg>
+              <input type="text" id="login-username" placeholder="e.g. alex" autocomplete="off" autocapitalize="off" spellcheck="false" maxlength="24" aria-describedby="login-username-status">
+              <span class="username-field-state" aria-hidden="true"></span>
             </div>
-          </label>
-          <button type="button" id="btn-login-continue" class="primary">Continue</button>
+            <button type="button" id="btn-shuffle-username" class="secondary shuffle-btn hidden" title="Get a different name" aria-label="Get a different name">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M3 6h3.5c2 0 3 1 4 2.5l5 8c1 1.5 2 2.5 4 2.5H21"/>
+                <path d="M3 18h3.5c2 0 3-1 4-2.5"/>
+                <polyline points="18 3 21 6 18 9"/>
+                <polyline points="18 15 21 18 18 21"/>
+              </svg>
+            </button>
+          </div>
+          <div class="username-status-row">
+            <p id="login-username-status" class="username-status" aria-live="polite"></p>
+            <span id="login-username-count" class="username-count"></span>
+          </div>
+          <button type="button" id="btn-login-continue" class="primary login-continue">Continue</button>
           <p id="login-username-error" class="error hidden"></p>
         </div>
         <p class="login-legal"><a href="/privacy">Privacy policy</a></p>
@@ -339,9 +375,18 @@
         </div>
 
         <div id="account-username-edit" class="hidden">
-          <label>Username
-            <input type="text" id="account-username-input" placeholder="e.g. alex" autocomplete="off" maxlength="24">
-          </label>
+          <label for="account-username-input" class="username-label">Username</label>
+          <div id="account-username-field" class="username-field">
+            <svg class="username-field-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <circle cx="12" cy="8.5" r="3.8"/><path d="M4.5 20c.9-3.6 3.9-5.8 7.5-5.8s6.6 2.2 7.5 5.8"/>
+            </svg>
+            <input type="text" id="account-username-input" placeholder="e.g. alex" autocomplete="off" autocapitalize="off" spellcheck="false" maxlength="24" aria-describedby="account-username-status">
+            <span class="username-field-state" aria-hidden="true"></span>
+          </div>
+          <div class="username-status-row">
+            <p id="account-username-status" class="username-status" aria-live="polite"></p>
+            <span id="account-username-count" class="username-count"></span>
+          </div>
           <div class="button-row">
             <button type="button" id="btn-account-save" class="primary">Save</button>
             <button type="button" id="btn-account-cancel-edit" class="secondary">Cancel</button>

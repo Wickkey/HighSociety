@@ -13,6 +13,7 @@ import { fetchGamesPage, renderIfChanged } from '../lobby/gameHistory.js';
 import { createEloChartController, fetchRatingHistory } from '../ui/eloChart.js';
 import { swr } from '../utils/swrCache.js';
 import { googleSignInConfigured } from '../ui/googleButton.js';
+import { attachUsernameField } from '../ui/usernameField.js';
 
 // Static catalog mirroring highsociety/code/common/achievements.py's
 // ACHIEVEMENTS -- small enough to duplicate client-side (36 entries) rather
@@ -450,13 +451,30 @@ export function showAccountScreen() {
 // used to just sit there permanently open. Re-syncs the input to the
 // current saved value every time (not just on showAccountScreen) so
 // re-opening after a Cancel never shows a stale in-progress edit.
+let _renameField = null;
+function renameField() {
+  if (!_renameField) {
+    _renameField = attachUsernameField({
+      field: $('account-username-field'),
+      input: $('account-username-input'),
+      status: $('account-username-status'),
+      count: $('account-username-count'),
+      submit: $('btn-account-save'),
+      current: () => (loadProfile() || {}).username || null,
+    });
+  }
+  return _renameField;
+}
+
 export function onAccountEditUsernameClick() {
   const profile = loadProfile();
   $('account-username-input').value = profile ? profile.username : '';
   hide($('account-error'));
   hide($('account-saved'));
   show($('account-username-edit'));
+  renameField().check();
   $('account-username-input').focus();
+  $('account-username-input').select();
 }
 
 export function onAccountCancelEditClick() {
@@ -478,14 +496,17 @@ export function showAchievementsScreen() {
 export async function onAccountSaveClick() {
   hide($('account-error'));
   hide($('account-saved'));
+  const field = renameField();
+  if ($('btn-account-save').classList.contains('is-busy')) return;
+  if (!(await field.ready())) return;
   const username = $('account-username-input').value.trim();
-  if (!username) { showError($('account-error'), 'Username is required.'); return; }
   const existing = loadProfile();
   if (existing && existing.username === username) {
     hide($('account-username-edit'));
     show($('account-saved'));
     return;
   }
+  field.setBusy(true, 'Saving…');
   try {
     const result = await fetchJSON('/api/auth/username/change', {
       method: 'POST',
@@ -502,6 +523,9 @@ export async function onAccountSaveClick() {
     hide($('account-username-edit'));
     show($('account-saved'));
   } catch (e) {
-    showError($('account-error'), e.message);
+    if (e.status === 409) field.showTaken(e.body && e.body.suggestion);
+    else showError($('account-error'), e.message);
+  } finally {
+    field.setBusy(false, 'Save');
   }
 }

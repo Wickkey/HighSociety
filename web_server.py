@@ -817,8 +817,11 @@ def api_auth_google():
     if existing:
         return jsonify({**existing, "login_token": game_history.issue_login_token(existing["username"])})
     name = claims.get("name") or ""
+    # No usable Google name (or nothing free near it): a random guest-style
+    # name instead, so the box always arrives holding an available name.
+    suggested = _free_username_like(name) or _generate_unique_guest_username() or ""
     return jsonify({"needs_username": True, "suggested_display_name": name,
-                    "suggested_username": _free_username_like(name)})
+                    "suggested_username": suggested})
 
 
 def _free_username_like(name: str) -> str:
@@ -836,6 +839,45 @@ def _free_username_like(name: str) -> str:
         candidates.append(base[:_MAX_USERNAME_LENGTH - len(suffix)].rstrip() + suffix)
     taken = game_history.taken_usernames(candidates) | _active_usernames()
     return next((c for c in candidates if c not in taken), "")
+
+
+def _username_available(username: str) -> bool:
+    """Free in the players table and not seated in a live room. Fails safe
+    toward "taken", same as username_is_taken."""
+    if username in _active_usernames():
+        return False
+    return not game_history.is_configured() or not game_history.username_is_taken(username)
+
+
+def _username_taken_response(username: str):
+    """The 409 every username claim returns when the name is gone -- with a
+    free variant the client can offer in one click."""
+    return jsonify({"error": "That username is already taken.",
+                    "suggestion": _free_username_like(username)}), 409
+
+
+@app.route("/api/auth/username/check")
+def api_auth_username_check():
+    """
+    Live availability for the username box on the sign-in screen and the
+    Account rename field, checked as the person types. `current` is the
+    browser's own username when renaming, which counts as available (it's
+    already theirs). A taken name comes back with `suggestion`, the first
+    free "name 2", "name 3", ... variant. Only ever advisory: the claim and
+    rename endpoints re-check before writing anything.
+    """
+    username = (request.args.get("username") or "").strip()
+    current = (request.args.get("current") or "").strip()
+    if not username:
+        return jsonify({"available": False, "error": "Pick a username."})
+    if len(username) > _MAX_USERNAME_LENGTH:
+        return jsonify({"available": False, "error": f"Usernames are up to {_MAX_USERNAME_LENGTH} characters."})
+    if current and username == current:
+        return jsonify({"available": True, "username": username})
+    if _username_available(username):
+        return jsonify({"available": True, "username": username})
+    return jsonify({"available": False, "username": username, "error": "Already taken.",
+                    "suggestion": _free_username_like(username)})
 
 
 @app.route("/api/auth/google/claim_username", methods=["POST"])
@@ -872,11 +914,11 @@ def api_auth_google_claim_username():
         return jsonify({**existing, "login_token": game_history.issue_login_token(existing["username"])})
 
     if game_history.username_is_taken(username):
-        return jsonify({"error": "That username is already taken."}), 409
+        return _username_taken_response(username)
 
     ok = game_history.create_google_player(claims["sub"], claims.get("email"), username, display_name)
     if not ok:
-        return jsonify({"error": "That username is already taken."}), 409
+        return _username_taken_response(username)
 
     return jsonify({"username": username, "display_name": display_name,
                     "login_token": game_history.issue_login_token(username)})
@@ -994,11 +1036,11 @@ def api_auth_guest_claim():
         return jsonify({"username": username})
 
     if game_history.username_is_taken(username):
-        return jsonify({"error": "That username is already taken."}), 409
+        return _username_taken_response(username)
 
     ok = game_history.create_guest_player(username)
     if not ok:
-        return jsonify({"error": "That username is already taken."}), 409
+        return _username_taken_response(username)
 
     return jsonify({"username": username, "login_token": game_history.issue_login_token(username)})
 
@@ -1046,7 +1088,7 @@ def api_auth_username_change():
 
     ok = game_history.rename_player(old_username, new_username)
     if not ok:
-        return jsonify({"error": "That username is already taken."}), 409
+        return _username_taken_response(new_username)
 
     return jsonify({"username": new_username})
 

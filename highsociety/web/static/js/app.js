@@ -7,7 +7,8 @@ import {
 } from './ui/modals.js';
 import { onSpecChatSend, onPlayerChatSend } from './ui/chat.js';
 import {
-  onContinueAsGuest, onShuffleUsername, onLoginUsernameContinue, initGoogleSignIn, proceedPastLogin,
+  onContinueAsGuest, onShuffleUsername, onLoginUsernameContinue, onLoginBack, showChooseStep, initGoogleSignIn,
+  proceedPastLogin,
 } from './auth/login.js';
 import {
   loadProfile, renderProfileChip, onProfileChipClick, onLogout, closeProfilePopover, upgradeLegacyProfile,
@@ -67,6 +68,7 @@ function wireStaticHandlers() {
   $('btn-continue-guest').addEventListener('click', onContinueAsGuest);
   $('btn-shuffle-username').addEventListener('click', onShuffleUsername);
   $('btn-login-continue').addEventListener('click', onLoginUsernameContinue);
+  $('btn-login-back').addEventListener('click', onLoginBack);
   $('login-username').addEventListener('keydown', (e) => { if (e.key === 'Enter') onLoginUsernameContinue(); });
   document.querySelectorAll('.home-tile').forEach((btn) => {
     // "play" is its own screen (matchmaking), not a panel of this one.
@@ -198,6 +200,10 @@ function wireStaticHandlers() {
   $('btn-account-save').addEventListener('click', onAccountSaveClick);
   $('btn-account-edit-username').addEventListener('click', onAccountEditUsernameClick);
   $('btn-account-cancel-edit').addEventListener('click', onAccountCancelEditClick);
+  $('account-username-input').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') onAccountSaveClick();
+    else if (e.key === 'Escape') onAccountCancelEditClick();
+  });
   // No standalone "Log out" button on the Account screen any more --
   // it read as an odd, heavier-weight duplicate of this same action
   // right below it; the profile chip's own popover menu (wired below)
@@ -267,6 +273,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // guard no-ops when window.google isn't ready yet, and the GIS
   // script's onload calls it again once it actually loads.)
   initGoogleSignIn();
+  showChooseStep();
   setCurrentRoomCode(new URLSearchParams(location.search).get('room'));
   // A returning visitor who already has a saved profile (guest or Google)
   // skips straight past #screen-login -- only a genuinely new visitor, or
