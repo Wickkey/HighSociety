@@ -2698,6 +2698,41 @@ def test_robots_keeps_room_links_out_of_search_results():
     assert "Disallow: /*?room=" in body
 
 
+def test_robots_points_at_the_sitemap(monkeypatch):
+    monkeypatch.setattr(web_server, "PUBLIC_BASE_URL", "https://example.com")
+    body = web_server.app.test_client().get("/robots.txt").get_data(as_text=True)
+    assert "Sitemap: https://example.com/sitemap.xml" in body
+
+
+def test_sitemap_lists_the_public_pages_at_the_canonical_address(monkeypatch):
+    monkeypatch.setattr(web_server, "PUBLIC_BASE_URL", "https://example.com")
+    resp = web_server.app.test_client().get("/sitemap.xml")
+    body = resp.get_data(as_text=True)
+    assert resp.mimetype == "application/xml"
+    assert "<loc>https://example.com/</loc>" in body and "<loc>https://example.com/rules</loc>" in body
+    assert "/account" not in body
+
+
+def test_each_screen_gets_its_own_title_and_canonical_address(monkeypatch):
+    monkeypatch.setattr(web_server, "PUBLIC_BASE_URL", "https://example.com")
+    html = web_server.app.test_client().get("/rules?ref=x").get_data(as_text=True)
+    assert "<title>How to Play High Society – Rules and Scoring</title>" in html
+    assert '<link rel="canonical" href="https://example.com/rules">' in html
+    assert 'name="robots"' not in html
+
+
+def test_canonical_falls_back_to_the_serving_host(monkeypatch):
+    monkeypatch.setattr(web_server, "PUBLIC_BASE_URL", "")
+    html = web_server.app.test_client().get("/").get_data(as_text=True)
+    assert '<link rel="canonical" href="http://localhost/">' in html
+
+
+def test_personal_screens_are_kept_out_of_search_results():
+    client = web_server.app.test_client()
+    for path in ("/account", "/account/alice", "/achievements", "/my-games", "/players/alice"):
+        assert '<meta name="robots" content="noindex">' in client.get(path).get_data(as_text=True), path
+
+
 def test_the_apple_touch_icon_is_served_where_ios_looks_for_it():
     client = web_server.app.test_client()
     for path in ("/apple-touch-icon.png", "/apple-touch-icon-precomposed.png"):

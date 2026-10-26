@@ -163,6 +163,11 @@ GA_MEASUREMENT_ID = os.environ.get("GA_MEASUREMENT_ID")
 GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID")
 GOOGLE_SIGN_IN_ENABLED = bool(GOOGLE_CLIENT_ID) and game_history.is_configured()
 
+# The site's one real address, e.g. https://highsocietyonline.com -- what
+# search engines are told is canonical, and what the sitemap lists. Unset
+# means whatever host served the request (localhost, the onrender.com URL).
+PUBLIC_BASE_URL = (os.environ.get("PUBLIC_BASE_URL") or "").rstrip("/")
+
 # Same opt-in-via-env-var pattern again: unset/"0" (the default -- every
 # local dev run and the whole pytest suite) keeps every MCTSBot decision
 # computed in-process, exactly as before. A deployment sets BOT_POOL_SIZE to
@@ -1374,28 +1379,79 @@ def index(username=None):
     #   its own boot-path handling).
     # Both are otherwise the same client-decides-what-to-show model every
     # other route on this one shared shell template already uses.
+    path = request.path
+    if path.startswith(("/account/", "/players/")):
+        path = path[:path.index("/", 1)]
+    title, description = _PAGE_META.get(path, _PAGE_META["/"])
     return render_template(
         "index.html", ga_measurement_id=GA_MEASUREMENT_ID,
         google_client_id=GOOGLE_CLIENT_ID if GOOGLE_SIGN_IN_ENABLED else None,
+        page_title=title, page_description=description,
+        canonical_url=_public_base() + path, site_url=_public_base() + "/",
+        # Personal screens: nothing for a search engine to show anyone else.
+        noindex=path in _PRIVATE_PATHS,
+        page_titles={p: t for p, (t, _) in _PAGE_META.items()},
     )
+
+
+_HOME_DESCRIPTION = ("The classic High Society board game, online: an auction card game for 3–5 players. "
+                     "Outbid friends or bots for points.")
+
+# Title and description per screen URL. Search results show these, and the
+# client swaps document.title from the same table as you move between
+# screens (see dom.js's setScreenPath).
+_PAGE_META = {
+    "/": ("High Society Online – Play the Auction Card Game", _HOME_DESCRIPTION),
+    "/play": ("Play High Society Online – Quick Match",
+              "Get matched with players near your rating for a game of High Society, or play against bots."),
+    "/host": ("Host a High Society Game – Invite Friends",
+              "Set up a High Society table for 3–5 players, add bots if you're short, and share the invite link."),
+    "/join": ("Join a High Society Game",
+              "Find an open High Society table and take a seat, or join a friend's game with their invite code."),
+    "/rules": ("How to Play High Society – Rules and Scoring",
+               "Learn High Society: bid money cards for luxury and prestige, dodge the disgraces, "
+               "and don't finish with the least money."),
+    "/leaderboard": ("High Society Leaderboard – Top Rated Players",
+                     "The highest rated High Society players online, ranked by Elo."),
+    "/account": ("Your Account – High Society", _HOME_DESCRIPTION),
+    "/achievements": ("Achievements – High Society", _HOME_DESCRIPTION),
+    "/my-games": ("My Games – High Society", _HOME_DESCRIPTION),
+    "/players": ("Player Profile – High Society", _HOME_DESCRIPTION),
+}
+_PRIVATE_PATHS = {"/account", "/achievements", "/my-games", "/players"}
+_SITEMAP_PATHS = ["/", "/rules", "/play", "/host", "/join", "/leaderboard", "/privacy"]
+
+
+def _public_base() -> str:
+    return PUBLIC_BASE_URL or request.url_root.rstrip("/")
 
 
 @app.route("/robots.txt")
 def robots_txt():
     # /?room=<code> pages are ephemeral game sessions, not indexable
     # content -- the room may not even exist anymore by the time a crawler
-    # visits. Everything else (just the homepage, in practice) is fine to
-    # crawl, so nothing else needs an explicit Disallow.
+    # visits. Personal screens aren't blocked here: they carry a noindex
+    # tag instead, which a crawler can only see if it's allowed to fetch them.
     # (Room links are /join?room=<code> now -- the wildcard covers those
     # and any older /?room= links still around.)
-    return Response("User-agent: *\nDisallow: /*?room=\n", mimetype="text/plain")
+    return Response(f"User-agent: *\nDisallow: /*?room=\n\nSitemap: {_public_base()}/sitemap.xml\n",
+                    mimetype="text/plain")
+
+
+@app.route("/sitemap.xml")
+def sitemap_xml():
+    urls = "".join(f"  <url><loc>{_public_base()}{path}</loc></url>\n" for path in _SITEMAP_PATHS)
+    return Response('<?xml version="1.0" encoding="UTF-8"?>\n'
+                    '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
+                    f"{urls}</urlset>\n", mimetype="application/xml")
 
 
 @app.route("/privacy")
 def privacy_policy():
     # A standalone page rather than an app screen: it has to be readable
     # before signing in (the app itself starts at the login wall).
-    return render_template("privacy.html", ga_measurement_id=GA_MEASUREMENT_ID)
+    return render_template("privacy.html", ga_measurement_id=GA_MEASUREMENT_ID,
+                           canonical_url=_public_base() + "/privacy")
 
 
 @app.route("/apple-touch-icon.png")
