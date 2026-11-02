@@ -16,13 +16,15 @@ at least 6 names, so a tier can't run dry from seating alone.
 """
 from typing import NamedTuple, Optional
 
-DIFFICULTIES = ("easy", "medium", "hard")
+# easy/medium/hard are MCTS search presets (ai/mcts_bot.py); magnus is the
+# self-play-trained neural network (ai/rl_bot.py).
+DIFFICULTIES = ("easy", "medium", "hard", "magnus")
 
 
 class RosterBot(NamedTuple):
     key: str          # stable id, never shown: players.username is f"__bot_{key}__"
     name: str         # its name everywhere -- seat, profile, history -- e.g. "Ziggy Bot"
-    difficulty: str   # "easy" / "medium" / "hard"
+    difficulty: str   # one of DIFFICULTIES
     bio: str
 
 
@@ -54,6 +56,13 @@ BOT_ROSTER = (
     _bot("Reya", "hard", "Reads the table like a ledger and balances it in her favor."),
     _bot("Luna", "hard", "Comes alive in the endgame, when everyone else has run out of money."),
     _bot("Nova", "hard", "Ruthless with the Prestige cards. Leaves the scraps for you."),
+    # -- Magnus (the neural network, trained by playing itself) --------------
+    _bot("Atlas", "magnus", "Never read the rules. Learned them by playing itself a few hundred thousand times."),
+    _bot("Vega", "magnus", "Has seen every Painting go for every price. Remembers which ones were worth it."),
+    _bot("Orion", "magnus", "Doesn't bluff, doesn't flinch. Just does the arithmetic and bids."),
+    _bot("Kepler", "magnus", "Works out who will run out of money first. Usually right."),
+    _bot("Echo", "magnus", "Plays the way its past selves wished they had."),
+    _bot("Sable", "magnus", "Keeps exactly enough money not to be the poorest. Spends the rest on you."),
 )
 
 _BY_NAME = {b.name.lower(): b for b in BOT_ROSTER}

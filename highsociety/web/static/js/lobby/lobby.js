@@ -572,7 +572,7 @@ export function onSeatCountButtonClick(e) {
   syncBotSeatCapacity();
 }
 
-const BOT_TIERS = ['easy', 'medium', 'hard'];
+const BOT_TIERS = ['easy', 'medium', 'hard', 'magnus'];
 
 function totalBotCount() {
   return BOT_TIERS.reduce((sum, tier) => sum + parseInt($(`bot-${tier}`).value, 10), 0);
@@ -589,7 +589,7 @@ function maxBotsAllowed() {
 // tiers before it have already been trimmed.
 function trimBotsToFit() {
   const maxBots = maxBotsAllowed();
-  ['hard', 'medium', 'easy'].forEach((tier) => {
+  [...BOT_TIERS].reverse().forEach((tier) => {
     const stillOver = totalBotCount() - maxBots;
     if (stillOver <= 0) return;
     const input = $(`bot-${tier}`);
@@ -702,6 +702,7 @@ export async function onCreateGame() {
     easy: parseInt($('bot-easy').value || '0', 10),
     medium: parseInt($('bot-medium').value || '0', 10),
     hard: parseInt($('bot-hard').value || '0', 10),
+    magnus: parseInt($('bot-magnus').value || '0', 10),
   };
   const botMix = [];
   for (const [type, n] of Object.entries(counts)) for (let i = 0; i < n; i += 1) botMix.push(type);

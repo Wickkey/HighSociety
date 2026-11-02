@@ -2,6 +2,7 @@ from highsociety.code.ai.capped_greedy_bot import CappedGreedyBot
 from highsociety.code.ai.greedy_bot import GreedyBot
 from highsociety.code.ai.pass_bot import PassBot
 from highsociety.code.ai.mcts_bot import EasyMCTSBot, HardMCTSBot, MediumMCTSBot
+from highsociety.code.ai.rl_bot import MagnusBot
 from highsociety.code.ai.tutorial_bot import TutorialBot
 from highsociety.code.ai.bot_names import assign_bot_names
 
@@ -10,9 +11,10 @@ from highsociety.code.ai.bot_names import assign_bot_names
 # --bots, scripts/bot_evaluator.py) stays in sync with what actually exists in this
 # package. "pass"/"greedy"/"capped" stay registered here for exactly that —
 # scripts/tuning/evaluation keep full access to the plain heuristic bots —
-# but the web lobby only ever offers "easy"/"medium"/"hard" (see
-# web_server.py's UI, which never lists the other three as choices even
-# though the server would happily accept them).
+# but the web lobby only ever offers the difficulties: "easy"/"medium"/"hard"
+# (MCTS) and "magnus" (the RL network, see rl_bot.py). web_server.py's UI never
+# lists the other three as choices, even though the server would happily
+# accept them.
 BOT_TYPES = {
     "pass": PassBot,
     "greedy": GreedyBot,
@@ -20,6 +22,7 @@ BOT_TYPES = {
     "easy": EasyMCTSBot,
     "medium": MediumMCTSBot,
     "hard": HardMCTSBot,
+    "magnus": MagnusBot,
 }
 
 

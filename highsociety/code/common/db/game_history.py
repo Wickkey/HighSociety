@@ -121,6 +121,24 @@ _SCHEMA_STATEMENTS = [
         difficulty TEXT NOT NULL CHECK (difficulty IN ('easy', 'medium', 'hard'))
     )
     """,
+    # The difficulty check widens with bot_roster.DIFFICULTIES (e.g. "magnus",
+    # the RL bot). The original check above was created inline, so its name is
+    # whatever Postgres generated -- drop every CHECK on the table rather than
+    # guess, then add the current one under a fixed name. Guarded on the
+    # current definition, so it only runs (and locks the table) when the
+    # difficulty list actually changed.
+    f"""
+    DO $$ DECLARE c text; BEGIN
+        IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'bots'::regclass AND contype = 'c'
+                       AND {" AND ".join(f"pg_get_constraintdef(oid) LIKE '%''{d}''%'" for d in bot_roster.DIFFICULTIES)}) THEN
+            FOR c IN SELECT conname FROM pg_constraint WHERE conrelid = 'bots'::regclass AND contype = 'c' LOOP
+                EXECUTE format('ALTER TABLE bots DROP CONSTRAINT %I', c);
+            END LOOP;
+            ALTER TABLE bots ADD CONSTRAINT bots_difficulty_check
+                CHECK (difficulty IN ({", ".join(f"'{d}'" for d in bot_roster.DIFFICULTIES)}));
+        END IF;
+    END $$
+    """,
     # Postgres has no `ADD CONSTRAINT IF NOT EXISTS` -- drop-then-recreate
     # on every startup is how this codebase already achieves idempotency
     # for anything that isn't a plain column/table (see this file's own

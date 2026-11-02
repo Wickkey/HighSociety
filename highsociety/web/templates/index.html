@@ -1209,7 +1209,7 @@
           <div class="host-collapsible-body">
             <div class="host-steppers">
               <!-- Each stepper's +/- buttons write straight into the same
-                   plain #bot-easy/#bot-medium/#bot-hard number inputs
+                   plain #bot-easy/#bot-medium/#bot-hard/#bot-magnus number inputs
                    onCreateGame already reads -- see onBotStepperClick
                    (app.js). The real <input> stays in the DOM (type=hidden)
                    rather than becoming a separate piece of state to keep in
@@ -1243,6 +1243,15 @@
                   <button type="button" class="host-stepper-btn" data-delta="1" aria-label="More hard bots">+</button>
                 </div>
                 <input type="hidden" id="bot-hard" min="0" max="4" step="1" value="0">
+              </div>
+              <div class="host-stepper" data-target="bot-magnus">
+                <span class="host-stepper-label">Magnus</span>
+                <div class="host-stepper-controls">
+                  <button type="button" class="host-stepper-btn" data-delta="-1" aria-label="Fewer Magnus bots">−</button>
+                  <span class="host-stepper-value">0</span>
+                  <button type="button" class="host-stepper-btn" data-delta="1" aria-label="More Magnus bots">+</button>
+                </div>
+                <input type="hidden" id="bot-magnus" min="0" max="4" step="1" value="0">
               </div>
             </div>
             <!-- Replaces a static "leave one seat for a human" reminder --
@@ -1496,6 +1505,7 @@
               <button type="button" class="lobby-bot-option" data-action="add-bot" data-bot-type="easy">Easy bot</button>
               <button type="button" class="lobby-bot-option" data-action="add-bot" data-bot-type="medium">Medium bot</button>
               <button type="button" class="lobby-bot-option" data-action="add-bot" data-bot-type="hard">Hard bot</button>
+              <button type="button" class="lobby-bot-option" data-action="add-bot" data-bot-type="magnus">Magnus bot</button>
             </div>
           </div>
           <p id="lobby-seats-error" class="error hidden"></p>
@@ -1825,6 +1835,7 @@
                 <label>Easy <input type="number" id="rematch-bot-easy" min="0" max="4" value="0"></label>
                 <label>Medium <input type="number" id="rematch-bot-medium" min="0" max="4" value="0"></label>
                 <label>Hard <input type="number" id="rematch-bot-hard" min="0" max="4" value="0"></label>
+                <label>Magnus <input type="number" id="rematch-bot-magnus" min="0" max="4" value="0"></label>
               </div>
               <p id="rematch-bot-hint" class="hint"></p>
             </fieldset>
