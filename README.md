@@ -1,98 +1,100 @@
 # HighSociety
 
-A Python implementation of the High Society card game backend.
+An online version of the High Society auction card game for 3–5 players: a Python game engine,
+bots from simple heuristics up to a self-play-trained neural network, and a browser client with
+accounts, ratings and matchmaking.
 
-**Play it now:** [highsociety.onrender.com](https://highsociety.onrender.com/) — no install needed.
-Free-tier hosting, so the first load after a period of inactivity can take ~30-60s to wake up.
+**Play it now:** [highsociety.onrender.com](https://highsociety.onrender.com/). No install needed.
+
+## What's in it
+
+- **The game engine** (`highsociety/code/gamecore/`): rules, auctions (normal and disgrace),
+  Faux Pas discards, elimination of the poorest player, scoring. Every game is reproducible from
+  its seed and action log.
+- **The website** (`web_server.py`, `highsociety/web/`). Flask with WebSockets:
+  - **Hosting and joining:** host a public or private room, join by code, or **Play Now**
+    (matchmaking, with bots filling empty seats).
+  - **During a game:** spectating, rematches, and per-move time limits.
+  - **Accounts and records:** guest accounts with an optional Google sign-in, **Elo ratings** and a
+    leaderboard, player profiles, game history with replays, and achievements.
+  - **Learning to play:** a How to Play page with a video tutorial, a guided practice game, and the
+    written rules.
+- **Bots** (`highsociety/code/ai/`), offered in the lobby as difficulties:
+
+  | Difficulty | How it plays |
+  |---|---|
+  | Easy / Medium / Hard | Monte Carlo Tree Search (`mcts_bot.py`), with more search at each level |
+  | **Insane** | a neural network trained by self-play reinforcement learning (`rl_bot.py`) |
+
+  Every lobby bot is a named character with its own profile and Elo (`common/bot_roster.py`).
+  The Insane bots are Batman, Thanos, Magnus Carlsen, Thalapathy and Rocky.
+  For scripts and testing there are also plain heuristic bots: `pass`, `greedy` (raises with the
+  cheapest card that beats the bid) and `capped` (the same, up to a budget per card).
+- **CLI and socket play** (`scripts/`): hot-seat in one terminal, or networked over TCP with
+  spectators.
 
 ## Requirements
 
-Python 3.14 (what production runs; pinned in `.python-version`, which Render also reads). No third-party packages needed for CLI or socket play. Playing in a browser needs
-`flask`/`flask-sock`:
+Python 3.14, which is what production runs (pinned in `.python-version`, which Render also reads).
 
 ```
-pip install -r requirements.txt
-```
-
-For running tests:
-
-```
-pip install -r tests/requirements.txt
+pip install -r requirements.txt          # app + bots (Flask, flask-sock, numpy, ...)
+pip install -r tests/requirements.txt    # tests
 ```
 
 ## Playing
 
-See [docs/PLAYING.md](docs/PLAYING.md) for full instructions: local hot-seat CLI, networked multiplayer
-(server + per-player clients + spectators), a browser-based lobby + web client, and how to
-record/replay a session (works identically regardless of which mode produced the recording).
-
-Quick start:
+See [docs/PLAYING.md](docs/PLAYING.md) for the full instructions. Quick start:
 
 ```
+python3 web_server.py                                        # the website: open http://localhost:8000
 python3 -m scripts.play_cli                                  # local, one terminal, hot-seat
 python3 -m scripts.network_server --players 2                # networked: host
 python3 -m scripts.network_client --host <ip> --port 8888    # networked: each player
-python3 web_server.py                                        # browser: host, then everyone (including you) opens a page
 ```
 
-For planning specific test scenarios ahead of time (rather than recording a real session), see
-`highsociety/code/gamecore/dev_tools/inspect_seed.py` and
-`tests/game_manager/test_scenario_faux_pas_branches.py`.
+### Against bots from the command line
 
-## Playing against bots
-
-`highsociety/code/ai/` has three ready-made bots — `PassBot` (always passes), `GreedyBot` (always
-raises with the single cheapest card that beats the current bid), and `CappedGreedyBot` (like
-`GreedyBot`, but refuses to spend past a budget that depends on the card up for auction). Both
-`scripts/play_cli.py` and `scripts/network_server.py` take a `--bots` flag: a comma-separated list of bot types
-(`pass`, `greedy`, `capped`) that fills that many seats automatically, one bot per entry.
-
-**CLI:**
+`scripts/play_cli.py` and `scripts/network_server.py` take `--bots`: a comma-separated list of bot
+types from the `BOT_TYPES` registry in `highsociety/code/ai/__init__.py`. The types are `pass`,
+`greedy`, `capped`, `easy`, `medium`, `hard` and `insane`. You're prompted only for the seats the
+bots don't fill.
 
 ```
-python3 -m scripts.play_cli --bots greedy,pass    # you fill the remaining seat(s) interactively
+python3 -m scripts.play_cli --bots insane,medium                     # you + 2 bots
+python3 -m scripts.network_server --players 3 --bots greedy,capped   # 1 human connects over the network
+python3 -m highsociety.code.gamecore.dev_tools.simulate_bots --bots hard,insane,capped   # watch bots play
 ```
 
-You're only prompted for whichever seats `--bots` didn't fill — if `--bots` names as many bots as
-you asked for players, nobody is prompted at all and it's a bots-only game.
+`--bot-think-time` (default 1 s) pauses before each bot move so a game can be followed; `0` runs
+at full speed. Comparing bots over many games: `python3 -m scripts.bot_evaluator --help`.
 
-**Networked:**
+**Writing your own bot:** see [docs/BOT_API.md](docs/BOT_API.md). Subclass `BasePlayer`,
+implement `get_bid` / `choose_painting_to_discard` / `send_message`, and add it to `BOT_TYPES`.
 
-```
-python3 -m scripts.network_server --players 3 --bots greedy,pass    # server pre-fills 2 of 3 seats
-python3 -m scripts.network_client --host <ip> --port 8888           # the remaining human connects as usual
-```
+### The Insane bot
 
-`--players` is the *total* seat count, bots included — the server only waits for
-`--players` minus however many `--bots` named to actually connect over the network. Bots aren't
-sockets, so this works with no client-side changes.
+`highsociety/code/ai/rl/` holds the game side of the neural-network bot:
+- `encoding.py`: the board encoding, built from public game state
+- `candidates.py`: the legal moves
+- `network.py`: the network, re-implemented in **numpy** so the server doesn't need PyTorch
+- `decision.py`: the move choice
 
-Both `--bots` flags default to a 1-second pause before each bot's decision (`--bot-think-time`,
-e.g. `--bot-think-time 0.3`) — a real game is meant to be watched, so an instant decision is easy
-to miss entirely. Set it to `0` for full speed.
-
-**Watching bots play each other live**, without any human or network setup at all:
-
-```
-python3 -m highsociety.code.gamecore.dev_tools.simulate_bots --bots greedy,greedy,pass,capped,capped
-```
-
-See `highsociety/code/gamecore/dev_tools/simulate_bots.py --help` for `--seed` (reproducible
-games) and `--think-time` (pause between each bot's decision, so you can actually follow along).
-
-Writing your own bot: see [docs/BOT_API.md](docs/BOT_API.md)'s "Embedded" section — subclass `BasePlayer`,
-implement `get_bid`/`choose_painting_to_discard`/`send_message`, and it plugs into `--bots` the
-same way by adding it to the `BOT_TYPES` registry in `highsociety/code/ai/__init__.py`.
+The trained weights live in `rl/weights/`. `active.json` names the file the Insane bots play, and
+each file's `.json` manifest records where it came from and how it was evaluated. Shipping better
+weights means dropping in a new file and pointing `active.json` at it; no code change is needed.
+Training itself happens outside this repository.
 
 ## Repository layout
 
 ```
 web_server.py      the website (Flask + WebSockets); Render starts it with gunicorn web_server:app
-highsociety/       the game engine, bots (ai/), database layer (common/db/), web client (web/)
-scripts/           every other entry point -- run from the repo root as `python3 -m scripts.<name>`:
-                   play_cli (local CLI game), network_server / network_client /
-                   network_spectator_client (socket play), bot_evaluator, selfplay_job, verify_replay
-docs/              PLAYING, BOT_API, SELFPLAY (RL self-play data job), ARCHITECTURE_NOTES
+highsociety/       game engine (code/gamecore), bots (code/ai), database layer (code/common/db),
+                   web client (web/: templates, static JS/CSS)
+scripts/           other entry points, run from the repo root as `python3 -m scripts.<name>`:
+                   play_cli, network_server / network_client / network_spectator_client,
+                   bot_evaluator, selfplay_job, verify_replay
+docs/              PLAYING, BOT_API, SELFPLAY (bot-vs-bot data job), ARCHITECTURE_NOTES
 tests/             pytest suite
 render.yaml        Render Blueprint for the self-play cron job (the website is set up in Render's dashboard)
 ```
@@ -105,92 +107,61 @@ pytest
 
 ## Configuration
 
-Game rules (starting cash, painting values, disgrace card types, player limits, per-turn time
-limit, etc.) live in `highsociety/HSConfig.json` — see `highsociety/code/HSConfig.md` for a
-field-by-field description.
+Game rules live in `highsociety/HSConfig.json`: starting cash, painting values, disgrace cards,
+player limits and turn time limit. See `highsociety/code/HSConfig.md` for each field.
 
-## Game history database (optional)
+Environment variables are all optional. Copy `.env.example` to `.env` for local development; it's
+loaded automatically. On a host, set them in its dashboard.
 
-`web_server.py` can persist every finished game (room, seats, bot mix, and each participant's
-final points/money/win-or-loss — see `highsociety/code/common/db/game_history.py`'s docstring for
-the exact schema) to a Postgres database. This is entirely optional and off by default: unless the
-`DATABASE_URL` environment variable is set, nothing here is ever touched (no import, no connection
-attempt), so the app runs exactly as before without a database configured.
+| Variable | What it turns on |
+|---|---|
+| `DATABASE_URL` | Postgres game history, accounts, ratings, achievements (see below). Unset: the app runs with no database at all. |
+| `GOOGLE_CLIENT_ID` | "Sign in with Google" (ID tokens are verified server-side; no client secret needed). |
+| `PUBLIC_BASE_URL` | The site's canonical address, used for canonical links and the sitemap. Unset: whatever host served the request. |
+| `GA_MEASUREMENT_ID` | Google Analytics (GA4) on every page. Unset: no analytics script at all. |
+| `BOT_POOL_SIZE` | Run MCTS bot decisions in N worker processes per difficulty instead of in-process. |
+| `PORT` | Port for `python3 web_server.py` (default 8000). |
 
-To turn it on, using [Supabase](https://supabase.com)'s free tier (chosen because it's Postgres —
-a natural fit for "map players to their past games" — and its optional Google-sign-in auth product
-means the same free project can cover a later real-accounts feature too, without switching
-providers):
+## Database (optional)
 
-1. Create a free Supabase account and a new project.
-2. In the project dashboard, go to **Project Settings → Database → Connection string** and copy
-   the URI (the "Session pooler" or direct connection string both work).
-3. Copy `.env.example` to `.env` and paste it in as `DATABASE_URL=postgresql://...` — `.env` is
-   gitignored, so it never gets committed. `web_server.py` loads it automatically at startup (via
-   `python-dotenv`), so no manual `export` is needed locally. A real hosting service (Render,
-   Railway, etc.) has no `.env` file to find, so there you'd set `DATABASE_URL` as a secret/
-   environment variable in its own dashboard instead.
-4. Start the app as usual. The three tables (`players`, `games`, `player_games`) are created
-   automatically on first startup if they don't already exist — no manual migration step.
+With `DATABASE_URL` pointing at a Postgres database (the live site uses [Supabase](https://supabase.com):
+Project Settings → Database → Connection string), the app stores everything about
+finished games.
+- **Players:** guest or Google-linked accounts, Elo ratings and rating history, achievements.
+- **Bots:** one identity per named bot.
+- **Games:** results, rounds, and the complete ordered action log of every game.
 
-A player's identity is keyed by their `username` today (there's no login system yet), but the
-schema already has nullable `google_id`/`email` columns on `players` so a future Google Sign-In
-can attach a real identity to an existing player's row without any schema change or data migration.
-A database write happening slowly or failing outright never affects gameplay — it happens
-fire-and-forget on a background thread after a game has already fully finished (see
-`record_finished_game_async`).
+The schema is created and migrated automatically at startup; every statement is idempotent, so
+there's no manual migration step. See the docstring of `highsociety/code/common/db/game_history.py`.
 
-Every finished game is fully replayable from these tables alone. `games.seed` fixes the deck order
-and starting player, `player_games.seat` the turn order, and `game_actions` is the complete,
-ordered action log. Each row records:
+Database writes happen after a game has finished, off the game's thread, so a slow or failing
+database never affects play.
 
-- its position (`seq`) and seat;
-- the action: a bid with the money cards behind it, a pass, fold or quit, a Faux Pas discard, or a
-  disconnect, resign or reconnect;
-- whether a timeout or a disconnect forced it (`reason`);
-- how long the player took to decide (`think_ms`).
+Every stored game is replayable from its seed and action log.
+`python3 -m scripts.verify_replay --source game --sample 50` rebuilds stored games and checks that
+every action and result reproduces (`highsociety/code/gamecore/recording/game_replay.py`). For
+bulk bot-vs-bot games, stored in the same format in `selfplay_games`, see [docs/SELFPLAY.md](docs/SELFPLAY.md).
 
-`python3 -m scripts.verify_replay --source game --sample 50` rebuilds stored games from those rows and
-checks every action and result reproduces. See `highsociety/code/gamecore/recording/game_replay.py`.
-For bulk bot-vs-bot self-play data (RL training), stored in its own `selfplay_games` table in the
-same format and run as a Render cron job, see [docs/SELFPLAY.md](docs/SELFPLAY.md).
+## Architecture: one engine, many kinds of players
 
-## Analytics (optional)
+`PlayGame` (`highsociety/code/gamecore/game_manager/gameplay.py`) never knows what kind of player
+sits in a seat. It only calls `get_bid()`, `choose_painting_to_discard()` and `send_message()`, and
+reads `.active`. A terminal player (`CLIPlayer`), a remote player (`NetworkPlayer`) and every bot
+are implementations of that one interface (`gamecore/player/bot_interface.py`). PlayGame also gives
+every player a live, read-only view of the game state (`AuctionHistory` plus the current auction).
+The MCTS and Insane bots decide from that view alone, keeping nothing of their own across a game.
 
-`web_server.py` renders a GA4 (`gtag.js`) snippet on every page if the `GA_MEASUREMENT_ID`
-environment variable is set (same opt-in pattern as `DATABASE_URL` above) — copy `.env.example` to
-`.env` and fill it in, or set it as a secret/environment variable on your hosting platform. Unset
-(the default), and no analytics script is ever rendered — nothing is tracked.
+Remote play is layered so a new transport doesn't touch player logic or the engine:
 
-## Status
+- **`gamecore/network/transport.py`:** `Transport` ("send one JSON message" / "receive the next
+  one"), with `SocketTransport` (raw TCP, `scripts/network_server.py`) and `WebSocketTransport`
+  (browser WebSocket, `web_server.py`).
+- **`gamecore/network/protocol.py`:** the JSON message shapes (`PLAYER_MOVE`, `PLAYER_INFO`,
+  `AUCTION_UPDATE`, …), independent of how the bytes move.
+- **`NetworkPlayer` / `NetworkSpectator`:** thin adapters from a `Transport` plus the protocol to
+  the player interface, with no socket or threading code of their own.
 
-CLI, networked, and browser play are all functional, covered by the test suite under `tests/`
-(including a real-socket end-to-end game in `tests/network/test_end_to_end_socket.py` and a
-real-WebSocket one in `tests/network/test_web_server.py`).
+`web_server.py` runs many games at once: a dictionary of `GameRoom`s, each with its own `PlayGame`
+thread. It uses that same stack unchanged, adding only the lobby, accounts and persistence around it.
 
-## Architecture: how the web client was added without touching the engine
-
-`PlayGame` (`highsociety/code/gamecore/game_manager/gameplay.py`) never knows or cares whether a
-player is local or remote — it only calls `get_bid()` / `choose_painting_to_discard()` /
-`send_message()` / reads `.active` on whatever player objects it's given. `CLIPlayer` and
-`NetworkPlayer` are just two implementations of that same informal interface.
-
-Remote play is itself layered so a new transport doesn't require touching player logic or the
-engine:
-
-- **`highsociety/code/gamecore/network/transport.py`** — `Transport`, an ABC for "send one JSON
-  message" / "receive the next one". `SocketTransport` (raw TCP, used by `scripts/network_server.py`) and
-  `WebSocketTransport` (a browser WebSocket via flask-sock/simple-websocket, used by
-  `web_server.py`) are its two implementations.
-- **`highsociety/code/gamecore/network/protocol.py`** — the JSON message *shapes* (`PLAYER_MOVE`,
-  `PLAYER_INFO`, `AUCTION_UPDATE`, etc.), independent of how those bytes move.
-- **`NetworkPlayer` / `NetworkSpectator`** — thin adapters gluing a `Transport` + the protocol
-  builders into the `BasePlayer`-shaped interface `PlayGame` expects. No socket/threading code of
-  their own, and no idea whether they're backed by a raw socket or a browser tab.
-
-`web_server.py` is the proof this layering works: it's a Flask app with an in-browser lobby
-(`GameRoom`) on top, but the only genuinely new engine-adjacent code is `WebSocketTransport` — 
-`NetworkPlayer`, `network/protocol.py`, and `PlayGame` itself are used completely unchanged from
-`scripts/network_server.py`'s socket-based path. The same seam is what a future multi-room/hosted-website
-version would extend (a dict of `GameRoom`s instead of the current single global one), not a
-rewrite.
+More design notes: [docs/ARCHITECTURE_NOTES.md](docs/ARCHITECTURE_NOTES.md).

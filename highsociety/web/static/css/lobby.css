@@ -1479,10 +1479,9 @@ h3:has(.section-icon) { display: flex; align-items: center; gap: 0.5rem; }
    flex-basis approach wrapped "Hard" onto its own full-width row once
    Easy+Medium's own natural width left no room for a third ~100px item
    on the same line. */
-.host-steppers { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.75rem; margin-bottom: 0.7rem; }
-@media (max-width: 480px) {
-  .host-steppers { grid-template-columns: 1fr; }
-}
+/* Four bot tiers (Easy/Medium/Hard/Insane) as a 2x2 grid: four in a row overflow the
+   narrow host card (each stepper needs ~118px), and 2x2 still fits a phone. */
+.host-steppers { display: grid; grid-template-columns: repeat(2, 1fr); gap: 0.75rem; margin-bottom: 0.7rem; }
 .host-stepper {
   display: flex;
   flex-direction: column;
@@ -1989,7 +1988,10 @@ button.secondary.standalone { margin-top: 0.9rem; display: inline-block; }
   font-weight: 700;
 }
 .lobby-bot-picker-options {
-  display: flex;
+  /* 2x2, like the host screen's bot steppers: four tiers in one row wrapped
+     "Medium bot"/"Insane bot" onto two lines but not "Easy bot"/"Hard bot". */
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
   gap: 0.5rem;
   padding: 0.7rem 0.9rem;
   background: var(--panel-bg);

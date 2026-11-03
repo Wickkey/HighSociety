@@ -645,6 +645,10 @@ class PlayGame():
             card=summarize_card(status_card),
             starting_money={p.username: p.money_left() for p in self.players},
         )
+        # The previous auction's last snapshot was taken before
+        # reset_auction_attributes(), so without this the first turn of every
+        # auction would see last auction's bids and passes.
+        self._record_auction_history_snapshot()
 
         self._sync_liveness()
         num_players_in_auction = self._count_active_auction_players()
@@ -781,6 +785,7 @@ class PlayGame():
             card=summarize_card(status_card),
             starting_money={p.username: p.money_left() for p in self.players},
         )
+        self._record_auction_history_snapshot()   # see normal_card_auction
 
         self._sync_liveness()
         num_players_in_auction = self._count_active_auction_players()

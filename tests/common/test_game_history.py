@@ -402,8 +402,20 @@ def test_schema_seeds_one_players_and_bots_row_per_roster_bot():
     seed_bots = next(st for st in game_history._SCHEMA_STATEMENTS
                      if "__bot_ziggy__" in st and st.startswith("INSERT INTO bots"))
     for b in bot_roster.BOT_ROSTER:
-        assert f"('{bot_roster.roster_username(b)}', '{b.name}')" in seed_players
+        assert f"('{bot_roster.roster_username(b)}', '{b.name}', {bot_roster.starting_elo(b.difficulty)})" in seed_players
         assert f"('{bot_roster.roster_username(b)}', '{b.difficulty}', '{b.key}')" in seed_bots
+    # a new bot starts at its tier's Elo; an existing bot's earned rating is never overwritten
+    assert "DO UPDATE SET display_name = EXCLUDED.display_name" in seed_players and "elo =" not in seed_players
+    assert bot_roster.starting_elo("insane") == 1300 and bot_roster.starting_elo("medium") == 1000
+
+
+def test_existing_insane_bots_are_moved_to_their_starting_elo_exactly_once():
+    from highsociety.code.common import bot_roster
+    once = [st for st in game_history._SCHEMA_STATEMENTS if "starting_elo:insane:1300" in st]
+    assert len(once) == 1 and "IF NOT EXISTS (SELECT 1 FROM app_state" in once[0]
+    seed = next(i for i, st in enumerate(game_history._SCHEMA_STATEMENTS) if st.startswith("INSERT INTO players")
+                and "__bot_ziggy__" in st)
+    assert game_history._SCHEMA_STATEMENTS.index(once[0]) < seed, "must run before new bots are seeded at 1300"
 
 
 

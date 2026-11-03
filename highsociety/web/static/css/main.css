@@ -627,10 +627,13 @@ fieldset.bot-mix {
   padding: 0.9rem 1rem 0.3rem;
 }
 fieldset.bot-mix legend { padding: 0 0.4rem; font-weight: 600; font-size: 0.9rem; }
+/* 2x2 for the four bot tiers (Easy/Medium/Hard/Insane) -- a wrapping row
+   left Insane alone, stretched across a second line on desktop. Same layout
+   as the host screen's bot steppers. */
 .bot-row {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
   gap: 0.75rem;
-  flex-wrap: wrap;
   align-items: stretch;
 }
 /* "Capped-greedy bot" wraps to two lines while "Pass bot"/"Greedy bot" fit
@@ -639,7 +642,6 @@ fieldset.bot-mix legend { padding: 0 0.4rem; font-weight: 600; font-size: 0.9rem
    each label a column with the input pinned to the bottom keeps every
    input aligned on the same row regardless of how much the caption wraps. */
 .bot-row label {
-  flex: 1 1 100px;
   display: flex;
   flex-direction: column;
 }

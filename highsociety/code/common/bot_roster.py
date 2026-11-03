@@ -12,22 +12,38 @@ layer) can seed the database from it without importing the bot engine.
 
 Sizing: a table seats at most 5, so at most 4 bots of one difficulty ever
 sit together (one seat is always the human host) -- every tier here has
-at least 6 names, so a tier can't run dry from seating alone.
+at least 5 names (4 are enough), so a tier can't run dry from seating alone.
 """
 from typing import NamedTuple, Optional
 
-DIFFICULTIES = ("easy", "medium", "hard")
+# easy/medium/hard are MCTS search presets (ai/mcts_bot.py); insane is the
+# self-play-trained neural network (ai/rl_bot.py).
+DIFFICULTIES = ("easy", "medium", "hard", "insane")
+
+# Elo a roster bot starts at when it is first created (players.elo's default
+# is 1000, same as a new human). The Insane bots win far more than an average
+# player (about 1 in 2 games against tables of MCTS Medium bots, where chance
+# is about 1 in 4), so starting them at 1000 would let humans gain rating from
+# losing to them. Only ever applied to a new bot -- a rating it has earned is
+# never overwritten (see game_history.py's roster seeding).
+STARTING_ELO = {"insane": 1300}
+DEFAULT_ELO = 1000
+
+
+def starting_elo(difficulty: str) -> int:
+    return STARTING_ELO.get(difficulty, DEFAULT_ELO)
 
 
 class RosterBot(NamedTuple):
     key: str          # stable id, never shown: players.username is f"__bot_{key}__"
     name: str         # its name everywhere -- seat, profile, history -- e.g. "Ziggy Bot"
-    difficulty: str   # "easy" / "medium" / "hard"
+    difficulty: str   # one of DIFFICULTIES
     bio: str
 
 
 def _bot(name: str, difficulty: str, bio: str) -> RosterBot:
-    return RosterBot(key=name.lower(), name=f"{name} Bot", difficulty=difficulty, bio=bio)
+    # key: lowercase, spaces -> "_" (it becomes the players.username "__bot_<key>__")
+    return RosterBot(key=name.lower().replace(" ", "_"), name=f"{name} Bot", difficulty=difficulty, bio=bio)
 
 
 BOT_ROSTER = (
@@ -54,6 +70,12 @@ BOT_ROSTER = (
     _bot("Reya", "hard", "Reads the table like a ledger and balances it in her favor."),
     _bot("Luna", "hard", "Comes alive in the endgame, when everyone else has run out of money."),
     _bot("Nova", "hard", "Ruthless with the Prestige cards. Leaves the scraps for you."),
+    # -- Insane (the neural network, trained by playing itself) --------------
+    _bot("Batman", "insane", "Works alone, in the dark, and always has a plan for the last auction."),
+    _bot("Thanos", "insane", "Perfectly balanced: spends exactly half of what you think it will."),
+    _bot("Magnus Carlsen", "insane", "Thinks a few auctions further ahead than everyone else at the table."),
+    _bot("Thalapathy", "insane", "Nee padicha schoolla na headmaster da."),
+    _bot("Rocky", "insane", "Takes the hits early, keeps its money, and wins the last round."),
 )
 
 _BY_NAME = {b.name.lower(): b for b in BOT_ROSTER}

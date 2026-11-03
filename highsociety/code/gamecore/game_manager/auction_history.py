@@ -27,6 +27,11 @@ class PlayerSnapshot:
     holds_faux_pas: bool = False
     faux_pas_discarded: bool = False
     active: bool = True
+    # Still in the current auction (hasn't passed yet). Reset to True for
+    # everyone at the start of each auction (see PlayGame's
+    # _record_auction_history_snapshot call there). The RL bot's board
+    # encoding needs it for every player (ai/rl/encoding.py).
+    in_auction: bool = True
 
 
 class AuctionHistory:
@@ -56,5 +61,6 @@ class AuctionHistory:
                 holds_faux_pas=p.holds_faux_pas,
                 faux_pas_discarded=p.has_discarded_card,
                 active=p.active,
+                in_auction=p.current_participation_in_auction,
             )
         self.last_updated_at = time.time()
