@@ -1,22 +1,19 @@
 """
-The moves the network chooses between, and the board after each one.
+The moves the network chooses between.
 
-The network doesn't output a bid directly. Each legal move is written into the
-board ("afterstate": the table as it would look right after that move), the
-network scores every afterstate, and the policy picks among the scores.
-
-A move is an index into SUBSETS: the set of money cards it ADDS this turn.
-Index 0 is the empty set -- pass. At most MAX_BID_CARDS cards may be on the
+The network outputs one logit per entry of SUBSETS; legal_moves() says which
+of them are allowed right now (the mask). A move is an index into SUBSETS:
+the set of money cards it ADDS this turn. Index 0 is the empty set -- pass. At most MAX_BID_CARDS cards may be on the
 table in one auction (bids of more cards are almost never right, and capping
 it keeps the move list at <= 1,024).
 
-Must match .RL/rl_seat.py (legal_bids / afterstates), which training used.
+Must match .RL/rl_seat.py (SUBSETS / legal_bids), which training used.
 """
 from itertools import combinations
 
 import numpy as np
 
-from highsociety.code.ai.rl.encoding import GAME_COL, HIGH_BIDDER0, IN_AUCTION0, MAX_PLAYERS, MONEY, N_MONEY
+from highsociety.code.ai.rl.encoding import MAX_PLAYERS, MONEY, N_MONEY
 
 MAX_BID_CARDS = 5
 PASS = 0                                               # SUBSETS[0]: add nothing
@@ -46,18 +43,6 @@ def legal_moves(board: np.ndarray) -> np.ndarray:
           & (mine + SUBSET_VALUE > top))
     ok[PASS] = True
     return np.flatnonzero(ok)
-
-
-def afterstates(board: np.ndarray, moves: np.ndarray) -> np.ndarray:
-    """(K, 27, 6): the board right after each move."""
-    after = np.repeat(board[None], len(moves), axis=0)
-    after[:, :N_MONEY, 0] -= 2 * SUBSETS[moves]                      # hand (1) -> on the table (-1)
-    is_pass = moves == PASS
-    after[is_pass, IN_AUCTION0, GAME_COL] = 0                        # pass: I'm out of this auction
-    bid = ~is_pass
-    after[bid, HIGH_BIDDER0:HIGH_BIDDER0 + MAX_PLAYERS, GAME_COL] = 0
-    after[bid, HIGH_BIDDER0, GAME_COL] = 1                           # bid: I hold the high bid
-    return after
 
 
 def move_cards(move: int) -> list[int]:

@@ -5,9 +5,8 @@ of a search like MCTSBot or a fixed heuristic like CappedGreedyBot.
 
 Offered in the lobby as the "Insane" difficulty (see common/bot_roster.py):
 InsaneBot plays whichever weights file weights/active.json names for
-"insane", so shipping a better-trained network is: export it (.RL/export_weights.py
-for v1 networks, .RL/v2/export_v2.py for v2) with --activate, commit, deploy --
-no code change. Each weights file's manifest says which network type it is.
+"insane", so shipping a better-trained network is: export it with
+.RL/v2/export_v2.py --activate, commit, deploy -- no code change.
 
 Like MCTSBot this class is deliberately thin and keeps no state of its own
 across the game: every decision is a pure function of the public game state
