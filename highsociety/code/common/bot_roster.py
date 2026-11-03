@@ -74,7 +74,7 @@ BOT_ROSTER = (
     _bot("Batman", "insane", "Works alone, in the dark, and always has a plan for the last auction."),
     _bot("Thanos", "insane", "Perfectly balanced: spends exactly half of what you think it will."),
     _bot("Magnus Carlsen", "insane", "Thinks a few auctions further ahead than everyone else at the table."),
-    _bot("Thalapathy", "insane", "Makes a grand entrance in the endgame. The crowd goes wild; your money doesn't."),
+    _bot("Thalapathy", "insane", "Nee padicha schoolla na headmaster da."),
     _bot("Rocky", "insane", "Takes the hits early, keeps its money, and wins the last round."),
 )
 
