@@ -1,0 +1,159 @@
+[09:47:43] new run runs/sp2: init runs/sp1/milestones/iter_000300.pt, device mps, 248193 params
+[09:47:53] CHECK it 0: vs_heuristics 33% (chance 26%) | eliminated 43% | 10.1s
+[09:47:53] new best vs_heuristics 33% at iteration 0 -> runs/sp2/best.pt
+[09:48:15] iter 1: reward 3p -0.12 4p +0.07 5p +0.12 | spend -0.044 points +0.050 made_pay +0.130 rank -0.051 | T 1.00 | entropy 1.65 | cards/bid 1.79 | 1616 dec | 22.0s
+[09:48:31] iter 2: reward 3p -0.00 4p +0.14 5p +0.12 | spend -0.061 points +0.077 made_pay +0.115 rank -0.048 | T 1.00 | entropy 1.68 | cards/bid 1.8 | 1276 dec | 15.5s
+[09:48:49] iter 3: reward 3p +0.05 4p +0.15 5p +0.06 | spend -0.048 points +0.064 made_pay +0.122 rank -0.039 | T 1.00 | entropy 1.67 | cards/bid 1.87 | 1567 dec | 18.5s
+[09:49:04] iter 4: reward 3p -0.18 4p +0.18 5p +0.16 | spend -0.052 points +0.070 made_pay +0.122 rank -0.055 | T 1.00 | entropy 1.63 | cards/bid 1.74 | 1311 dec | 14.8s
+[09:49:23] iter 5: reward 3p +0.16 4p +0.15 5p +0.15 | spend -0.048 points +0.074 made_pay +0.122 rank +0.006 | T 1.00 | entropy 1.70 | cards/bid 1.85 | 1571 dec | 19.1s
+[09:49:37] iter 6: reward 3p +0.20 4p +0.01 5p +0.24 | spend -0.051 points +0.085 made_pay +0.128 rank -0.017 | T 1.00 | entropy 1.60 | cards/bid 1.77 | 901 dec | 14.1s
+[09:49:51] iter 7: reward 3p -0.21 4p +0.31 5p +0.11 | spend -0.048 points +0.064 made_pay +0.124 rank -0.061 | T 1.00 | entropy 1.69 | cards/bid 1.84 | 881 dec | 13.4s
+[09:50:03] iter 8: reward 3p +0.06 4p +0.19 5p +0.10 | spend -0.046 points +0.065 made_pay +0.124 rank -0.032 | T 1.00 | entropy 1.62 | cards/bid 1.85 | 708 dec | 11.9s
+[09:50:15] iter 9: reward 3p -0.12 4p +0.11 5p +0.25 | spend -0.036 points +0.068 made_pay +0.131 rank -0.061 | T 1.00 | entropy 1.73 | cards/bid 1.81 | 669 dec | 12.6s
+[09:50:29] iter 10: reward 3p -0.06 4p +0.14 5p +0.29 | spend -0.055 points +0.059 made_pay +0.128 rank +0.028 | T 1.00 | entropy 1.72 | cards/bid 1.8 | 718 dec | 13.4s
+[09:50:43] iter 11: reward 3p +0.05 4p +0.48 5p +0.20 | spend -0.041 points +0.077 made_pay +0.126 rank +0.089 | T 1.00 | entropy 1.52 | cards/bid 1.76 | 940 dec | 14.2s
+[09:50:55] iter 12: reward 3p -0.54 4p -0.07 5p +0.08 | spend -0.057 points +0.060 made_pay +0.114 rank -0.238 | T 1.00 | entropy 1.58 | cards/bid 1.8 | 691 dec | 12.1s
+[09:51:08] iter 13: reward 3p +0.21 4p -0.06 5p +0.04 | spend -0.055 points +0.064 made_pay +0.123 rank -0.070 | T 1.00 | entropy 1.63 | cards/bid 1.78 | 787 dec | 12.9s
+[09:51:20] iter 14: reward 3p -0.09 4p +0.21 5p +0.38 | spend -0.059 points +0.082 made_pay +0.111 rank +0.007 | T 1.00 | entropy 1.72 | cards/bid 1.75 | 695 dec | 11.9s
+[09:51:33] iter 15: reward 3p -0.34 4p +0.17 5p +0.33 | spend -0.041 points +0.069 made_pay +0.114 rank -0.050 | T 1.00 | entropy 1.72 | cards/bid 1.78 | 801 dec | 13.1s
+[09:51:47] iter 16: reward 3p +0.32 4p +0.16 5p -0.26 | spend -0.056 points +0.072 made_pay +0.119 rank -0.023 | T 1.00 | entropy 1.61 | cards/bid 1.67 | 803 dec | 13.7s
+[09:51:59] iter 17: reward 3p -0.35 4p +0.24 5p +0.18 | spend -0.051 points +0.071 made_pay +0.116 rank -0.024 | T 1.00 | entropy 1.50 | cards/bid 1.75 | 842 dec | 12.7s
+[09:52:11] iter 18: reward 3p +0.39 4p -0.28 5p +0.34 | spend -0.053 points +0.091 made_pay +0.115 rank +0.096 | T 1.00 | entropy 1.61 | cards/bid 1.65 | 545 dec | 11.9s
+[09:52:24] iter 19: reward 3p +0.39 4p +0.14 5p +0.42 | spend -0.048 points +0.080 made_pay +0.117 rank +0.152 | T 1.00 | entropy 1.75 | cards/bid 1.7 | 705 dec | 12.7s
+[09:52:36] iter 20: reward 3p -0.06 4p +0.04 5p -0.01 | spend -0.054 points +0.046 made_pay +0.129 rank -0.118 | T 1.00 | entropy 1.55 | cards/bid 1.75 | 729 dec | 12.1s
+[09:52:50] iter 21: reward 3p -0.31 4p -0.03 5p +0.04 | spend -0.035 points +0.055 made_pay +0.118 rank -0.160 | T 1.00 | entropy 1.73 | cards/bid 1.71 | 793 dec | 14.4s
+[09:53:05] iter 22: reward 3p +0.38 4p +0.16 5p -0.16 | spend -0.053 points +0.077 made_pay +0.131 rank -0.087 | T 1.00 | entropy 1.65 | cards/bid 1.66 | 925 dec | 14.4s
+[09:53:21] iter 23: reward 3p -0.10 4p +0.14 5p +0.17 | spend -0.050 points +0.077 made_pay +0.104 rank -0.030 | T 1.00 | entropy 1.73 | cards/bid 1.69 | 864 dec | 16.2s
+[09:53:32] iter 24: reward 3p +0.13 4p +0.25 5p +0.15 | spend -0.056 points +0.072 made_pay +0.121 rank +0.033 | T 1.00 | entropy 1.60 | cards/bid 1.61 | 621 dec | 10.9s
+[09:53:46] iter 25: reward 3p +0.20 4p +0.15 5p +0.13 | spend -0.049 points +0.072 made_pay +0.118 rank +0.012 | T 1.00 | entropy 1.63 | cards/bid 1.68 | 859 dec | 14.2s
+[09:54:21] CHECK it 25: vs_heuristics 20% (chance 26%) | vs_start 33% (chance 26%) | eliminated 47% | 34.9s
+[09:54:33] iter 26: reward 3p -0.13 4p +0.28 5p -0.08 | spend -0.046 points +0.060 made_pay +0.110 rank -0.123 | T 1.00 | entropy 1.63 | cards/bid 1.71 | 722 dec | 12.1s
+[09:54:46] iter 27: reward 3p +0.13 4p +0.11 5p +0.25 | spend -0.046 points +0.074 made_pay +0.130 rank +0.019 | T 1.00 | entropy 1.53 | cards/bid 1.65 | 736 dec | 12.9s
+[09:54:59] iter 28: reward 3p +0.06 4p +0.12 5p -0.08 | spend -0.061 points +0.073 made_pay +0.107 rank -0.093 | T 1.00 | entropy 1.65 | cards/bid 1.7 | 703 dec | 12.8s
+[09:55:13] iter 29: reward 3p +0.17 4p +0.18 5p +0.10 | spend -0.044 points +0.069 made_pay +0.115 rank +0.009 | T 1.00 | entropy 1.72 | cards/bid 1.64 | 747 dec | 14.2s
+[09:55:27] iter 30: reward 3p -0.05 4p -0.17 5p +0.15 | spend -0.051 points +0.050 made_pay +0.126 rank -0.118 | T 1.00 | entropy 1.70 | cards/bid 1.67 | 785 dec | 13.7s
+[09:55:40] iter 31: reward 3p +0.62 4p +0.09 5p +0.00 | spend -0.053 points +0.082 made_pay +0.115 rank +0.051 | T 1.00 | entropy 1.65 | cards/bid 1.64 | 699 dec | 13.0s
+[09:55:55] iter 32: reward 3p +0.06 4p +0.25 5p +0.21 | spend -0.039 points +0.068 made_pay +0.118 rank +0.037 | T 1.00 | entropy 1.73 | cards/bid 1.65 | 888 dec | 14.8s
+[09:56:10] iter 33: reward 3p -0.03 4p +0.24 5p -0.17 | spend -0.041 points +0.065 made_pay +0.117 rank -0.079 | T 1.00 | entropy 1.60 | cards/bid 1.68 | 776 dec | 14.7s
+[09:56:27] iter 34: reward 3p -0.20 4p +0.27 5p +0.18 | spend -0.053 points +0.069 made_pay +0.114 rank -0.012 | T 1.00 | entropy 1.57 | cards/bid 1.64 | 818 dec | 17.8s
+[09:56:43] iter 35: reward 3p +0.24 4p +0.44 5p +0.08 | spend -0.056 points +0.070 made_pay +0.114 rank +0.091 | T 1.00 | entropy 1.66 | cards/bid 1.59 | 926 dec | 15.2s
+[09:56:58] iter 36: reward 3p +0.22 4p +0.10 5p +0.06 | spend -0.049 points +0.079 made_pay +0.117 rank -0.009 | T 1.00 | entropy 1.65 | cards/bid 1.62 | 833 dec | 15.1s
+[09:57:12] iter 37: reward 3p -0.10 4p +0.13 5p +0.09 | spend -0.049 points +0.055 made_pay +0.121 rank -0.043 | T 1.00 | entropy 1.64 | cards/bid 1.65 | 868 dec | 14.1s
+[09:57:28] iter 38: reward 3p +0.52 4p +0.24 5p +0.18 | spend -0.039 points +0.076 made_pay +0.126 rank +0.119 | T 1.00 | entropy 1.62 | cards/bid 1.57 | 798 dec | 15.6s
+[09:57:43] iter 39: reward 3p -0.20 4p +0.05 5p +0.30 | spend -0.047 points +0.063 made_pay +0.109 rank +0.004 | T 1.00 | entropy 1.62 | cards/bid 1.63 | 939 dec | 15.6s
+[09:57:56] iter 40: reward 3p +0.18 4p +0.28 5p -0.28 | spend -0.057 points +0.094 made_pay +0.100 rank -0.016 | T 1.00 | entropy 1.64 | cards/bid 1.54 | 625 dec | 12.6s
+[09:58:12] iter 41: reward 3p +0.10 4p -0.04 5p +0.11 | spend -0.044 points +0.058 made_pay +0.115 rank -0.070 | T 1.00 | entropy 1.74 | cards/bid 1.66 | 859 dec | 16.2s
+[09:58:25] iter 42: reward 3p -0.03 4p -0.27 5p +0.32 | spend -0.033 points +0.065 made_pay +0.115 rank -0.090 | T 1.00 | entropy 1.66 | cards/bid 1.61 | 745 dec | 13.2s
+[09:58:39] iter 43: reward 3p +0.22 4p +0.26 5p +0.19 | spend -0.058 points +0.094 made_pay +0.107 rank +0.077 | T 1.00 | entropy 1.62 | cards/bid 1.48 | 821 dec | 14.2s
+[09:58:54] iter 44: reward 3p -0.17 4p +0.75 5p +0.20 | spend -0.047 points +0.086 made_pay +0.122 rank -0.056 | T 1.00 | entropy 1.64 | cards/bid 1.56 | 752 dec | 14.4s
+[09:59:09] iter 45: reward 3p +0.42 4p -0.08 5p +0.32 | spend -0.045 points +0.067 made_pay +0.112 rank +0.113 | T 1.00 | entropy 1.72 | cards/bid 1.51 | 883 dec | 15.0s
+[09:59:23] iter 46: reward 3p +0.16 4p -0.03 5p +0.27 | spend -0.045 points +0.099 made_pay +0.102 rank -0.009 | T 1.00 | entropy 1.68 | cards/bid 1.52 | 809 dec | 14.2s
+[09:59:37] iter 47: reward 3p +0.24 4p +0.35 5p -0.09 | spend -0.056 points +0.088 made_pay +0.108 rank +0.110 | T 1.00 | entropy 1.64 | cards/bid 1.54 | 815 dec | 14.3s
+[09:59:51] iter 48: reward 3p +0.11 4p +0.10 5p +0.08 | spend -0.057 points +0.077 made_pay +0.104 rank -0.032 | T 1.00 | entropy 1.60 | cards/bid 1.5 | 799 dec | 13.4s
+[10:00:08] iter 49: reward 3p +0.11 4p -0.01 5p +0.13 | spend -0.047 points +0.063 made_pay +0.110 rank -0.044 | T 1.00 | entropy 1.58 | cards/bid 1.56 | 894 dec | 17.0s
+[10:00:21] iter 50: reward 3p -0.11 4p +0.33 5p +0.36 | spend -0.040 points +0.071 made_pay +0.119 rank +0.003 | T 1.00 | entropy 1.73 | cards/bid 1.53 | 654 dec | 13.2s
+[10:01:21] CHECK it 50: vs_heuristics 17% (chance 26%) | vs_start 22% (chance 26%) | vs_prev 16% (chance 26%) | eliminated 45% | 59.6s
+[10:01:34] iter 51: reward 3p -0.10 4p +0.22 5p +0.23 | spend -0.058 points +0.083 made_pay +0.107 rank -0.005 | T 1.00 | entropy 1.69 | cards/bid 1.46 | 687 dec | 12.5s
+[10:01:48] iter 52: reward 3p +0.48 4p +0.07 5p +0.01 | spend -0.048 points +0.079 made_pay +0.111 rank +0.052 | T 1.00 | entropy 1.69 | cards/bid 1.45 | 727 dec | 14.9s
+[10:02:06] iter 53: reward 3p -0.06 4p +0.28 5p +0.21 | spend -0.031 points +0.072 made_pay +0.115 rank +0.053 | T 1.00 | entropy 1.72 | cards/bid 1.5 | 832 dec | 17.1s
+[10:02:21] iter 54: reward 3p +0.33 4p +0.14 5p -0.20 | spend -0.049 points +0.077 made_pay +0.101 rank -0.023 | T 1.00 | entropy 1.63 | cards/bid 1.44 | 833 dec | 15.8s
+[10:02:36] iter 55: reward 3p +0.14 4p +0.09 5p -0.16 | spend -0.052 points +0.084 made_pay +0.097 rank -0.062 | T 1.00 | entropy 1.60 | cards/bid 1.46 | 843 dec | 14.6s
+[10:02:52] iter 56: reward 3p +0.46 4p +0.41 5p +0.02 | spend -0.047 points +0.069 made_pay +0.112 rank +0.115 | T 1.00 | entropy 1.64 | cards/bid 1.48 | 854 dec | 16.3s
+[10:03:08] iter 57: reward 3p +0.05 4p +0.36 5p -0.10 | spend -0.035 points +0.066 made_pay +0.107 rank -0.017 | T 1.00 | entropy 1.71 | cards/bid 1.55 | 811 dec | 16.1s
+[10:03:24] iter 58: reward 3p +0.07 4p -0.40 5p -0.07 | spend -0.051 points +0.058 made_pay +0.114 rank -0.181 | T 1.00 | entropy 1.57 | cards/bid 1.43 | 843 dec | 15.4s
+[10:03:41] iter 59: reward 3p +0.36 4p +0.20 5p -0.09 | spend -0.046 points +0.065 made_pay +0.111 rank -0.005 | T 1.00 | entropy 1.56 | cards/bid 1.51 | 993 dec | 16.7s
+[10:03:56] iter 60: reward 3p +0.28 4p +0.17 5p +0.00 | spend -0.043 points +0.053 made_pay +0.114 rank -0.039 | T 1.00 | entropy 1.63 | cards/bid 1.49 | 740 dec | 15.8s
+[10:04:12] iter 61: reward 3p -0.02 4p +0.15 5p +0.15 | spend -0.047 points +0.060 made_pay +0.103 rank +0.012 | T 1.00 | entropy 1.69 | cards/bid 1.53 | 848 dec | 15.6s
+[10:04:29] iter 62: reward 3p +0.18 4p +0.05 5p +0.18 | spend -0.047 points +0.078 made_pay +0.096 rank +0.020 | T 1.00 | entropy 1.70 | cards/bid 1.5 | 712 dec | 17.1s
+[10:04:46] iter 63: reward 3p +0.18 4p +0.22 5p +0.11 | spend -0.042 points +0.060 made_pay +0.109 rank +0.063 | T 1.00 | entropy 1.66 | cards/bid 1.49 | 711 dec | 16.7s
+[10:05:04] iter 64: reward 3p +0.36 4p +0.28 5p +0.01 | spend -0.040 points +0.083 made_pay +0.109 rank +0.018 | T 1.00 | entropy 1.70 | cards/bid 1.56 | 827 dec | 18.3s
+[10:05:23] iter 65: reward 3p +0.15 4p +0.10 5p -0.10 | spend -0.065 points +0.104 made_pay +0.090 rank -0.087 | T 1.00 | entropy 1.55 | cards/bid 1.46 | 887 dec | 18.1s
+[10:05:37] iter 66: reward 3p -0.31 4p +0.19 5p +0.00 | spend -0.060 points +0.069 made_pay +0.109 rank -0.139 | T 1.00 | entropy 1.63 | cards/bid 1.48 | 729 dec | 14.1s
+[10:05:51] iter 67: reward 3p +0.03 4p +0.06 5p +0.10 | spend -0.044 points +0.049 made_pay +0.106 rank -0.038 | T 1.00 | entropy 1.74 | cards/bid 1.55 | 719 dec | 14.7s
+[10:06:05] iter 68: reward 3p -0.21 4p +0.10 5p +0.13 | spend -0.054 points +0.069 made_pay +0.098 rank -0.110 | T 1.00 | entropy 1.68 | cards/bid 1.47 | 719 dec | 13.5s
+[10:06:22] iter 69: reward 3p +0.21 4p -0.04 5p +0.27 | spend -0.050 points +0.069 made_pay +0.107 rank +0.021 | T 1.00 | entropy 1.74 | cards/bid 1.51 | 851 dec | 17.5s
+[10:06:41] iter 70: reward 3p +0.16 4p -0.07 5p +0.16 | spend -0.044 points +0.068 made_pay +0.108 rank -0.015 | T 1.00 | entropy 1.74 | cards/bid 1.51 | 1025 dec | 19.0s
+[10:06:57] iter 71: reward 3p +0.03 4p +0.25 5p +0.04 | spend -0.056 points +0.075 made_pay +0.103 rank +0.035 | T 1.00 | entropy 1.62 | cards/bid 1.52 | 821 dec | 15.3s
+[10:07:12] iter 72: reward 3p -0.15 4p +0.12 5p +0.42 | spend -0.044 points +0.073 made_pay +0.096 rank +0.145 | T 1.00 | entropy 1.70 | cards/bid 1.45 | 630 dec | 15.0s
+[10:07:27] iter 73: reward 3p -0.21 4p -0.00 5p +0.17 | spend -0.057 points +0.065 made_pay +0.102 rank -0.109 | T 1.00 | entropy 1.63 | cards/bid 1.52 | 796 dec | 15.8s
+[10:07:44] iter 74: reward 3p +0.45 4p +0.52 5p +0.06 | spend -0.040 points +0.083 made_pay +0.109 rank +0.099 | T 1.00 | entropy 1.79 | cards/bid 1.49 | 758 dec | 16.3s
+[10:08:01] iter 75: reward 3p -0.02 4p +0.06 5p +0.18 | spend -0.039 points +0.050 made_pay +0.109 rank -0.004 | T 1.00 | entropy 1.81 | cards/bid 1.53 | 843 dec | 17.1s
+[10:09:01] CHECK it 75: vs_heuristics 27% (chance 26%) | vs_start 18% (chance 26%) | vs_prev 16% (chance 26%) | eliminated 43% | 60.2s
+[10:09:17] iter 76: reward 3p -0.22 4p +0.32 5p -0.21 | spend -0.062 points +0.058 made_pay +0.107 rank -0.210 | T 1.00 | entropy 1.76 | cards/bid 1.56 | 721 dec | 15.4s
+[10:09:32] iter 77: reward 3p +0.15 4p +0.13 5p +0.19 | spend -0.036 points +0.068 made_pay +0.093 rank +0.034 | T 1.00 | entropy 1.80 | cards/bid 1.51 | 731 dec | 15.7s
+[10:09:46] iter 78: reward 3p +0.02 4p -0.19 5p +0.26 | spend -0.052 points +0.093 made_pay +0.109 rank -0.129 | T 1.00 | entropy 1.70 | cards/bid 1.42 | 716 dec | 13.5s
+[10:10:01] iter 79: reward 3p +0.74 4p +0.16 5p +0.17 | spend -0.048 points +0.094 made_pay +0.086 rank +0.152 | T 1.00 | entropy 1.65 | cards/bid 1.45 | 702 dec | 15.4s
+[10:10:16] iter 80: reward 3p -0.02 4p +0.16 5p +0.27 | spend -0.049 points +0.076 made_pay +0.108 rank -0.004 | T 1.00 | entropy 1.63 | cards/bid 1.48 | 810 dec | 14.5s
+[10:10:32] iter 81: reward 3p +0.51 4p +0.02 5p +0.37 | spend -0.043 points +0.074 made_pay +0.088 rank +0.113 | T 1.00 | entropy 1.57 | cards/bid 1.48 | 733 dec | 16.1s
+[10:10:46] iter 82: reward 3p +0.26 4p -0.20 5p -0.20 | spend -0.055 points +0.052 made_pay +0.093 rank -0.113 | T 1.00 | entropy 1.70 | cards/bid 1.41 | 676 dec | 13.5s
+[10:10:58] iter 83: reward 3p +0.50 4p +0.15 5p +0.23 | spend -0.048 points +0.112 made_pay +0.098 rank +0.201 | T 1.00 | entropy 1.73 | cards/bid 1.42 | 557 dec | 12.9s
+[10:11:16] iter 84: reward 3p +0.08 4p -0.16 5p +0.04 | spend -0.053 points +0.050 made_pay +0.094 rank -0.117 | T 1.00 | entropy 1.63 | cards/bid 1.41 | 777 dec | 17.4s
+[10:11:34] iter 85: reward 3p +0.34 4p +0.22 5p +0.09 | spend -0.042 points +0.076 made_pay +0.101 rank +0.020 | T 1.00 | entropy 1.76 | cards/bid 1.47 | 813 dec | 17.8s
+[10:11:50] iter 86: reward 3p -0.04 4p -0.01 5p +0.27 | spend -0.057 points +0.073 made_pay +0.096 rank -0.018 | T 1.00 | entropy 1.70 | cards/bid 1.45 | 886 dec | 16.6s
+[10:12:04] iter 87: reward 3p -0.01 4p -0.24 5p +0.18 | spend -0.053 points +0.058 made_pay +0.092 rank -0.095 | T 1.00 | entropy 1.66 | cards/bid 1.39 | 684 dec | 13.9s
+[10:12:19] iter 88: reward 3p +0.30 4p +0.08 5p +0.14 | spend -0.046 points +0.069 made_pay +0.095 rank +0.050 | T 1.00 | entropy 1.68 | cards/bid 1.5 | 691 dec | 14.7s
+[10:12:36] iter 89: reward 3p -0.61 4p +0.22 5p +0.01 | spend -0.044 points +0.051 made_pay +0.097 rank -0.027 | T 1.00 | entropy 1.66 | cards/bid 1.46 | 812 dec | 17.2s
+[10:12:52] iter 90: reward 3p -0.11 4p -0.08 5p +0.20 | spend -0.044 points +0.058 made_pay +0.094 rank -0.046 | T 1.00 | entropy 1.73 | cards/bid 1.46 | 725 dec | 16.0s
+[10:13:08] iter 91: reward 3p +0.42 4p +0.08 5p +0.19 | spend -0.035 points +0.067 made_pay +0.102 rank +0.099 | T 1.00 | entropy 1.73 | cards/bid 1.47 | 688 dec | 16.2s
+[10:13:26] iter 92: reward 3p +1.12 4p +0.17 5p -0.02 | spend -0.034 points +0.062 made_pay +0.082 rank +0.043 | T 1.00 | entropy 1.75 | cards/bid 1.48 | 724 dec | 17.3s
+[10:13:47] iter 93: reward 3p +0.05 4p +0.17 5p +0.30 | spend -0.053 points +0.064 made_pay +0.081 rank +0.134 | T 1.00 | entropy 1.66 | cards/bid 1.49 | 841 dec | 20.8s
+[10:14:04] iter 94: reward 3p -0.03 4p +0.04 5p +0.32 | spend -0.034 points +0.064 made_pay +0.095 rank +0.013 | T 1.00 | entropy 1.75 | cards/bid 1.39 | 752 dec | 17.6s
+[10:14:24] iter 95: reward 3p +0.01 4p +0.14 5p +0.04 | spend -0.038 points +0.065 made_pay +0.098 rank -0.077 | T 1.00 | entropy 1.72 | cards/bid 1.41 | 876 dec | 20.2s
+[10:14:42] iter 96: reward 3p +0.18 4p +0.17 5p +0.19 | spend -0.044 points +0.076 made_pay +0.093 rank +0.054 | T 1.00 | entropy 1.64 | cards/bid 1.4 | 804 dec | 17.3s
+[10:14:56] iter 97: reward 3p +0.09 4p +0.24 5p +0.36 | spend -0.049 points +0.083 made_pay +0.091 rank +0.081 | T 1.00 | entropy 1.66 | cards/bid 1.39 | 631 dec | 13.8s
+[10:15:14] iter 98: reward 3p +0.32 4p +0.53 5p +0.20 | spend -0.042 points +0.081 made_pay +0.087 rank +0.202 | T 1.00 | entropy 1.67 | cards/bid 1.36 | 679 dec | 18.0s
+[10:15:30] iter 99: reward 3p +0.08 4p +0.36 5p +0.20 | spend -0.050 points +0.091 made_pay +0.088 rank +0.060 | T 1.00 | entropy 1.65 | cards/bid 1.34 | 739 dec | 16.2s
+[10:15:46] iter 100: reward 3p +0.29 4p +0.33 5p -0.05 | spend -0.040 points +0.054 made_pay +0.081 rank +0.105 | T 1.00 | entropy 1.75 | cards/bid 1.37 | 655 dec | 15.7s
+[10:16:45] CHECK it 100: vs_heuristics 17% (chance 26%) | vs_start 40% (chance 26%) | vs_prev 40% (chance 26%) | eliminated 38% | 59.6s
+[10:17:06] iter 101: reward 3p +0.12 4p +0.01 5p +0.01 | spend -0.055 points +0.091 made_pay +0.085 rank -0.083 | T 1.00 | entropy 1.64 | cards/bid 1.35 | 833 dec | 20.7s
+[10:17:25] iter 102: reward 3p +0.51 4p -0.10 5p +0.19 | spend -0.051 points +0.073 made_pay +0.088 rank -0.018 | T 1.00 | entropy 1.61 | cards/bid 1.39 | 679 dec | 18.3s
+[10:17:46] iter 103: reward 3p +0.40 4p +0.14 5p +0.06 | spend -0.026 points +0.064 made_pay +0.088 rank +0.051 | T 1.00 | entropy 1.69 | cards/bid 1.37 | 713 dec | 21.7s
+[10:18:11] iter 104: reward 3p +0.25 4p +0.06 5p -0.09 | spend -0.052 points +0.069 made_pay +0.080 rank -0.041 | T 1.00 | entropy 1.72 | cards/bid 1.38 | 822 dec | 25.0s
+[10:18:33] iter 105: reward 3p +0.45 4p +0.02 5p +0.21 | spend -0.034 points +0.055 made_pay +0.085 rank +0.026 | T 1.00 | entropy 1.68 | cards/bid 1.36 | 765 dec | 21.5s
+[10:18:53] iter 106: reward 3p +0.45 4p +0.40 5p +0.06 | spend -0.043 points +0.074 made_pay +0.086 rank +0.124 | T 1.00 | entropy 1.69 | cards/bid 1.37 | 818 dec | 19.7s
+[10:19:12] iter 107: reward 3p +0.21 4p +0.25 5p +0.19 | spend -0.050 points +0.076 made_pay +0.083 rank +0.121 | T 1.00 | entropy 1.76 | cards/bid 1.4 | 774 dec | 19.6s
+[10:19:32] iter 108: reward 3p +0.17 4p +0.29 5p +0.13 | spend -0.040 points +0.065 made_pay +0.078 rank +0.085 | T 1.00 | entropy 1.68 | cards/bid 1.37 | 733 dec | 19.6s
+[10:19:50] iter 109: reward 3p +0.12 4p +0.32 5p +0.34 | spend -0.037 points +0.058 made_pay +0.089 rank +0.132 | T 1.00 | entropy 1.72 | cards/bid 1.31 | 668 dec | 17.7s
+[10:20:09] iter 110: reward 3p +0.39 4p +0.15 5p +0.09 | spend -0.030 points +0.065 made_pay +0.074 rank +0.098 | T 1.00 | entropy 1.73 | cards/bid 1.33 | 618 dec | 19.0s
+[10:20:27] iter 111: reward 3p -0.06 4p +0.25 5p +0.32 | spend -0.045 points +0.068 made_pay +0.079 rank +0.110 | T 1.00 | entropy 1.64 | cards/bid 1.32 | 773 dec | 18.6s
+[10:20:46] iter 112: reward 3p +0.12 4p +0.18 5p +0.31 | spend -0.035 points +0.072 made_pay +0.079 rank +0.107 | T 1.00 | entropy 1.66 | cards/bid 1.32 | 767 dec | 19.1s
+[10:21:04] iter 113: reward 3p -0.00 4p +0.24 5p +0.19 | spend -0.034 points +0.068 made_pay +0.082 rank +0.047 | T 1.00 | entropy 1.66 | cards/bid 1.3 | 713 dec | 17.7s
+[10:21:21] iter 114: reward 3p +0.12 4p -0.00 5p +0.70 | spend -0.050 points +0.094 made_pay +0.072 rank +0.093 | T 1.00 | entropy 1.68 | cards/bid 1.31 | 594 dec | 16.4s
+[10:21:41] iter 115: reward 3p +0.45 4p +0.07 5p +0.03 | spend -0.039 points +0.062 made_pay +0.076 rank +0.040 | T 1.00 | entropy 1.69 | cards/bid 1.34 | 759 dec | 20.7s
+[10:22:02] iter 116: reward 3p +0.37 4p +0.35 5p +0.34 | spend -0.028 points +0.082 made_pay +0.077 rank +0.223 | T 1.00 | entropy 1.69 | cards/bid 1.31 | 872 dec | 21.0s
+[10:22:20] iter 117: reward 3p -0.05 4p +0.24 5p +0.26 | spend -0.040 points +0.064 made_pay +0.067 rank +0.098 | T 1.00 | entropy 1.66 | cards/bid 1.31 | 700 dec | 17.4s
+[10:22:38] iter 118: reward 3p +0.38 4p +0.40 5p -0.09 | spend -0.032 points +0.049 made_pay +0.071 rank +0.056 | T 1.00 | entropy 1.67 | cards/bid 1.28 | 662 dec | 18.4s
+[10:22:57] iter 119: reward 3p +0.55 4p +0.04 5p +0.34 | spend -0.034 points +0.075 made_pay +0.084 rank +0.167 | T 1.00 | entropy 1.58 | cards/bid 1.3 | 656 dec | 18.5s
+[10:23:17] iter 120: reward 3p +0.41 4p +0.45 5p +0.18 | spend -0.029 points +0.080 made_pay +0.078 rank +0.214 | T 1.00 | entropy 1.71 | cards/bid 1.28 | 675 dec | 20.6s
+[10:23:35] iter 121: reward 3p +0.14 4p -0.01 5p +0.20 | spend -0.046 points +0.085 made_pay +0.074 rank +0.022 | T 1.00 | entropy 1.69 | cards/bid 1.23 | 672 dec | 17.9s
+[10:23:55] iter 122: reward 3p +0.34 4p +0.31 5p +0.02 | spend -0.042 points +0.071 made_pay +0.062 rank +0.056 | T 1.00 | entropy 1.60 | cards/bid 1.28 | 773 dec | 19.8s
+[10:24:17] iter 123: reward 3p +0.13 4p -0.00 5p +0.06 | spend -0.035 points +0.072 made_pay +0.076 rank -0.040 | T 1.00 | entropy 1.72 | cards/bid 1.3 | 733 dec | 21.6s
+[10:24:40] iter 124: reward 3p +0.06 4p +0.39 5p +0.19 | spend -0.035 points +0.048 made_pay +0.069 rank +0.126 | T 1.00 | entropy 1.70 | cards/bid 1.29 | 821 dec | 23.6s
+[10:25:01] iter 125: reward 3p +0.46 4p +0.33 5p -0.02 | spend -0.043 points +0.063 made_pay +0.057 rank +0.125 | T 1.00 | entropy 1.69 | cards/bid 1.27 | 689 dec | 20.8s
+[10:26:04] CHECK it 125: vs_heuristics 8% (chance 26%) | vs_start 29% (chance 26%) | vs_prev 20% (chance 26%) | eliminated 17% | 62.9s
+[10:26:25] iter 126: reward 3p +0.25 4p +0.28 5p -0.01 | spend -0.037 points +0.074 made_pay +0.065 rank +0.020 | T 1.00 | entropy 1.65 | cards/bid 1.31 | 763 dec | 20.4s
+[10:26:47] iter 127: reward 3p +0.28 4p +0.25 5p +0.30 | spend -0.032 points +0.086 made_pay +0.064 rank +0.162 | T 1.00 | entropy 1.75 | cards/bid 1.21 | 656 dec | 22.0s
+[10:27:07] iter 128: reward 3p +0.23 4p +0.61 5p +0.17 | spend -0.042 points +0.068 made_pay +0.064 rank +0.147 | T 1.00 | entropy 1.63 | cards/bid 1.28 | 685 dec | 20.1s
+[10:27:30] iter 129: reward 3p -0.14 4p +0.38 5p -0.03 | spend -0.032 points +0.065 made_pay +0.074 rank +0.069 | T 1.00 | entropy 1.67 | cards/bid 1.2 | 646 dec | 23.6s
+[10:27:50] iter 130: reward 3p +0.20 4p +0.11 5p +0.12 | spend -0.049 points +0.050 made_pay +0.072 rank +0.067 | T 1.00 | entropy 1.49 | cards/bid 1.24 | 701 dec | 19.5s
+[10:28:18] iter 131: reward 3p +0.17 4p +0.39 5p +0.13 | spend -0.024 points +0.068 made_pay +0.065 rank +0.072 | T 1.00 | entropy 1.60 | cards/bid 1.31 | 767 dec | 28.4s
+[10:28:44] iter 132: reward 3p +0.26 4p +0.17 5p +0.33 | spend -0.041 points +0.053 made_pay +0.049 rank +0.200 | T 1.00 | entropy 1.62 | cards/bid 1.23 | 634 dec | 25.4s
+[10:29:59] stopped by hand at iteration 132, saved runs/sp2/latest.pt
+launcher: done
+[10:30:30] resumed runs/sp2/latest.pt at iteration 132 (2660 games), device mps
+[10:30:55] iter 133: reward 3p +0.13 4p +0.12 5p +0.04 | spend -0.042 points +0.062 made_pay +0.051 rank +0.011 | T 1.00 | entropy 1.64 | cards/bid 1.23 | 621 dec | 24.7s
+[10:31:15] iter 134: reward 3p +0.10 4p +0.10 5p +0.15 | spend -0.048 points +0.068 made_pay +0.054 rank +0.041 | T 1.00 | entropy 1.59 | cards/bid 1.23 | 689 dec | 20.1s
+[10:31:36] iter 135: reward 3p -0.07 4p +0.25 5p +0.54 | spend -0.037 points +0.070 made_pay +0.057 rank +0.167 | T 1.00 | entropy 1.67 | cards/bid 1.2 | 543 dec | 20.6s
+[10:31:56] iter 136: reward 3p +0.20 4p +0.20 5p +0.00 | spend -0.041 points +0.080 made_pay +0.062 rank +0.069 | T 1.00 | entropy 1.66 | cards/bid 1.19 | 652 dec | 20.0s
+[10:32:21] iter 137: reward 3p +0.08 4p +0.20 5p +0.11 | spend -0.041 points +0.065 made_pay +0.058 rank +0.047 | T 1.00 | entropy 1.57 | cards/bid 1.19 | 763 dec | 24.9s
+[10:32:40] iter 138: reward 3p -0.19 4p +0.24 5p +0.32 | spend -0.034 points +0.055 made_pay +0.064 rank +0.071 | T 1.00 | entropy 1.55 | cards/bid 1.25 | 624 dec | 18.9s
+[10:33:00] iter 139: reward 3p +0.57 4p +0.23 5p +0.27 | spend -0.044 points +0.075 made_pay +0.061 rank +0.232 | T 1.00 | entropy 1.57 | cards/bid 1.17 | 685 dec | 20.7s
+[10:33:20] iter 140: reward 3p +0.07 4p +0.15 5p +0.17 | spend -0.038 points +0.048 made_pay +0.051 rank +0.071 | T 1.00 | entropy 1.55 | cards/bid 1.2 | 510 dec | 20.0s
+[10:33:47] iter 141: reward 3p +0.24 4p +0.19 5p +0.24 | spend -0.042 points +0.081 made_pay +0.057 rank +0.129 | T 1.00 | entropy 1.52 | cards/bid 1.19 | 823 dec | 26.2s
+[10:34:09] iter 142: reward 3p +0.21 4p +0.21 5p -0.08 | spend -0.035 points +0.057 made_pay +0.062 rank -0.002 | T 1.00 | entropy 1.54 | cards/bid 1.21 | 642 dec | 22.6s
+[10:35:27] stopped by hand at iteration 142, saved runs/sp2/latest.pt
+launcher: done
+[10:35:40] resumed runs/sp2/latest.pt at iteration 142 (2880 games), device mps
+[10:36:08] iter 143: reward 3p +0.03 4p -0.09 5p +0.15 | spend -0.040 points +0.066 made_pay +0.058 rank -0.045 | T 1.00 | entropy 1.58 | cards/bid 1.17 | money left $34 (poorest other $14) elim 17% | 659 dec | 28.3s
+[10:36:18] stopped by hand at iteration 143, saved runs/sp2/latest.pt
+launcher: done

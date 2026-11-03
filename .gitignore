@@ -172,5 +172,13 @@ Thumbs.db
 
 *.ipynb
 
-# Local RL workspace (notebooks, cached self-play data) -- never pushed
-.RL/
+# RL research workspace (.RL/): code, notebooks, logs, dashboards and notes are
+# tracked as a record of how the Insane bot was trained; the heavy artifacts are
+# not -- network weights (the shipped ones live in highsociety/code/ai/rl/weights/),
+# training data and caches.
+.RL/**/*.pt
+.RL/**/*.pt.tmp
+.RL/**/*.npz
+.RL/**/*.pkl
+.RL/**/__pycache__/
+.RL/**/.ipynb_checkpoints/
