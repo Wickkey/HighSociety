@@ -1,5 +1,5 @@
 """
-The RL ("Magnus") bot: the network plumbing (encoding, legal moves, numpy
+The RL ("Insane") bot: the network plumbing (encoding, legal moves, numpy
 network) and the bot playing real games through PlayGame.
 
 Its match against the PyTorch training code (same boards, same scores, same
@@ -14,15 +14,15 @@ from highsociety.code.ai.capped_greedy_bot import CappedGreedyBot
 from highsociety.code.ai.greedy_bot import GreedyBot
 from highsociety.code.ai.rl import candidates, decision, encoding
 from highsociety.code.ai.rl.network import load_network
-from highsociety.code.ai.rl_bot import MagnusBot, RLBot, active_weights
+from highsociety.code.ai.rl_bot import InsaneBot, RLBot, active_weights
 from highsociety.code.common.bot_roster import DIFFICULTIES, names_for_difficulty
 from highsociety.code.gamecore.components_module.painting import Painting
 from highsociety.code.gamecore.game_manager.auction_history import AuctionHistory
 from highsociety.code.gamecore.game_manager.gameplay import PlayGame
 
 
-class RecordingMagnus(MagnusBot):
-    """A MagnusBot that keeps every board it saw and every move it made."""
+class RecordingInsane(InsaneBot):
+    """A InsaneBot that keeps every board it saw and every move it made."""
 
     def __init__(self, name):
         super().__init__(name=name, username=name.lower())
@@ -47,15 +47,15 @@ def _play(players, seed):
 # ---------------------------------------------------------------- the bot in real games
 
 @pytest.mark.parametrize("n_players", [3, 4, 5])
-def test_magnus_plays_full_games_with_only_legal_moves(n_players):
+def test_insane_plays_full_games_with_only_legal_moves(n_players):
     for seed in range(3):
-        magnus = RecordingMagnus("Magnus")
+        bot = RecordingInsane("Insane")
         others = [CappedGreedyBot(f"Capped{i}", f"capped{i}") if i % 2 else GreedyBot(f"Greedy{i}", f"greedy{i}")
                   for i in range(n_players - 1)]
-        game = _play([magnus, *others], seed=seed)
+        game = _play([bot, *others], seed=seed)
         assert game.auction_rounds, "the game never got going"
-        assert magnus.seen, "Magnus never had to decide anything"
-        for board, live, _, move in magnus.seen:
+        assert bot.seen, "the bot never had to decide anything"
+        for board, live, _, move in bot.seen:
             if move == "pass":
                 continue
             assert isinstance(move, list) and 1 <= len(move) <= candidates.MAX_BID_CARDS
@@ -65,16 +65,16 @@ def test_magnus_plays_full_games_with_only_legal_moves(n_players):
             assert mine + sum(move) > top, "a bid that doesn't beat the high bid"
 
 
-def test_two_magnus_bots_at_one_table_finish_the_game():
-    game = _play([MagnusBot("Atlas Bot", "atlas bot"), MagnusBot("Vega Bot", "vega bot"),
+def test_two_insane_bots_at_one_table_finish_the_game():
+    game = _play([InsaneBot("Batman Bot", "batman bot"), InsaneBot("Thanos Bot", "thanos bot"),
                   CappedGreedyBot("Capped", "capped")], seed=7)
     assert game.auction_rounds
 
 
 def test_the_board_matches_the_bot_and_the_table():
-    magnus = RecordingMagnus("Magnus")
-    _play([magnus, GreedyBot("G1", "g1"), CappedGreedyBot("C1", "c1")], seed=3)
-    for board, live, _, _ in magnus.seen:
+    bot = RecordingInsane("Insane")
+    _play([bot, GreedyBot("G1", "g1"), CappedGreedyBot("C1", "c1")], seed=3)
+    for board, live, _, _ in bot.seen:
         assert board.shape == (encoding.N_ROWS, encoding.N_COLS) and board.dtype == np.int8
         assert not board[:, 3:5].any(), "3-player game: seat columns 3 and 4 must stay empty"
         assert (board[encoding.N_MONEY:, encoding.GAME_COL] == 2).sum() == 1, "exactly one card on auction"
@@ -83,7 +83,7 @@ def test_the_board_matches_the_bot_and_the_table():
             assert board[row, encoding.GAME_COL] == 2
 
 
-class SnapshotChecker(MagnusBot):
+class SnapshotChecker(InsaneBot):
     """At each decision, compares the AuctionHistory snapshot the bot reads with the live players."""
 
     def __init__(self, name):
@@ -108,14 +108,14 @@ def test_the_snapshot_the_bot_reads_is_current_at_every_decision(seed):
     # PlayGame snapshots at the end of an auction *before* resetting players for
     # the next one; without the fresh snapshot at auction start, the first turns
     # of each auction saw last auction's passes and bids.
-    magnus = SnapshotChecker("Magnus")
-    game = PlayGame(players=[magnus, GreedyBot("G1", "g1"), CappedGreedyBot("C1", "c1"), GreedyBot("G2", "g2")],
+    bot = SnapshotChecker("Insane")
+    game = PlayGame(players=[bot, GreedyBot("G1", "g1"), CappedGreedyBot("C1", "c1"), GreedyBot("G2", "g2")],
                     spectators=[], mode="network", seed=seed, turn_duration=None,
                     auction_history=AuctionHistory(), pace_events=False, preseated=True)
-    magnus.players = game.players
+    bot.players = game.players
     game.play_game()
-    assert magnus.decisions > 0
-    assert magnus.stale == []
+    assert bot.decisions > 0
+    assert bot.stale == []
 
 
 # ---------------------------------------------------------------- the pieces
@@ -144,12 +144,13 @@ def test_afterstates_move_cards_to_the_table_and_take_the_high_bid():
 
 
 def test_the_active_weights_load_and_score_deterministically():
-    net = load_network(active_weights("magnus"))
+    net = load_network(active_weights("insane"))
     boards = np.random.default_rng(0).integers(-1, 3, size=(7, encoding.N_ROWS, encoding.N_COLS)).astype(np.int8)
-    scores = net.score(boards)
-    assert scores.shape == (7,) and np.isfinite(scores).all()
-    assert np.array_equal(scores, net.score(boards))
-    assert load_network(active_weights("magnus")) is net                   # one shared copy
+    run = net.score if net.arch == "v1" else net.logits
+    scores = run(boards)
+    assert scores.shape == ((7,) if net.arch == "v1" else (7, len(candidates.SUBSETS))) and np.isfinite(scores).all()
+    assert np.array_equal(scores, run(boards))
+    assert load_network(active_weights("insane")) is net                   # one shared copy
 
 
 def test_faux_pas_discard_gives_up_the_cheapest_painting():
@@ -158,7 +159,7 @@ def test_faux_pas_discard_gives_up_the_cheapest_painting():
     assert decision.decide_faux_pas_discard(cards) == 2
     assert decision.decide_faux_pas_discard([{"type": "Passe", "value": -5}]) is None
 
-    bot = MagnusBot("M", "m")
+    bot = InsaneBot("M", "m")
     for v in (6, 3, 8):
         bot.add_status_card(Painting(value=v))
     assert bot.choose_painting_to_discard().value == 3
@@ -168,16 +169,59 @@ def test_a_failing_decision_passes_instead_of_breaking_the_game(monkeypatch):
     def boom(*a, **k):
         raise RuntimeError("bug")
     monkeypatch.setattr(decision, "decide_bid", boom)
-    assert MagnusBot("M", "m").get_bid() == "pass"
+    assert InsaneBot("M", "m").get_bid() == "pass"
 
 
-# ---------------------------------------------------------------- the "magnus" difficulty
+# ---------------------------------------------------------------- the "insane" difficulty
 
-def test_magnus_is_a_lobby_difficulty_with_its_own_names():
-    assert "magnus" in DIFFICULTIES
-    assert BOT_TYPES["magnus"] is MagnusBot
-    assert len(names_for_difficulty("magnus")) >= 4                  # a table seats at most 4 bots
-    bots = create_bot_players(["magnus", "magnus", "hard"], think_time=0)
-    assert [type(b) for b in bots] == [MagnusBot, MagnusBot, BOT_TYPES["hard"]]
-    assert all(b.name in names_for_difficulty("magnus") for b in bots[:2])
-    assert bots[0].difficulty == "magnus" and isinstance(bots[0], RLBot)
+def test_insane_is_a_lobby_difficulty_with_its_own_names():
+    assert "insane" in DIFFICULTIES
+    assert BOT_TYPES["insane"] is InsaneBot
+    assert len(names_for_difficulty("insane")) >= 4                  # a table seats at most 4 bots
+    bots = create_bot_players(["insane", "insane", "hard"], think_time=0)
+    assert [type(b) for b in bots] == [InsaneBot, InsaneBot, BOT_TYPES["hard"]]
+    assert all(b.name in names_for_difficulty("insane") for b in bots[:2])
+    assert bots[0].difficulty == "insane" and isinstance(bots[0], RLBot)
+
+
+# ---------------------------------------------------------------- both network types
+
+def _random_weights(head, d=32, layers=2, hidden=256, seed=0):
+    rng = np.random.default_rng(seed)
+    w = {"embed.weight": rng.normal(size=(d, 6)), "embed.bias": rng.normal(size=d), "card_id": rng.normal(size=(27, d))}
+    for i in range(layers):
+        p = f"attention.layers.{i}."
+        w.update({p + "norm1.weight": np.ones(d), p + "norm1.bias": np.zeros(d),
+                  p + "norm2.weight": np.ones(d), p + "norm2.bias": np.zeros(d),
+                  p + "self_attn.in_proj_weight": rng.normal(size=(3 * d, d)) * 0.1, p + "self_attn.in_proj_bias": np.zeros(3 * d),
+                  p + "self_attn.out_proj.weight": rng.normal(size=(d, d)) * 0.1, p + "self_attn.out_proj.bias": np.zeros(d),
+                  p + "linear1.weight": rng.normal(size=(4 * d, d)) * 0.1, p + "linear1.bias": np.zeros(4 * d),
+                  p + "linear2.weight": rng.normal(size=(d, 4 * d)) * 0.1, p + "linear2.bias": np.zeros(d)})
+    if head == "v1":
+        w.update({"head.1.weight": rng.normal(size=(hidden, 27 * d)) * 0.01, "head.1.bias": np.zeros(hidden),
+                  "head.3.weight": rng.normal(size=(1, hidden)) * 0.01, "head.3.bias": np.zeros(1)})
+    else:
+        w.update({"body.1.weight": rng.normal(size=(hidden, 27 * d)) * 0.01, "body.1.bias": np.zeros(hidden),
+                  "policy.weight": rng.normal(size=(len(candidates.SUBSETS), hidden)) * 0.01,
+                  "policy.bias": np.zeros(len(candidates.SUBSETS))})
+    return w
+
+
+@pytest.mark.parametrize("arch", ["v1", "v2"])
+def test_both_network_types_choose_a_legal_move(arch):
+    from highsociety.code.ai.rl.network import PolicyNet, ScoreNet
+    net = (ScoreNet if arch == "v1" else PolicyNet)(_random_weights(arch), n_heads=4, n_layers=2)
+    assert net.arch == arch
+    board = np.zeros((encoding.N_ROWS, encoding.N_COLS), dtype=np.int8)
+    board[:encoding.N_MONEY, 0] = 1
+    board[encoding.MONEY_ROW[8], 1] = -1
+    move = decision.choose_move(net, board)
+    assert move in candidates.legal_moves(board)
+
+
+def test_the_shipped_weights_say_which_network_type_they_are():
+    import json
+    from highsociety.code.ai.rl.network import WEIGHTS_DIR
+    name = active_weights("insane")
+    manifest = json.loads((WEIGHTS_DIR / f"{name}.json").read_text())
+    assert manifest["arch"] == load_network(name).arch

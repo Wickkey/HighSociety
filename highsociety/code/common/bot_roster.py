@@ -12,13 +12,13 @@ layer) can seed the database from it without importing the bot engine.
 
 Sizing: a table seats at most 5, so at most 4 bots of one difficulty ever
 sit together (one seat is always the human host) -- every tier here has
-at least 6 names, so a tier can't run dry from seating alone.
+at least 5 names (4 are enough), so a tier can't run dry from seating alone.
 """
 from typing import NamedTuple, Optional
 
-# easy/medium/hard are MCTS search presets (ai/mcts_bot.py); magnus is the
+# easy/medium/hard are MCTS search presets (ai/mcts_bot.py); insane is the
 # self-play-trained neural network (ai/rl_bot.py).
-DIFFICULTIES = ("easy", "medium", "hard", "magnus")
+DIFFICULTIES = ("easy", "medium", "hard", "insane")
 
 
 class RosterBot(NamedTuple):
@@ -29,7 +29,8 @@ class RosterBot(NamedTuple):
 
 
 def _bot(name: str, difficulty: str, bio: str) -> RosterBot:
-    return RosterBot(key=name.lower(), name=f"{name} Bot", difficulty=difficulty, bio=bio)
+    # key: lowercase, spaces -> "_" (it becomes the players.username "__bot_<key>__")
+    return RosterBot(key=name.lower().replace(" ", "_"), name=f"{name} Bot", difficulty=difficulty, bio=bio)
 
 
 BOT_ROSTER = (
@@ -56,13 +57,12 @@ BOT_ROSTER = (
     _bot("Reya", "hard", "Reads the table like a ledger and balances it in her favor."),
     _bot("Luna", "hard", "Comes alive in the endgame, when everyone else has run out of money."),
     _bot("Nova", "hard", "Ruthless with the Prestige cards. Leaves the scraps for you."),
-    # -- Magnus (the neural network, trained by playing itself) --------------
-    _bot("Atlas", "magnus", "Never read the rules. Learned them by playing itself a few hundred thousand times."),
-    _bot("Vega", "magnus", "Has seen every Painting go for every price. Remembers which ones were worth it."),
-    _bot("Orion", "magnus", "Doesn't bluff, doesn't flinch. Just does the arithmetic and bids."),
-    _bot("Kepler", "magnus", "Works out who will run out of money first. Usually right."),
-    _bot("Echo", "magnus", "Plays the way its past selves wished they had."),
-    _bot("Sable", "magnus", "Keeps exactly enough money not to be the poorest. Spends the rest on you."),
+    # -- Insane (the neural network, trained by playing itself) --------------
+    _bot("Batman", "insane", "Works alone, in the dark, and always has a plan for the last auction."),
+    _bot("Thanos", "insane", "Perfectly balanced: spends exactly half of what you think it will."),
+    _bot("Magnus Carlsen", "insane", "Thinks a few auctions further ahead than everyone else at the table."),
+    _bot("Thalapathy", "insane", "Makes a grand entrance in the endgame. The crowd goes wild; your money doesn't."),
+    _bot("Rocky", "insane", "Takes the hits early, keeps its money, and wins the last round."),
 )
 
 _BY_NAME = {b.name.lower(): b for b in BOT_ROSTER}

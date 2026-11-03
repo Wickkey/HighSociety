@@ -121,8 +121,9 @@ _SCHEMA_STATEMENTS = [
         difficulty TEXT NOT NULL CHECK (difficulty IN ('easy', 'medium', 'hard'))
     )
     """,
-    # The difficulty check widens with bot_roster.DIFFICULTIES (e.g. "magnus",
-    # the RL bot). The original check above was created inline, so its name is
+    # The difficulty check widens with bot_roster.DIFFICULTIES (e.g. "insane",
+    # the RL bot; it was briefly called "magnus" before launch -- any such rows
+    # are renamed below). The original check above was created inline, so its name is
     # whatever Postgres generated -- drop every CHECK on the table rather than
     # guess, then add the current one under a fixed name. Guarded on the
     # current definition, so it only runs (and locks the table) when the
@@ -134,6 +135,7 @@ _SCHEMA_STATEMENTS = [
             FOR c IN SELECT conname FROM pg_constraint WHERE conrelid = 'bots'::regclass AND contype = 'c' LOOP
                 EXECUTE format('ALTER TABLE bots DROP CONSTRAINT %I', c);
             END LOOP;
+            UPDATE bots SET difficulty = 'insane' WHERE difficulty = 'magnus';
             ALTER TABLE bots ADD CONSTRAINT bots_difficulty_check
                 CHECK (difficulty IN ({", ".join(f"'{d}'" for d in bot_roster.DIFFICULTIES)}));
         END IF;

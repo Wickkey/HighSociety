@@ -32,7 +32,7 @@ def assign_bot_names(count: int, taken: set = None,
     just a label for them.
 
     Falls back to BotN for any slot its pool can't fill. Every difficulty
-    has at least 6 names and a table seats at most 4 bots, so this never
+    has at least 5 names and a table seats at most 4 bots, so this never
     actually happens — it's just a safety net against ever crashing on it.
     """
     taken = {t.lower() for t in (taken or set())}

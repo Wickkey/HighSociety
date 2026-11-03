@@ -32,7 +32,7 @@ google-auth
 # fetching/caching Google's public signing keys -- a hard runtime
 # dependency of the id_token verification call above, not optional.
 requests
-# The "Magnus" bot's neural network runs in plain numpy (see
+# The "Insane" bots' neural network runs in plain numpy (see
 # highsociety/code/ai/rl/network.py) -- deliberately not PyTorch, which is
 # hundreds of MB; numpy is a few tens and does a move in milliseconds.
 numpy

@@ -1,0 +1,45 @@
+{
+ "name": "insane-v1",
+ "arch": "v2",
+ "n_heads": 4,
+ "n_layers": 2,
+ "d_model": 32,
+ "n_moves": 1024,
+ "params": 511104,
+ "source": ".RL/runs_v2/v2a/milestones/iter_000600.pt",
+ "exported_at": "2026-11-03T16:40:01",
+ "progress_check": {
+  "kind": "eval",
+  "it": 600,
+  "games": 12022,
+  "vs_heuristics": {
+   "win_rate": 0.5,
+   "chance": 0.261,
+   "eliminated": 0.133,
+   "avg_points": 16.67,
+   "avg_money_left": 38.1,
+   "poorest_other_money_left": 12.2
+  },
+  "vs_start": {
+   "win_rate": 0.356,
+   "chance": 0.261,
+   "eliminated": 0.089,
+   "avg_money_left": 34.2,
+   "poorest_other_money_left": 19.8
+  },
+  "vs_prev": {
+   "win_rate": 0.222,
+   "chance": 0.261,
+   "eliminated": 0.2,
+   "avg_money_left": 41.1,
+   "poorest_other_money_left": 28.5
+  },
+  "vs_medium": {
+   "win_rate": 0.633,
+   "chance": 0.261,
+   "eliminated": 0.067
+  },
+  "seconds": 155.3
+ },
+ "note": "v2a iter 600 (v2 network, sp9 distilled + RL). Fresh deals: 41% wins vs MCTS medium (150 games), 67% vs hard (30), 47% vs capped/greedy (150); chance 26%."
+}

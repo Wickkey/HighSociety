@@ -316,12 +316,12 @@ export function renderRematchPanel() {
 }
 
 function fillRematchBotForm(mix) {
-  const counts = { easy: 0, medium: 0, hard: 0, magnus: 0 };
+  const counts = { easy: 0, medium: 0, hard: 0, insane: 0 };
   mix.forEach((b) => { if (counts[b] !== undefined) counts[b] += 1; });
   $('rematch-bot-easy').value = counts.easy;
   $('rematch-bot-medium').value = counts.medium;
   $('rematch-bot-hard').value = counts.hard;
-  $('rematch-bot-magnus').value = counts.magnus;
+  $('rematch-bot-insane').value = counts.insane;
   $('rematch-bot-hint').textContent = rematchBotSeats
     ? `${rematchBotSeats} bot seat${rematchBotSeats === 1 ? '' : 's'} to fill (same as last time by default, but changeable).`
     : 'No bot seats this time. Every seat is a returning player.';
@@ -347,7 +347,7 @@ export function onSendRematchRequest() {
     easy: parseInt($('rematch-bot-easy').value || '0', 10),
     medium: parseInt($('rematch-bot-medium').value || '0', 10),
     hard: parseInt($('rematch-bot-hard').value || '0', 10),
-    magnus: parseInt($('rematch-bot-magnus').value || '0', 10),
+    insane: parseInt($('rematch-bot-insane').value || '0', 10),
   };
   const botMix = [];
   for (const [type, n] of Object.entries(counts)) for (let i = 0; i < n; i += 1) botMix.push(type);

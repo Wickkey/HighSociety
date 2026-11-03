@@ -3,8 +3,10 @@ The RL bot's decisions as pure functions of explicit inputs (same pattern as
 mcts/stateless_decision.py): given the network and the public game state, the
 move doesn't depend on anything else.
 
-Bid: list the legal moves, score each move's afterstate, then decide in two
-steps -- pass or bid, then which bid:
+Bid: list the legal moves and get a probability for each -- v1 networks
+score each move's afterstate, v2 networks give one logit per move from a
+single pass over the current board (illegal moves masked) -- then decide in
+two steps, pass or bid, then which bid:
 
     P = softmax(scores)             (the policy the network was trained as)
     pass   if P(pass) >= 0.5
@@ -21,15 +23,21 @@ import numpy as np
 
 from highsociety.code.ai.rl.candidates import PASS, afterstates, legal_moves, move_cards
 from highsociety.code.ai.rl.encoding import encode
-from highsociety.code.ai.rl.network import ScoreNet
 
 
-def choose_move(net: ScoreNet, board: np.ndarray) -> int:
-    """Index into SUBSETS of the chosen move for this board."""
+def _move_scores(net, board: np.ndarray, moves: np.ndarray) -> np.ndarray:
+    """One score per legal move: v1 scores each afterstate, v2 reads the board once."""
+    if net.arch == "v2":
+        return net.logits(board[None])[0][moves].astype(np.float64)
+    return net.score(afterstates(board, moves)).astype(np.float64)
+
+
+def choose_move(net, board: np.ndarray) -> int:
+    """Index into SUBSETS of the chosen move for this board (net: network.ScoreNet or PolicyNet)."""
     moves = legal_moves(board)                         # moves[0] is always pass
     if len(moves) == 1:
         return PASS
-    scores = net.score(afterstates(board, moves)).astype(np.float64)
+    scores = _move_scores(net, board, moves)
     p = np.exp(scores - scores.max())
     p /= p.sum()
     if p[0] >= 0.5:
@@ -37,7 +45,7 @@ def choose_move(net: ScoreNet, board: np.ndarray) -> int:
     return int(moves[1 + int(scores[1:].argmax())])
 
 
-def decide_bid(net: ScoreNet, auction_history, event_log: list[dict], live_state: dict,
+def decide_bid(net, auction_history, event_log: list[dict], live_state: dict,
                username: str) -> Union[list[int], str]:
     """"pass", or the money-card values to add to my bid this turn."""
     move = choose_move(net, encode(auction_history, event_log, live_state, username))

@@ -3,10 +3,11 @@ An embedded bot driven by a neural network trained by self-play reinforcement
 learning (the research code lives in .RL/, outside the deployed app), instead
 of a search like MCTSBot or a fixed heuristic like CappedGreedyBot.
 
-Offered in the lobby as the "Magnus" difficulty (see common/bot_roster.py):
-MagnusBot plays whichever weights file weights/active.json names for
-"magnus", so shipping a better-trained network is: export it with
-.RL/export_weights.py --activate, commit, deploy -- no code change.
+Offered in the lobby as the "Insane" difficulty (see common/bot_roster.py):
+InsaneBot plays whichever weights file weights/active.json names for
+"insane", so shipping a better-trained network is: export it (.RL/export_weights.py
+for v1 networks, .RL/v2/export_v2.py for v2) with --activate, commit, deploy --
+no code change. Each weights file's manifest says which network type it is.
 
 Like MCTSBot this class is deliberately thin and keeps no state of its own
 across the game: every decision is a pure function of the public game state
@@ -38,7 +39,7 @@ class RLBot(BasePlayer):
         weights: name of a weights/<name>.npz file (+ its <name>.json manifest).
         think_time: same meaning as every other bot's -- purely a pause for a
         human-watchable game; the decision itself takes milliseconds.
-        difficulty: "magnus" for the lobby preset (game_history.py attributes
+        difficulty: "insane" for the lobby preset (game_history.py attributes
         finished games to roster bots by it), "custom" for ad hoc use.
         """
         super().__init__(name, username)
@@ -83,9 +84,9 @@ class RLBot(BasePlayer):
         return next(c for c in self.status_cards if isinstance(c, Painting) and c.value == value)
 
 
-class MagnusBot(RLBot):
-    """The lobby's "Magnus" difficulty: the RL network named in weights/active.json."""
+class InsaneBot(RLBot):
+    """The lobby's "Insane" difficulty: the RL network named in weights/active.json."""
 
     def __init__(self, name: str, username: str, think_time: float = 0) -> None:
-        super().__init__(name, username, weights=active_weights("magnus"), think_time=think_time,
-                         difficulty="magnus")
+        super().__init__(name, username, weights=active_weights("insane"), think_time=think_time,
+                         difficulty="insane")
