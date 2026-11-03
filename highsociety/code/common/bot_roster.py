@@ -75,7 +75,7 @@ BOT_ROSTER = (
     _bot("Thanos", "insane", "Perfectly balanced: spends exactly half of what you think it will."),
     _bot("Magnus Carlsen", "insane", "Thinks a few auctions further ahead than everyone else at the table."),
     _bot("Thalapathy", "insane", "Nee padicha schoolla na headmaster da."),
-    _bot("Rocky", "insane", "Takes the hits early, keeps its money, and wins the last round."),
+    _bot("Rocky", "insane", "Fist my bump."),
 )
 
 _BY_NAME = {b.name.lower(): b for b in BOT_ROSTER}
