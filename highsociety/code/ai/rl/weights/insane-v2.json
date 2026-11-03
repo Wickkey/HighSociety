@@ -6,40 +6,8 @@
  "d_model": 32,
  "n_moves": 1024,
  "params": 511104,
- "source": ".RL/runs_v2/v2a/milestones/iter_001000.pt",
- "exported_at": "2026-11-03T20:58:47",
- "progress_check": {
-  "kind": "eval",
-  "it": 1000,
-  "games": 20022,
-  "vs_heuristics": {
-   "win_rate": 0.45,
-   "chance": 0.261,
-   "eliminated": 0.167,
-   "avg_points": 17.9,
-   "avg_money_left": 37.0,
-   "poorest_other_money_left": 14.1
-  },
-  "vs_start": {
-   "win_rate": 0.378,
-   "chance": 0.261,
-   "eliminated": 0.044,
-   "avg_money_left": 38.6,
-   "poorest_other_money_left": 19.2
-  },
-  "vs_prev": {
-   "win_rate": 0.356,
-   "chance": 0.261,
-   "eliminated": 0.2,
-   "avg_money_left": 42.8,
-   "poorest_other_money_left": 31.6
-  },
-  "vs_medium": {
-   "win_rate": 0.533,
-   "chance": 0.261,
-   "eliminated": 0.1
-  },
-  "seconds": 151.6
- },
- "note": "v2a iteration 1000. Picked from the logged checks (top cluster ~1000-1100: ~57-60% vs MCTS Medium in 30-game checks, smoothed) plus the fresh-deal benchmark: 47% wins / 8% eliminated vs MCTS Medium over 150 games (insane-v1 = iter 600: 41% / 15%); chance 26%."
+ "source": ".RL/runs_v2/v2a/milestones/iter_002000.pt",
+ "exported_at": "2026-11-03T21:12:30",
+ "progress_check": null,
+ "note": "v2a final checkpoint (iteration 2000), chosen from the logged checks: late checkpoints beat their start 44-49% (vs 35-39% around iteration 1000), 50-62% vs Capped/Greedy, ~50% vs MCTS Medium in 30-game checks (chance 26%). For reference, iteration 1000: 47% wins / 8% eliminated vs MCTS Medium over 150 fresh games."
 }
