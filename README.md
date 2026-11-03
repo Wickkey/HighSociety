@@ -5,7 +5,6 @@ bots from simple heuristics up to a self-play-trained neural network, and a brow
 accounts, ratings and matchmaking.
 
 **Play it now:** [highsociety.onrender.com](https://highsociety.onrender.com/). No install needed.
-Free-tier hosting, so the first load after a quiet period can take 30–60 s to wake up.
 
 ## What's in it
 
@@ -125,8 +124,8 @@ loaded automatically. On a host, set them in its dashboard.
 
 ## Database (optional)
 
-With `DATABASE_URL` pointing at a Postgres database (the live site uses [Supabase](https://supabase.com)'s
-free tier: Project Settings → Database → Connection string), the app stores everything about
+With `DATABASE_URL` pointing at a Postgres database (the live site uses [Supabase](https://supabase.com):
+Project Settings → Database → Connection string), the app stores everything about
 finished games.
 - **Players:** guest or Google-linked accounts, Elo ratings and rating history, achievements.
 - **Bots:** one identity per named bot.
