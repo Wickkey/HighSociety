@@ -6,8 +6,40 @@
  "d_model": 32,
  "n_moves": 1024,
  "params": 511104,
- "source": ".RL/runs_v2/v2a/milestones/iter_002000.pt",
- "exported_at": "2026-11-03T21:12:30",
- "progress_check": null,
- "note": "v2a final checkpoint (iteration 2000), chosen from the logged checks: late checkpoints beat their start 44-49% (vs 35-39% around iteration 1000), 50-62% vs Capped/Greedy, ~50% vs MCTS Medium in 30-game checks (chance 26%). For reference, iteration 1000: 47% wins / 8% eliminated vs MCTS Medium over 150 fresh games."
+ "source": ".RL/runs_v2/v2a/milestones/iter_001900.pt",
+ "exported_at": "2026-11-03T21:14:57",
+ "progress_check": {
+  "kind": "eval",
+  "it": 1900,
+  "games": 38022,
+  "vs_heuristics": {
+   "win_rate": 0.617,
+   "chance": 0.261,
+   "eliminated": 0.183,
+   "avg_points": 21.83,
+   "avg_money_left": 32.8,
+   "poorest_other_money_left": 12.9
+  },
+  "vs_start": {
+   "win_rate": 0.467,
+   "chance": 0.261,
+   "eliminated": 0.156,
+   "avg_money_left": 37.8,
+   "poorest_other_money_left": 18.6
+  },
+  "vs_prev": {
+   "win_rate": 0.311,
+   "chance": 0.261,
+   "eliminated": 0.267,
+   "avg_money_left": 40.3,
+   "poorest_other_money_left": 29.0
+  },
+  "vs_medium": {
+   "win_rate": 0.5,
+   "chance": 0.261,
+   "eliminated": 0.1
+  },
+  "seconds": 158.4
+ },
+ "note": "v2a iteration 1900: the strongest late checkpoint by the logged checks -- 62% vs Capped/Greedy (60 games), 47% vs its starting point (45), 50% vs MCTS Medium (30), 18% eliminated; chance 26%. Late checkpoints beat their start 44-49% of the time vs 35-39% around iteration 1000. For reference, iteration 1000: 47% wins / 8% eliminated vs MCTS Medium over 150 fresh games."
 }
