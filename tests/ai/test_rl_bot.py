@@ -2,9 +2,9 @@
 The RL ("Insane") bot: the network plumbing (encoding, legal moves, numpy
 network) and the bot playing real games through PlayGame.
 
-Its match against the PyTorch training code (same boards, same scores, same
-moves) is checked outside the test suite by .RL/check_rl_bot.py, since that
-needs PyTorch, which the app doesn't depend on.
+Its match against the PyTorch training code (same boards, same logits, same
+moves) is checked outside the test suite by .RL/v2/check_v2_server.py, since
+that needs PyTorch, which the app doesn't depend on.
 """
 import numpy as np
 import pytest
@@ -131,25 +131,12 @@ def test_legal_moves_start_with_pass_and_all_beat_the_high_bid():
         assert sum(cards) > 20 and len(cards) <= candidates.MAX_BID_CARDS
 
 
-def test_afterstates_move_cards_to_the_table_and_take_the_high_bid():
-    board = np.zeros((encoding.N_ROWS, encoding.N_COLS), dtype=np.int8)
-    board[:encoding.N_MONEY, 0] = 1
-    board[encoding.IN_AUCTION0, encoding.GAME_COL] = 1
-    moves = candidates.legal_moves(board)
-    after = candidates.afterstates(board, moves)
-    assert after[0, encoding.IN_AUCTION0, encoding.GAME_COL] == 0          # pass: out of the auction
-    bid = int(np.flatnonzero(moves == next(m for m in moves if candidates.move_cards(m) == [25]))[0])
-    assert after[bid, encoding.MONEY_ROW[25], 0] == -1
-    assert after[bid, encoding.HIGH_BIDDER0, encoding.GAME_COL] == 1
-
-
 def test_the_active_weights_load_and_score_deterministically():
     net = load_network(active_weights("insane"))
     boards = np.random.default_rng(0).integers(-1, 3, size=(7, encoding.N_ROWS, encoding.N_COLS)).astype(np.int8)
-    run = net.score if net.arch == "v1" else net.logits
-    scores = run(boards)
-    assert scores.shape == ((7,) if net.arch == "v1" else (7, len(candidates.SUBSETS))) and np.isfinite(scores).all()
-    assert np.array_equal(scores, run(boards))
+    scores = net.logits(boards)
+    assert scores.shape == (7, len(candidates.SUBSETS)) and np.isfinite(scores).all()
+    assert np.array_equal(scores, net.logits(boards))
     assert load_network(active_weights("insane")) is net                   # one shared copy
 
 
@@ -184,9 +171,10 @@ def test_insane_is_a_lobby_difficulty_with_its_own_names():
     assert bots[0].difficulty == "insane" and isinstance(bots[0], RLBot)
 
 
-# ---------------------------------------------------------------- both network types
+# ---------------------------------------------------------------- the network
 
-def _random_weights(head, d=32, layers=2, hidden=256, seed=0):
+
+def _random_weights(d=32, layers=2, hidden=256, seed=0):
     rng = np.random.default_rng(seed)
     w = {"embed.weight": rng.normal(size=(d, 6)), "embed.bias": rng.normal(size=d), "card_id": rng.normal(size=(27, d))}
     for i in range(layers):
@@ -197,31 +185,27 @@ def _random_weights(head, d=32, layers=2, hidden=256, seed=0):
                   p + "self_attn.out_proj.weight": rng.normal(size=(d, d)) * 0.1, p + "self_attn.out_proj.bias": np.zeros(d),
                   p + "linear1.weight": rng.normal(size=(4 * d, d)) * 0.1, p + "linear1.bias": np.zeros(4 * d),
                   p + "linear2.weight": rng.normal(size=(d, 4 * d)) * 0.1, p + "linear2.bias": np.zeros(d)})
-    if head == "v1":
-        w.update({"head.1.weight": rng.normal(size=(hidden, 27 * d)) * 0.01, "head.1.bias": np.zeros(hidden),
-                  "head.3.weight": rng.normal(size=(1, hidden)) * 0.01, "head.3.bias": np.zeros(1)})
-    else:
-        w.update({"body.1.weight": rng.normal(size=(hidden, 27 * d)) * 0.01, "body.1.bias": np.zeros(hidden),
-                  "policy.weight": rng.normal(size=(len(candidates.SUBSETS), hidden)) * 0.01,
-                  "policy.bias": np.zeros(len(candidates.SUBSETS))})
+    w.update({"body.1.weight": rng.normal(size=(hidden, 27 * d)) * 0.01, "body.1.bias": np.zeros(hidden),
+              "policy.weight": rng.normal(size=(len(candidates.SUBSETS), hidden)) * 0.01,
+              "policy.bias": np.zeros(len(candidates.SUBSETS))})
     return w
 
 
-@pytest.mark.parametrize("arch", ["v1", "v2"])
-def test_both_network_types_choose_a_legal_move(arch):
-    from highsociety.code.ai.rl.network import PolicyNet, ScoreNet
-    net = (ScoreNet if arch == "v1" else PolicyNet)(_random_weights(arch), n_heads=4, n_layers=2)
-    assert net.arch == arch
+def test_the_network_only_ever_chooses_a_legal_move():
+    from highsociety.code.ai.rl.network import PolicyNet
+    net = PolicyNet(_random_weights(), n_heads=4, n_layers=2)
     board = np.zeros((encoding.N_ROWS, encoding.N_COLS), dtype=np.int8)
     board[:encoding.N_MONEY, 0] = 1
-    board[encoding.MONEY_ROW[8], 1] = -1
-    move = decision.choose_move(net, board)
-    assert move in candidates.legal_moves(board)
+    board[encoding.MONEY_ROW[8], 1] = -1                           # someone bid 8
+    for seed in range(5):                                          # several random networks
+        net = PolicyNet(_random_weights(seed=seed), n_heads=4, n_layers=2)
+        assert decision.choose_move(net, board) in candidates.legal_moves(board)
 
 
-def test_the_shipped_weights_say_which_network_type_they_are():
-    import json
+def test_the_shipped_weights_have_one_output_per_move():
     from highsociety.code.ai.rl.network import WEIGHTS_DIR
+    import json
     name = active_weights("insane")
     manifest = json.loads((WEIGHTS_DIR / f"{name}.json").read_text())
-    assert manifest["arch"] == load_network(name).arch
+    assert manifest["n_moves"] == len(candidates.SUBSETS) == 1024
+    assert load_network(name).w["policy.weight"].shape[0] == 1024

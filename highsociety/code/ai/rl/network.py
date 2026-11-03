@@ -1,23 +1,17 @@
 """
-The RL scoring network, run with numpy only.
+The RL policy network, run with numpy only.
 
-Training uses PyTorch (.RL/rl_model.py's ScoreNet), but PyTorch is far too big
-a dependency for the web server, and the network is small (~250k numbers), so
-its forward pass is re-implemented here and fed the trained weights exported
-to an .npz file (.RL/export_weights.py). .RL/check_rl_bot.py checks this
-matches the PyTorch model's scores.
+Training uses PyTorch (.RL/v2/model_v2.py's PolicyNet), but PyTorch is far too big a dependency for
+the web server, and the network is small (~500k numbers), so its forward pass is re-implemented here
+and fed the trained weights exported to an .npz file (.RL/v2/export_v2.py). .RL/v2/check_v2_server.py
+checks this matches the PyTorch network's outputs.
 
-Two architectures; each weights file's manifest says which ("arch", default "v1"):
-
-v1 ScoreNet: (..., 27, 6) board -> (...) score, run on the board after each legal move.
-v2 PolicyNet: (..., 27, 6) board -> (..., 1024) logits, one per move (candidates.SUBSETS order), run
-    once per decision on the current board; illegal moves are masked before the softmax.
-
-Both share the same body. Each of the 27 rows is a token:
-    1. embed     Linear(6 -> d) per row, plus a learned per-row vector (which card it is)
-    2. attention n_layers pre-norm transformer encoder layers (self-attention + ReLU MLP)
-then v1: flatten 27 x d -> Linear -> ReLU -> Linear -> 1 score
-     v2: flatten 27 x d -> Linear -> ReLU (body.1) -> Linear -> 1024 logits (policy)
+PolicyNet: (K, 27, 6) boards -> (K, 1024) logits, one per move in candidates.SUBSETS order (index 0 =
+pass), from a single pass over the current board. Illegal moves are masked by the caller (decision.py).
+Each of the 27 rows is a token:
+    1. embed      Linear(6 -> d) per row, plus a learned per-row vector (which card it is)
+    2. attention  n_layers pre-norm transformer encoder layers (self-attention + ReLU MLP)
+    3. head       flatten 27 x d -> Linear -> ReLU (body.1) -> Linear -> 1024 logits (policy)
 """
 import json
 from functools import lru_cache
@@ -43,17 +37,16 @@ def _softmax(x, axis=-1):
     return e / e.sum(axis, keepdims=True)
 
 
-class _Body:
-    """The shared part: embedding + attention layers. Subclasses add their head."""
-    arch = None
+class PolicyNet:
+    """Holds one set of trained weights; logits() is a pure function of its input."""
 
     def __init__(self, weights: dict, n_heads: int, n_layers: int):
         self.w = {k: np.asarray(v, dtype=np.float32) for k, v in weights.items()}
         self.n_heads, self.n_layers = n_heads, n_layers
         self.d_model = self.w["card_id"].shape[1]
 
-    def _tokens(self, boards: np.ndarray) -> np.ndarray:
-        """(K, 27, 6) boards -> (K, 27, d) attended tokens."""
+    def logits(self, boards: np.ndarray) -> np.ndarray:
+        """(K, 27, 6) boards -> (K, 1024) float32 logits (unmasked)."""
         w, d, H = self.w, self.d_model, self.n_heads
         x = boards.reshape(-1, N_ROWS, N_COLS).astype(np.float32)
         h = x @ w["embed.weight"].T + w["embed.bias"] + w["card_id"]            # (K, 27, d)
@@ -69,46 +62,19 @@ class _Body:
             y = _layer_norm(h, w[p + "norm2.weight"], w[p + "norm2.bias"])
             f = np.maximum(y @ w[p + "linear1.weight"].T + w[p + "linear1.bias"], 0)
             h = h + f @ w[p + "linear2.weight"].T + w[p + "linear2.bias"]
-        return h
-
-
-class ScoreNet(_Body):
-    """v1: one score per board (the board after a candidate move)."""
-    arch = "v1"
-
-    def score(self, boards: np.ndarray) -> np.ndarray:
-        """(K, 27, 6) boards -> (K,) float32 scores."""
-        w = self.w
-        h = self._tokens(boards)
-        z = np.maximum(h.reshape(len(h), -1) @ w["head.1.weight"].T + w["head.1.bias"], 0)
-        return (z @ w["head.3.weight"].T + w["head.3.bias"]).reshape(len(h))
-
-
-class PolicyNet(_Body):
-    """v2: 1024 logits per board, one per move in candidates.SUBSETS order (index 0 = pass)."""
-    arch = "v2"
-
-    def logits(self, boards: np.ndarray) -> np.ndarray:
-        """(K, 27, 6) boards -> (K, 1024) float32 logits (unmasked)."""
-        w = self.w
-        h = self._tokens(boards)
-        z = np.maximum(h.reshape(len(h), -1) @ w["body.1.weight"].T + w["body.1.bias"], 0)
+        z = np.maximum(h.reshape(K, T * d) @ w["body.1.weight"].T + w["body.1.bias"], 0)
         return z @ w["policy.weight"].T + w["policy.bias"]
 
 
-_ARCHS = {"v1": ScoreNet, "v2": PolicyNet}
-
-
-def load_weights(name: str):
-    """weights/<name>.npz plus its manifest weights/<name>.json -> a ScoreNet or PolicyNet."""
+def load_weights(name: str) -> PolicyNet:
+    """weights/<name>.npz plus its manifest weights/<name>.json."""
     manifest = json.loads((WEIGHTS_DIR / f"{name}.json").read_text())
     with np.load(WEIGHTS_DIR / f"{name}.npz") as f:
         weights = dict(f)
-    cls = _ARCHS[manifest.get("arch", "v1")]
-    return cls(weights, n_heads=manifest["n_heads"], n_layers=manifest["n_layers"])
+    return PolicyNet(weights, n_heads=manifest["n_heads"], n_layers=manifest["n_layers"])
 
 
 @lru_cache(maxsize=None)
-def load_network(name: str):
+def load_network(name: str) -> PolicyNet:
     """One shared, read-only copy per weights file, however many bots use it."""
     return load_weights(name)

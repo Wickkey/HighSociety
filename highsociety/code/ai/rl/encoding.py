@@ -4,7 +4,7 @@ The board as the RL network sees it: one decision point -> a (27, 6) int8 matrix
 This is the production copy of the encoding the network was trained on (.RL/
 state_encoding.py + .RL/rl_seat.py's encode_live, which build it from a game
 record / from live engine objects). It must stay identical to those, or the
-network sees boards it never trained on -- .RL/check_rl_bot.py compares the
+network sees boards it never trained on -- .RL/v2/check_v2_server.py compares the
 two at every decision of real games.
 
 Rows (27) = 11 money rows + 16 status-card rows:
