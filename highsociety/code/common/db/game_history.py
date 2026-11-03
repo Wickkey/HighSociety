@@ -337,8 +337,33 @@ _SCHEMA_STATEMENTS = [
     # moving a name to another difficulty in the roster takes effect on the
     # next startup.
     "ALTER TABLE bots ADD COLUMN IF NOT EXISTS bot_key TEXT UNIQUE",
-    "INSERT INTO players (username, display_name) VALUES "
-    + ", ".join(f"('{bot_roster.roster_username(b)}', '{b.name}')" for b in bot_roster.BOT_ROSTER)
+    # A tier's starting Elo (bot_roster.STARTING_ELO) is applied ONCE to the
+    # bots of that tier that already exist -- the Insane bots were deployed at
+    # 1000 before their starting Elo was set -- recorded in app_state so a
+    # restart never re-applies it (it runs before the seeding below, so on a
+    # fresh database there's nothing to adjust yet). After that, every bot
+    # keeps the rating it earns.
+    """
+    CREATE TABLE IF NOT EXISTS app_state (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+    """,
+    *[f"""
+    DO $$ BEGIN
+        IF NOT EXISTS (SELECT 1 FROM app_state WHERE key = 'starting_elo:{tier}:{elo}') THEN
+            UPDATE players p SET elo = {elo} FROM bots b
+                WHERE b.player_id = p.id AND b.difficulty = '{tier}' AND b.bot_key IS NOT NULL;
+            INSERT INTO app_state (key, value) VALUES ('starting_elo:{tier}:{elo}', now()::text);
+        END IF;
+    END $$
+    """ for tier, elo in bot_roster.STARTING_ELO.items()],
+    # A new bot starts at its tier's Elo; an existing bot keeps the rating it
+    # has earned (the ON CONFLICT only touches the name).
+    "INSERT INTO players (username, display_name, elo) VALUES "
+    + ", ".join(f"('{bot_roster.roster_username(b)}', '{b.name}', {bot_roster.starting_elo(b.difficulty)})"
+                for b in bot_roster.BOT_ROSTER)
     + " ON CONFLICT (username) DO UPDATE SET display_name = EXCLUDED.display_name",
     "INSERT INTO bots (player_id, difficulty, bot_key) "
     "SELECT p.id, v.difficulty, v.bot_key FROM players p JOIN (VALUES "

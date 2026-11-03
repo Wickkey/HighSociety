@@ -20,6 +20,19 @@ from typing import NamedTuple, Optional
 # self-play-trained neural network (ai/rl_bot.py).
 DIFFICULTIES = ("easy", "medium", "hard", "insane")
 
+# Elo a roster bot starts at when it is first created (players.elo's default
+# is 1000, same as a new human). The Insane bots win far more than an average
+# player (about 1 in 2 games against tables of MCTS Medium bots, where chance
+# is about 1 in 4), so starting them at 1000 would let humans gain rating from
+# losing to them. Only ever applied to a new bot -- a rating it has earned is
+# never overwritten (see game_history.py's roster seeding).
+STARTING_ELO = {"insane": 1300}
+DEFAULT_ELO = 1000
+
+
+def starting_elo(difficulty: str) -> int:
+    return STARTING_ELO.get(difficulty, DEFAULT_ELO)
+
 
 class RosterBot(NamedTuple):
     key: str          # stable id, never shown: players.username is f"__bot_{key}__"
