@@ -2693,6 +2693,25 @@ def test_matchmaking_as_someone_else_is_refused(monkeypatch):
     client.post("/api/matchmaking/cancel", json={"ticket_id": ticket})
 
 
+def test_screens_behind_sign_in_send_search_engines_to_the_home_page(monkeypatch):
+    monkeypatch.setattr(web_server, "PUBLIC_BASE_URL", "https://example.com")
+    client = web_server.app.test_client()
+    for path in ("/play", "/host", "/join"):
+        html = client.get(path).get_data(as_text=True)
+        assert '<link rel="canonical" href="https://example.com/">' in html
+    sitemap = client.get("/sitemap.xml").get_data(as_text=True)
+    assert "/rules" in sitemap and "/leaderboard" in sitemap
+    assert not any(f"example.com{p}<" in sitemap for p in ("/play", "/host", "/join"))
+
+
+def test_the_home_page_describes_the_game_for_search_engines():
+    html = web_server.app.test_client().get("/").get_data(as_text=True)
+    assert "VideoGame" in html
+    assert "Play High Society online for free" in html
+    assert 'href="/rules"' in html and 'href="/leaderboard"' in html
+    assert "VideoGame" not in web_server.app.test_client().get("/rules").get_data(as_text=True)
+
+
 def test_robots_keeps_room_links_out_of_search_results():
     body = web_server.app.test_client().get("/robots.txt").get_data(as_text=True)
     assert "Disallow: /*?room=" in body
@@ -2716,7 +2735,7 @@ def test_sitemap_lists_the_public_pages_at_the_canonical_address(monkeypatch):
 def test_each_screen_gets_its_own_title_and_canonical_address(monkeypatch):
     monkeypatch.setattr(web_server, "PUBLIC_BASE_URL", "https://example.com")
     html = web_server.app.test_client().get("/rules?ref=x").get_data(as_text=True)
-    assert "<title>How to Play High Society – Rules and Scoring</title>" in html
+    assert "<title>High Society Card Game Rules – How to Play</title>" in html
     assert '<link rel="canonical" href="https://example.com/rules">' in html
     assert 'name="robots"' not in html
 

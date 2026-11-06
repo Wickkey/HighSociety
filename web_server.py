@@ -1533,30 +1533,30 @@ def index(username=None, game_id=None):
         "index.html", ga_measurement_id=GA_MEASUREMENT_ID,
         google_client_id=GOOGLE_CLIENT_ID if GOOGLE_SIGN_IN_ENABLED else None,
         page_title=title, page_description=description,
-        canonical_url=_public_base() + path, site_url=_public_base() + "/",
+        canonical_url=_public_base() + ("/" if path in _SIGN_IN_ONLY_PATHS else path), site_url=_public_base() + "/",
         # Personal screens: nothing for a search engine to show anyone else.
         noindex=path in _PRIVATE_PATHS,
         page_titles={p: t for p, (t, _) in _PAGE_META.items()},
     )
 
 
-_HOME_DESCRIPTION = ("The classic High Society board game, online: an auction card game for 3–5 players. "
-                     "Outbid friends or bots for points.")
+_HOME_DESCRIPTION = ("Play High Society online for free: the classic auction card game for 3–5 players. "
+                     "No download or sign-up. Outbid friends or bots in your browser.")
 
 # Title and description per screen URL. Search results show these, and the
 # client swaps document.title from the same table as you move between
 # screens (see dom.js's setScreenPath).
 _PAGE_META = {
-    "/": ("High Society Online – Play the Auction Card Game", _HOME_DESCRIPTION),
+    "/": ("Play High Society Online Free – Auction Card Game", _HOME_DESCRIPTION),
     "/play": ("Play High Society Online – Quick Match",
               "Get matched with players near your rating for a game of High Society, or play against bots."),
     "/host": ("Host a High Society Game – Invite Friends",
               "Set up a High Society table for 3–5 players, add bots if you're short, and share the invite link."),
     "/join": ("Join a High Society Game",
               "Find an open High Society table and take a seat, or join a friend's game with their invite code."),
-    "/rules": ("How to Play High Society – Rules and Scoring",
-               "Learn High Society: bid money cards for luxury and prestige, dodge the disgraces, "
-               "and don't finish with the least money."),
+    "/rules": ("High Society Card Game Rules – How to Play",
+               "How to play the High Society card game: bid money cards for paintings and prestige, "
+               "dodge the disgraces, and don't finish with the least money."),
     "/leaderboard": ("High Society Leaderboard – Top Rated Players",
                      "The highest rated High Society players online, ranked by Elo."),
     "/account": ("Your Account – High Society", _HOME_DESCRIPTION),
@@ -1565,8 +1565,11 @@ _PAGE_META = {
     "/players": ("Player Profile – High Society", _HOME_DESCRIPTION),
     "/review": ("Game Review – High Society", _HOME_DESCRIPTION),
 }
+# Screens a first-time visitor only reaches after signing in, so a search engine
+# sees the home page's content at these addresses: point it there.
+_SIGN_IN_ONLY_PATHS = {"/play", "/host", "/join"}
 _PRIVATE_PATHS = {"/account", "/achievements", "/my-games", "/players", "/review"}
-_SITEMAP_PATHS = ["/", "/rules", "/play", "/host", "/join", "/leaderboard", "/privacy"]
+_SITEMAP_PATHS = ["/", "/rules", "/leaderboard", "/privacy"]
 
 
 def _public_base() -> str:

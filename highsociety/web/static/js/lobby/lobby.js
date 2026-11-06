@@ -155,7 +155,7 @@ export async function enterRoom(roomCode, event) {
 // (re-)shown (see leaveToHome and the initial-load boot path), so returning
 // home never leaves a stale panel expanded from a previous visit.
 const HOME_TILE_TARGETS = ['join', 'host', 'rules'];
-export function showHomeTile(target) {
+export function showHomeTile(target, { openOn = null } = {}) {
   // Hiding the whole grid wrapper, not just #home-tiles inside it -- a
   // real reported bug: #home-grid carries its own margin-top (the same
   // --screen-top-gap every screen's top-level panel uses), and it never
@@ -169,7 +169,7 @@ export function showHomeTile(target) {
   hide($('home-grid'));
   HOME_TILE_TARGETS.forEach((t) => $(`home-panel-${t}`).classList.toggle('hidden', t !== target));
   setScreenPath(`/${target}`); // 'join'/'host'/'rules' -- matches web_server.py's static routes exactly
-  if (target === 'rules') showHowToPlay(hash);
+  if (target === 'rules') showHowToPlay(hash || (openOn ? `#${openOn}` : ''));
   else stopHowToPlayVideo();
   // One less click for the single most common thing to do on this panel --
   // Join's whole reason for existing, for anyone who already has a code in
