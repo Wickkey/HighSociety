@@ -328,3 +328,61 @@ def test_the_bot_board_endpoint_returns_every_bot():
     bots = response.get_json()["bots"]
     assert {b["name"] for b in bots} >= {"Ziggy Bot", "Magnus Carlsen Bot"}
     assert {"username", "name", "difficulty", "elo", "games_played", "games_won"} <= set(bots[0])
+
+
+class TestBioEndpoint:
+    @pytest.fixture
+    def client(self, monkeypatch):
+        monkeypatch.setattr(web_server.game_history, "is_configured", lambda: True)
+        saved = {}
+        monkeypatch.setattr(web_server.game_history, "set_player_bio",
+                            lambda username, bio: saved.update({username: bio}) or True)
+        client = web_server.app.test_client()
+        client.saved = saved
+        return client
+
+    def _post(self, client, monkeypatch, match, **body):
+        monkeypatch.setattr(web_server.game_history, "login_token_matches", lambda u, t: match)
+        return client.post("/api/profile/bio", json={"username": "alice", "login_token": "t", **body})
+
+    def test_saves_it_on_one_line(self, client, monkeypatch):
+        response = self._post(client, monkeypatch, True, bio="  loves\n  auctions ")
+        assert response.get_json() == {"bio": "loves auctions"}
+        assert client.saved == {"alice": "loves auctions"}
+
+    def test_an_empty_bio_clears_it(self, client, monkeypatch):
+        assert self._post(client, monkeypatch, True, bio="   ").status_code == 200
+        assert client.saved == {"alice": None}
+
+    def test_someone_elses_token_is_refused(self, client, monkeypatch):
+        assert self._post(client, monkeypatch, False, bio="hacked").status_code == 403
+        assert client.saved == {}
+
+    def test_a_failed_token_lookup_is_refused_too(self, client, monkeypatch):
+        assert self._post(client, monkeypatch, None, bio="hacked").status_code == 403
+        assert client.saved == {}
+
+    def test_a_bot_bio_cannot_be_overwritten(self, client, monkeypatch):
+        assert self._post(client, monkeypatch, True, username="__bot_ziggy__", bio="hacked").status_code == 403
+        assert client.saved == {}
+
+    def test_too_long_is_refused(self, client, monkeypatch):
+        assert self._post(client, monkeypatch, True, bio="x" * 161).status_code == 400
+
+    def test_non_text_is_refused(self, client, monkeypatch):
+        assert self._post(client, monkeypatch, True, bio=["x"]).status_code == 400
+
+
+def test_bot_pictures_are_found_by_roster_key_and_missing_ones_stay_absent(tmp_path):
+    (tmp_path / "ziggy.png").write_bytes(b"x")
+    (tmp_path / "not_a_bot.png").write_bytes(b"x")
+    assert web_server._find_bot_avatars(str(tmp_path)) == {"__bot_ziggy__": "/static/avatars/bots/ziggy.png"}
+
+
+def test_a_named_bot_seat_links_to_its_profile_and_a_human_does_not():
+    room = web_server.GameRoom("TEST", 2, ["hard"], 1, 0, "public")
+    room.players.append(make_player(username="alice"))
+    seats = {s["username"]: s for s in room.joined_summary()}
+    assert seats["alice"]["profile_username"] is None
+    bot_seat = next(s for s in seats.values() if s["is_bot"])
+    assert bot_seat["profile_username"].startswith("__bot_")

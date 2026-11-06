@@ -203,6 +203,7 @@ export function seedOpponents(status, myUsername) {
     if (p.username === myUsername) return;
     game.opponents[p.username] = {
       name: p.name, statusCards: [], active: true, outOfAuction: false, lastBid: null, elo: p.elo ?? null,
+      profileUsername: p.profile_username || null,
     };
   });
 }

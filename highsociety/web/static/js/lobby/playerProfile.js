@@ -11,7 +11,8 @@ import { fetchGamesPage, renderIfChanged } from './gameHistory.js';
 import { createEloChartController } from '../ui/eloChart.js';
 // Circular with account.js only in the established, safe way: used inside
 // a function body, never at module evaluation.
-import { profileStats } from '../account/account.js';
+import { profileStats, fetchAchievements, renderAchievementTile, ACHIEVEMENTS } from '../account/account.js';
+import { setAvatar } from '../ui/avatar.js';
 
 // Same shared chart Account's own screen uses (see ui/eloChart.js), a
 // separate controller instance so this screen's chart state (fetched
@@ -67,6 +68,12 @@ export function showPlayerProfileScreen(username, returnTo = 'leaderboard') {
   delete $('player-profile-history-list').dataset.renderedHtml; // a stale renderIfChanged memo from a *different* profile must never suppress this one's first real paint
   hide($('player-profile-history-empty'));
 
+  // Decided here, from the name alone, so the section never pops in or out
+  // after loading. Bots don't earn achievements.
+  const isBot = username.startsWith('__bot_');
+  $('player-profile-achievements-section').classList.toggle('hidden', isBot);
+  if (!isBot) loadPlayerProfileAchievements(username);
+
   // All three run independently -- none awaits or blocks another, same as
   // Account's own screen-open already does. The chart's own relevance
   // guard matters here in a way Account never had to worry about:
@@ -79,6 +86,29 @@ export function showPlayerProfileScreen(username, returnTo = 'leaderboard') {
     emptyMessage: 'No rated games yet.',
   });
   loadPlayerProfileHistoryPage();
+}
+
+async function loadPlayerProfileAchievements(username) {
+  const grid = $('player-profile-achievements');
+  const count = $('player-profile-achievements-count');
+  count.textContent = '';
+  grid.innerHTML = '';
+  grid.classList.add('tile-loading-spinner');
+  hide($('player-profile-achievements-empty'));
+  const paint = (ids) => {
+    const earned = new Set(ids);
+    const tiles = ACHIEVEMENTS.filter((a) => earned.has(a.id));
+    grid.classList.remove('tile-loading-spinner');
+    grid.innerHTML = tiles.map((a) => renderAchievementTile(a, true)).join('');
+    count.textContent = `${tiles.length} of ${ACHIEVEMENTS.length}`;
+    $('player-profile-achievements-empty').classList.toggle('hidden', tiles.length > 0);
+  };
+  const { cached, freshPromise } = fetchAchievements(username);
+  if (cached) paint(cached);
+  const fresh = await freshPromise;
+  if (username !== profileUsername) return; // moved on to another profile
+  if (fresh) paint(fresh);
+  else if (!cached) paint([]);
 }
 
 async function loadPlayerProfileStats(username) {
@@ -99,7 +129,7 @@ async function loadPlayerProfileStats(username) {
 }
 
 function paintPlayerProfileStats(stats) {
-  $('player-profile-avatar').textContent = stats.display_name.charAt(0).toUpperCase();
+  setAvatar($('player-profile-avatar'), stats.display_name, stats.avatar_url);
   $('player-profile-name').textContent = stats.display_name;
   $('player-profile-elo').textContent = stats.elo;
   show($('player-profile-elo-hero'));
@@ -120,6 +150,8 @@ function paintPlayerProfileStats(stats) {
       show(tag);
     }
   } else {
+    $('player-profile-bio').textContent = stats.bio || '';
+    $('player-profile-bio').classList.toggle('hidden', !stats.bio);
     $('player-profile-since').textContent = dateLabel(stats.created_at);
     $('player-profile-last-played').textContent = stats.last_played_at ? timeAgo(stats.last_played_at) : '—';
     show($('player-profile-meta-row'));

@@ -17,6 +17,7 @@ import {
   showAccountScreen, onAccountSaveClick, showAchievementsScreen,
   onAccountEditUsernameClick, onAccountCancelEditClick, onEloChartRangeClick,
   onAchievementTileClick, onAchievementTileKeydown,
+  onAccountEditBioClick, onAccountBioInput, onAccountBioSave, onAccountBioCancel,
 } from './account/account.js';
 import {
   showHomeTile, showHomeTiles, onHomeLinkClick, navigateFromSidebar, onCreateGame, onJoinByCode, onJoinRoomCodeInput,
@@ -48,7 +49,7 @@ import {
   onStandingsTableClick,
 } from './lobby/rematch.js';
 import { onPlaceBid, onPass, onResign, onDiscardPainting, onQuickReactionClick } from './game/gameActions.js';
-import { onTutorialCoachNextClick } from './ui/notifications.js';
+import { onTutorialCoachNextClick, onAchievementToastClick } from './ui/notifications.js';
 
 // Debug-only bridge, not part of the app's real API surface: lets a
 // browser console (or a Playwright page.evaluate, as used throughout this
@@ -183,6 +184,12 @@ function wireStaticHandlers() {
   $('leaderboard-tab-people').addEventListener('click', () => onLeaderboardTabClick('people'));
   $('leaderboard-tab-bots').addEventListener('click', () => onLeaderboardTabClick('bots'));
   $('achievements-grid').addEventListener('click', onAchievementTileClick);
+  $('player-profile-achievements').addEventListener('click', onAchievementTileClick);
+  $('player-profile-achievements').addEventListener('keydown', onAchievementTileKeydown);
+  $('btn-account-edit-bio').addEventListener('click', onAccountEditBioClick);
+  $('account-bio-input').addEventListener('input', onAccountBioInput);
+  $('btn-account-bio-save').addEventListener('click', onAccountBioSave);
+  $('btn-account-bio-cancel').addEventListener('click', onAccountBioCancel);
   $('achievements-grid').addEventListener('keydown', onAchievementTileKeydown);
   $('game-detail-body').addEventListener('click', onGameDetailTableClick);
   // Reached from a name click (Leaderboard, or the game detail modal
@@ -243,6 +250,7 @@ function wireStaticHandlers() {
   $('btn-resign').addEventListener('click', onResign);
   $('btn-discard-painting').addEventListener('click', onDiscardPainting);
   initChat();
+  $('achievement-toast').addEventListener('click', onAchievementToastClick);
   $('btn-spec-chat-send').addEventListener('click', onSpecChatSend);
   $('spec-chat-input').addEventListener('keydown', (e) => { if (e.key === 'Enter') onSpecChatSend(); });
   $('spec-chat-target-toggle').addEventListener('change', (e) => {

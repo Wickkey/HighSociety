@@ -1248,3 +1248,49 @@ button.link-button:hover { color: var(--accent); }
 .rematch-bot-form .button-row button { margin: 0; }
 .rematch-bot-form .button-row .primary { flex: 1 1 auto; min-width: 0; }
 @media (max-width: 560px) { .rematch-bot-tiers { grid-template-columns: minmax(0, 1fr); } }
+
+/* ---------------- bot profile links at the table ---------------- */
+.opponent-profile-link { color: inherit; text-decoration: underline; text-decoration-color: transparent; text-underline-offset: 2px; }
+.opponent-profile-link:hover, .opponent-profile-link:focus-visible { text-decoration-color: currentColor; }
+.opponent-profile-link::after { content: " ↗"; font-size: 0.75em; color: var(--muted); }
+
+/* ---------------- achievement unlocked ---------------- */
+.achievement-toast {
+  position: fixed;
+  left: 50%;
+  top: 16px;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  width: min(360px, calc(100vw - 32px));
+  margin: 0;
+  padding: 0.7rem 0.9rem;
+  border: 2px solid var(--accent-highlight);
+  border-radius: var(--radius-card);
+  background: var(--panel-bg);
+  color: var(--text);
+  text-align: left;
+  box-shadow: var(--shadow-lg);
+  cursor: pointer;
+  opacity: 0;
+  transform: translate(-50%, -14px) scale(0.96);
+  transition: opacity 0.2s ease, transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.achievement-toast.hidden { display: none; }
+.achievement-toast.show { opacity: 1; transform: translate(-50%, 0) scale(1); }
+.achievement-toast-icon {
+  flex: 0 0 44px;
+  width: 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+.achievement-toast-icon svg { width: 26px; height: 26px; }
+.achievement-toast-text { display: flex; flex-direction: column; min-width: 0; line-height: 1.25; }
+.achievement-toast-label { font-size: 0.7rem; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--accent-strong); }
+.achievement-toast-desc { font-size: 0.8rem; color: var(--muted); }

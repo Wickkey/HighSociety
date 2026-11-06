@@ -263,3 +263,26 @@ def test_social_pariah_needs_all_three_disgrace_cards():
     assert "social_pariah" not in detect_per_game_achievements(_standings("bob"), set(), two, []).get("bob", set())
     three = two + [disgrace("Scandale")]
     assert "social_pariah" in detect_per_game_achievements(_standings("bob"), set(), three, [])["bob"]
+
+
+def _win_against(bot_mix):
+    standings = [{"username": "alice", "points": 30, "money_left": 20, "active": True, "eliminated": False}]
+    standings += [{"username": f"bot{i}", "points": 10, "money_left": 20, "active": True, "eliminated": False}
+                  for i in range(len(bot_mix))]
+    return detect_per_game_achievements(final_standings=standings, winner_usernames={"alice"},
+                                        auction_rounds=[], bot_mix=bot_mix)["alice"]
+
+
+def test_insane_achievements_scale_with_how_many_insane_bots_were_beaten():
+    assert not _win_against(["hard", "hard"]) & {"turing_test", "man_vs_machine", "singularity"}
+    assert _win_against(["insane", "easy"]) & {"turing_test", "man_vs_machine", "singularity"} == {"turing_test"}
+    assert _win_against(["insane", "insane"]) & {"man_vs_machine", "singularity"} == {"man_vs_machine"}
+    assert {"turing_test", "man_vs_machine", "singularity"} <= _win_against(["insane"] * 4)
+
+
+def test_insane_achievements_need_a_win():
+    standings = [{"username": "alice", "points": 5, "money_left": 20, "active": True, "eliminated": False},
+                 {"username": "bot0", "points": 30, "money_left": 20, "active": True, "eliminated": False}]
+    result = detect_per_game_achievements(final_standings=standings, winner_usernames={"bot0"},
+                                          auction_rounds=[], bot_mix=["insane"])
+    assert "turing_test" not in result.get("alice", set())

@@ -94,6 +94,29 @@ export function clearMoveTimer() {
 // How many seconds before zero the clock should turn urgent — scaled to the
 // room's actual per-move limit rather than a flat 5s, since 5s left out of
 // a 20s move reads very differently than 5s left out of a 3-minute one.
+// A named bot's name opens its profile in a new tab, so looking one up never
+// takes you off the table. Updated in place: this runs on every render, and
+// rebuilding the link would swallow a tap landing in between.
+function renderOpponentName(el, opponent, suffix) {
+  if (!opponent.profileUsername) {
+    el.textContent = `${opponent.name}${suffix}`;
+    return;
+  }
+  let link = el.querySelector('a');
+  if (!link) {
+    el.textContent = '';
+    link = document.createElement('a');
+    link.className = 'opponent-profile-link';
+    link.target = '_blank';
+    link.rel = 'noopener';
+    link.title = 'Open profile in a new tab';
+    el.append(link, document.createTextNode(''));
+  }
+  link.href = `/players/${encodeURIComponent(opponent.profileUsername)}`;
+  link.textContent = opponent.name;
+  el.lastChild.textContent = suffix;
+}
+
 export function urgentWindowSeconds() {
   const limit = game && game.turnTimeLimit;
   if (!limit || limit < 30) return 5;
@@ -334,7 +357,7 @@ export function renderOpponents(isSpectator) {
     let statusSuffix = '';
     if (o.active === false) statusSuffix = ' (out)';
     else if (o.outOfAuction) statusSuffix = ' (passed)';
-    row.querySelector('.name').textContent = `${o.name}${statusSuffix}`;
+    renderOpponentName(row.querySelector('.name'), o, statusSuffix);
     // Rated seats only (Google-linked players and the named bots) -- the
     // number you'd see on their profile, so you know who you're up against.
     const eloEl = row.querySelector('.opp-elo');

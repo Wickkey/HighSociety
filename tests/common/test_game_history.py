@@ -1398,14 +1398,14 @@ def test_get_player_profile_stats_computes_win_rate(database_url):
         (1, 1000),                    # (player id, elo)
         (4, 3),                       # (games_played, wins)
         (2.5, 10.0, 8.0),             # (avg_placement, avg_points, avg_money_remaining)
-        (created_at, last_seen_at),   # (created_at, last_seen_at)
+        (created_at, last_seen_at, None),   # (created_at, last_seen_at, bio)
     ])
     with patch.object(game_history, "_connect", return_value=conn):
         result = game_history.get_player_profile_stats("alice")
     assert result == {
         "games_played": 4, "wins": 3, "win_rate": 0.75, "elo": 1000,
         "avg_placement": 2.5, "avg_points": 10.0, "avg_money_remaining": 8.0,
-        "created_at": created_at.isoformat(), "last_played_at": last_seen_at.isoformat(),
+        "created_at": created_at.isoformat(), "last_played_at": last_seen_at.isoformat(), "bio": None,
     }
 
 
@@ -1413,7 +1413,7 @@ def test_get_player_profile_stats_zero_games_has_zero_win_rate_not_a_division_er
     game_history._schema_ready = True
     conn, cursor = _fake_connection()
     now = datetime.datetime.now(datetime.timezone.utc)
-    cursor.fetchone.side_effect = iter([(1, 1000), (0, 0), (None, None, None), (now, now)])
+    cursor.fetchone.side_effect = iter([(1, 1000), (0, 0), (None, None, None), (now, now, None)])
     with patch.object(game_history, "_connect", return_value=conn):
         result = game_history.get_player_profile_stats("alice")
     assert result["games_played"] == 0
@@ -1432,7 +1432,7 @@ def test_get_player_profile_stats_averages_are_none_when_no_game_results_rows_ex
     game_history._schema_ready = True
     conn, cursor = _fake_connection()
     now = datetime.datetime.now(datetime.timezone.utc)
-    cursor.fetchone.side_effect = iter([(1, 1000), (5, 2), (None, None, None), (now, now)])
+    cursor.fetchone.side_effect = iter([(1, 1000), (5, 2), (None, None, None), (now, now, None)])
     with patch.object(game_history, "_connect", return_value=conn):
         result = game_history.get_player_profile_stats("alice")
     assert result["games_played"] == 5
@@ -1448,7 +1448,7 @@ def test_get_player_profile_stats_includes_elo_from_the_same_connection(database
     game_history._schema_ready = True
     conn, cursor = _fake_connection()
     now = datetime.datetime.now(datetime.timezone.utc)
-    cursor.fetchone.side_effect = iter([(1, 1234), (2, 1), (1.0, 15.0, 5.0), (now, now)])
+    cursor.fetchone.side_effect = iter([(1, 1234), (2, 1), (1.0, 15.0, 5.0), (now, now, None)])
     with patch.object(game_history, "_connect", return_value=conn):
         result = game_history.get_player_profile_stats("alice")
     assert result["elo"] == 1234
@@ -1464,7 +1464,7 @@ def test_get_player_profile_stats_includes_player_since_and_last_played(database
     conn, cursor = _fake_connection()
     created_at = datetime.datetime(2025, 6, 1, tzinfo=datetime.timezone.utc)
     last_seen_at = datetime.datetime(2026, 3, 15, tzinfo=datetime.timezone.utc)
-    cursor.fetchone.side_effect = iter([(1, 1000), (2, 1), (1.0, 5.0, 3.0), (created_at, last_seen_at)])
+    cursor.fetchone.side_effect = iter([(1, 1000), (2, 1), (1.0, 5.0, 3.0), (created_at, last_seen_at, None)])
     with patch.object(game_history, "_connect", return_value=conn):
         result = game_history.get_player_profile_stats("alice")
     assert result["created_at"] == created_at.isoformat()
@@ -2211,3 +2211,13 @@ def test_bot_leaderboard_failure_is_not_cached_as_the_real_ratings(database_url)
     with patch.object(game_history, "_connect", side_effect=RuntimeError("unreachable")):
         assert len(game_history.get_bot_leaderboard()) == len(bot_roster.BOT_ROSTER)
     assert "bots" not in game_history._leaderboard_cache
+
+
+def test_bot_leaderboard_counts_games_from_player_games(database_url):
+    """A real run showed every bot at 0 games: the players totals only cover humans."""
+    game_history._schema_ready = True
+    conn, cursor = _fake_connection()
+    cursor.fetchall = MagicMock(return_value=[])
+    with patch.object(game_history, "_connect", return_value=conn):
+        game_history.get_bot_leaderboard()
+    assert "player_games" in cursor.execute.call_args.args[0]

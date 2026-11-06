@@ -21,7 +21,7 @@ import { attachUsernameField } from '../ui/usernameField.js';
 // backend's, since those ids are what /api/achievements returns as unlocked.
 // Icons are 24x24 stroke line-art, same design language as the sidebar/
 // home-tile icons (fill:none, stroke:currentColor, ~1.6 width, round caps).
-const ACHIEVEMENTS = [
+export const ACHIEVEMENTS = [
   { id: 'first_win', name: 'First Victory', description: 'Win a game.',
     icon: '<path d="M12 3.4l2.1 4.4 4.8.6-3.5 3.4.9 4.8L12 14.3l-4.3 2.3.9-4.8-3.5-3.4 4.8-.6L12 3.4z"/>' },
   { id: 'hat_trick', name: 'Hat Trick', description: 'Win 3 games.',
@@ -119,6 +119,12 @@ const ACHIEVEMENTS = [
     icon: '<circle cx="10" cy="8" r="3.2"/><path d="M4 20c0-3.4 2.7-6 6-6 1.3 0 2.5.4 3.4 1"/><path d="M16 15l4 4M20 15l-4 4"/>' },
   { id: 'in_the_red', name: 'In the Red', description: 'Finish a game with a negative score.',
     icon: '<path d="M3 6l6 6 4-4 8 8"/><path d="M15 16h6v-6"/>' },
+  { id: 'turing_test', name: 'Turing Test', description: 'Win a game with an Insane bot at the table.',
+    icon: '<rect x="5" y="8.5" width="14" height="10.5" rx="2.5"/><path d="M12 8.5V5.5"/><circle cx="12" cy="4.2" r="1.1"/><circle cx="9.3" cy="13" r="1.1"/><circle cx="14.7" cy="13" r="1.1"/><path d="M9.5 16.2h5"/>' },
+  { id: 'man_vs_machine', name: 'Man vs. Machine', description: 'Win a game with two or more Insane bots at the table.',
+    icon: '<circle cx="7" cy="8" r="3"/><path d="M2.5 19c.5-3.2 2.3-5 4.5-5s4 1.8 4.5 5"/><rect x="14" y="7" width="7.5" height="7" rx="1.6"/><path d="M17.7 7V4.8"/><path d="M15.2 17.5h5"/><path d="M17.7 14v3.5"/>' },
+  { id: 'singularity', name: 'Singularity', description: 'Win a game against four Insane bots at once.',
+    icon: '<circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1"/>' },
 ];
 
 // Same lock glyph used both as the front's small icon-badge pin and (per
@@ -143,7 +149,7 @@ const LOCK_ICON_SVG = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor
 // same lock glyph) rather than a separately-colored "reveal" surface --
 // per explicit feedback, a different color scheme on the back read as
 // off-palette rather than "the same tile, turned around".
-function renderAchievementTile(a, unlocked) {
+export function renderAchievementTile(a, unlocked) {
   const lockBadge = unlocked ? '' : `<span class="achievement-lock">${LOCK_ICON_SVG}</span>`;
   const backLock = unlocked ? '' : `<span class="achievement-tile-back-lock">${LOCK_ICON_SVG}</span>`;
   return `<div class="achievement-tile ${unlocked ? 'unlocked' : 'locked'}" tabindex="0" aria-label="${escapeHtml(a.name)}: ${escapeHtml(a.description)}">`
@@ -243,6 +249,7 @@ function renderAccountStats(stats, profile) {
   $('account-stat-avg-points').textContent = stats.avg_points != null ? stats.avg_points.toFixed(1) : '—';
   $('account-stat-avg-money').textContent = stats.avg_money_remaining != null ? stats.avg_money_remaining.toFixed(1) : '—';
   $('account-stats-row').classList.remove('loading');
+  paintAccountBio(stats.bio || '');
 
   const dateLabel = (iso) => new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
   $('account-player-since').textContent = dateLabel(stats.created_at);
@@ -358,7 +365,7 @@ async function loadRecentActivity(profile) {
 // not the network call itself.
 // Unlocked achievement ids for `username`, cached across reloads (see
 // utils/swrCache.js) -- shared by Achievements and the login-time prefetch.
-function fetchAchievements(username) {
+export function fetchAchievements(username) {
   return swr(`achievements:${username}`, () =>
     fetchJSON(`/api/achievements?username=${encodeURIComponent(username)}`).then((r) => r.achievements || []));
 }
@@ -398,12 +405,72 @@ async function loadAchievements() {
   // null: transient network error -- leave whatever's already rendered
 }
 
+const MAX_BIO_LENGTH = 160;
+let accountBio = '';
+
+function paintAccountBio(bio) {
+  accountBio = bio;
+  const text = $('account-bio');
+  text.textContent = bio;
+  text.classList.toggle('hidden', !bio);
+  $('btn-account-edit-bio').textContent = bio ? 'Edit bio' : 'Add a bio';
+}
+
+function renderBioCount() {
+  $('account-bio-count').textContent = `${$('account-bio-input').value.length}/${MAX_BIO_LENGTH}`;
+}
+
+export function onAccountEditBioClick() {
+  const input = $('account-bio-input');
+  input.value = accountBio;
+  renderBioCount();
+  hide($('account-bio-error'));
+  show($('account-bio-edit'));
+  hide($('account-bio-view'));
+  input.focus();
+}
+
+export function onAccountBioInput() { renderBioCount(); }
+
+export function onAccountBioCancel() {
+  hide($('account-bio-edit'));
+  show($('account-bio-view'));
+}
+
+export async function onAccountBioSave() {
+  const profile = loadProfile();
+  if (!profile) return;
+  const save = $('btn-account-bio-save');
+  save.disabled = true;
+  hide($('account-bio-error'));
+  try {
+    const result = await fetchJSON('/api/profile/bio', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: profile.username, login_token: loginToken(), bio: $('account-bio-input').value }),
+    });
+    paintAccountBio(result.bio);
+    onAccountBioCancel();
+    // The cached profile still holds the old bio, and would flash it next visit.
+    profileStats(profile.username);
+  } catch (e) {
+    showError($('account-bio-error'), e.message);
+  } finally {
+    save.disabled = false;
+  }
+}
+
 // Reached via the popover's "Account" item or the sidebar's Account tab --
 // a full screen rather than the old inline popover fields, room to grow
 // into "possibly do much more in future" (match history, stats, ...)
 // without cramming it into a 260px dropdown.
 export function showAccountScreen() {
   const profile = loadProfile();
+  // Reset here, not left for the fetch: a new visit must never show the last
+  // account's bio, or an edit box left open.
+  paintAccountBio('');
+  onAccountBioCancel();
+  hide($('account-bio-error'));
   $('account-avatar').textContent = profile ? profile.username.charAt(0).toUpperCase() : '?';
   $('account-username-display').textContent = profile ? profile.username : '';
   $('account-username-input').value = profile ? profile.username : '';

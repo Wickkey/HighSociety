@@ -2296,7 +2296,7 @@ def test_profile_endpoint_returns_stats_and_elo(monkeypatch):
         "username": "alice", "games_played": 4, "wins": 3, "win_rate": 0.75,
         "avg_placement": 1.5, "avg_points": 12.0, "avg_money_remaining": 6.0, "elo": 1032,
         "created_at": "2025-06-01T00:00:00+00:00", "last_played_at": "2026-03-15T00:00:00+00:00",
-        "is_bot": False, "display_name": "alice", "bio": None,
+        "is_bot": False, "display_name": "alice", "bio": None, "avatar_url": None,
         "bot_difficulty": None, "bot_legacy": False,
     }
 

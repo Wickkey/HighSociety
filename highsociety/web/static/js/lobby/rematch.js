@@ -18,7 +18,8 @@ import { game, resetGameState, seedOpponents, applyRoomDisplaySettings, remember
 import { ensureGameScreenVisible } from '../game/gameEvents.js';
 import { renderOpponents } from '../game/gameRenderer.js';
 import { loadProfile, setSessionStatus } from '../auth/profile.js';
-import { prefetchAccountStats } from '../account/account.js';
+import { prefetchAccountStats, ACHIEVEMENTS } from '../account/account.js';
+import { showAchievementToasts } from '../ui/notifications.js';
 
 // Rematch panel state on the finished screen: null while no vote is
 // underway, else {requestedBy, botMix, votes} mirroring web_server.py's
@@ -185,12 +186,14 @@ async function revealEloChange(initialStatus) {
   // The save now usually lands within a few hundred ms, so the first few
   // checks come quickly rather than all waiting a full 800ms.
   let changes = initialStatus.elo_changes;
+  let latestStatus = initialStatus;
   for (let attempt = 0; attempt < 24 && (changes === undefined || changes === null); attempt++) {
     await new Promise((resolve) => setTimeout(resolve, attempt < 5 ? 300 : 800));
     if (token !== eloRevealToken) return; // superseded by a newer game (e.g. a rematch)
     try {
       const fresh = await fetchJSON(`/api/status?room=${encodeURIComponent(currentRoomCode())}`);
       changes = fresh.elo_changes;
+      latestStatus = fresh;
     } catch (e) { /* transient network hiccup -- next attempt (or the timeout below) handles it */ }
   }
   if (token !== eloRevealToken) return;
@@ -211,6 +214,10 @@ async function revealEloChange(initialStatus) {
   eloChangesGameId = initialStatus.game_id;
   eloChangesForGame = changes || {};
   showTableEloChanges(eloChangesForGame);
+
+  // Settled means the save has committed, so these are final.
+  const unlockedIds = (latestStatus.new_achievements || {})[game.myUsername] || [];
+  showAchievementToasts(ACHIEVEMENTS.filter((a) => unlockedIds.includes(a.id)));
 
   const mine = changes && changes[game.myUsername];
   const profile = loadProfile();

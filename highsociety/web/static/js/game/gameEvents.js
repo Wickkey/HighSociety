@@ -101,6 +101,7 @@ export function applyGameMessage(msg, isSpectator) {
           o.active = d.active;
           o.statusCards = d.status_cards;
           if (d.elo != null) o.elo = d.elo;
+          if (d.profile_username) o.profileUsername = d.profile_username;
           if (d.in_auction === false) o.outOfAuction = true;
           if (d.current_bid) o.lastBid = d.current_bid;
           renderOpponents(isSpectator);

@@ -204,6 +204,7 @@
         <div>
           <h2 id="profile-view-username"></h2>
           <p id="profile-view-elo-line" class="muted hidden">Elo <span id="profile-view-elo"></span></p>
+          <p id="profile-view-bio" class="profile-view-bio muted hidden"></p>
         </div>
       </div>
       <div id="profile-view-stats-row" class="account-stats-row hidden">
@@ -401,6 +402,23 @@
           <p id="account-error" class="error hidden"></p>
         </div>
         <p id="account-saved" class="account-saved hidden">Saved.</p>
+
+        <div id="account-bio-view" class="account-bio-block">
+          <p id="account-bio" class="account-bio hidden"></p>
+          <button type="button" id="btn-account-edit-bio" class="account-bio-edit">Add a bio</button>
+        </div>
+        <div id="account-bio-edit" class="account-bio-editor hidden">
+          <label for="account-bio-input" class="username-label">Bio</label>
+          <textarea id="account-bio-input" rows="2" maxlength="160" placeholder="A line about you, shown on your profile"></textarea>
+          <div class="username-status-row">
+            <p id="account-bio-error" class="error hidden"></p>
+            <span id="account-bio-count" class="username-count"></span>
+          </div>
+          <div class="button-row">
+            <button type="button" id="btn-account-bio-save" class="primary">Save</button>
+            <button type="button" id="btn-account-bio-cancel" class="secondary">Cancel</button>
+          </div>
+        </div>
 
         <!-- A guest connects Google here and keeps this username and every
              past game (see login.js's connectGoogleToGuest). Full panel
@@ -709,6 +727,17 @@
               <div id="player-profile-elo-chart" class="account-elo-chart tile-loading-spinner"></div>
             </div>
           </div>
+        </div>
+
+        <!-- Hidden only for a bot, decided from the username before anything
+             loads (see showPlayerProfileScreen), so it never pops in late. -->
+        <div id="player-profile-achievements-section" class="card panel account-panel">
+          <div class="profile-achievements-head">
+            <h3>Achievements</h3>
+            <span id="player-profile-achievements-count" class="muted"></span>
+          </div>
+          <div id="player-profile-achievements" class="achievements-grid profile-achievements-grid"></div>
+          <p id="player-profile-achievements-empty" class="muted hidden">No achievements yet.</p>
         </div>
 
         <!-- Never hidden as a whole any more (see .account-stats-chart-row's
@@ -1907,6 +1936,15 @@
        lobby.js's loadHomeGlobalStats); no database configured (local
        dev) just leaves this out entirely rather than showing a
        hardcoded 0. -->
+  <button type="button" id="achievement-toast" class="achievement-toast hidden" role="status">
+    <span id="achievement-toast-icon" class="achievement-toast-icon" aria-hidden="true"></span>
+    <span class="achievement-toast-text">
+      <span class="achievement-toast-label">Achievement unlocked</span>
+      <strong id="achievement-toast-name"></strong>
+      <span id="achievement-toast-desc" class="achievement-toast-desc"></span>
+    </span>
+  </button>
+
   <button type="button" id="chat-jump" class="chat-jump hidden" aria-label="Unread chat messages. Go to chat.">
     <span aria-hidden="true">💬</span><span id="chat-jump-count" class="chat-jump-count"></span>
   </button>

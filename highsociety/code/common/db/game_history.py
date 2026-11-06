@@ -91,6 +91,8 @@ _SCHEMA_STATEMENTS = [
     # matchmaking.py's docstring) -- every player starts equal until
     # there's real post-match rating logic to diverge them.
     "ALTER TABLE players ADD COLUMN IF NOT EXISTS elo INTEGER NOT NULL DEFAULT 1000",
+    # Written by the player (see set_player_bio); NULL until they add one.
+    "ALTER TABLE players ADD COLUMN IF NOT EXISTS bio TEXT",
     """
     CREATE TABLE IF NOT EXISTS player_achievements (
         id SERIAL PRIMARY KEY,
@@ -1359,14 +1361,15 @@ def get_player_profile_stats(username: str) -> Optional[dict]:
             # finishes (record_finished_game's player upsert), so serving it from that cache
             # (which only ever stores id/elo) would show a stale value for
             # the rest of this process's life once cached once.
-            cur.execute("SELECT created_at, last_seen_at FROM players WHERE id = %s", (player_id,))
-            created_at, last_seen_at = cur.fetchone()
+            cur.execute("SELECT created_at, last_seen_at, bio FROM players WHERE id = %s", (player_id,))
+            created_at, last_seen_at, bio = cur.fetchone()
             return {
                 "games_played": games_played, "wins": wins, "win_rate": win_rate, "elo": elo,
                 "avg_placement": float(avg_placement) if avg_placement is not None else None,
                 "avg_points": float(avg_points) if avg_points is not None else None,
                 "avg_money_remaining": float(avg_money_remaining) if avg_money_remaining is not None else None,
                 "created_at": created_at.isoformat(),
+                "bio": bio,
                 # Deliberately named for what this data actually is --
                 # last_seen_at only updates when a game finishes (see
                 # record_finished_game's player upsert), not on every page load/heartbeat, so
@@ -1378,6 +1381,28 @@ def get_player_profile_stats(username: str) -> Optional[dict]:
     except Exception as e:  # noqa: BLE001
         LoggingManager.warning(f"game_history.get_player_profile_stats failed: {e}")
         return None
+    finally:
+        if conn is not None:
+            _release_connection(conn)
+
+
+def set_player_bio(username: str, bio: Optional[str]) -> bool:
+    """Sets (or, with None, clears) a player's bio. False if they have no
+    players row, there's no database, or the write failed."""
+    if not is_configured():
+        return False
+    ensure_schema()
+    if not _schema_ready:
+        return False
+    conn = None
+    try:
+        conn = _connect()
+        with conn, conn.cursor() as cur:
+            cur.execute("UPDATE players SET bio = %s WHERE username = %s", (bio, username))
+            return cur.rowcount > 0
+    except Exception as e:  # noqa: BLE001
+        LoggingManager.warning(f"game_history.set_player_bio failed: {e}")
+        return False
     finally:
         if conn is not None:
             _release_connection(conn)
@@ -1734,7 +1759,8 @@ def get_bot_leaderboard() -> list[dict]:
 
 def _fetch_bot_ratings() -> Optional[dict]:
     """username -> (elo, games_played, games_won) for every bot account, or
-    None with no database or on any failure."""
+    None with no database or on any failure. Counted from player_games, as a
+    bot's profile is: the running totals on players only cover humans."""
     if not is_configured():
         return None
     ensure_schema()
@@ -1746,9 +1772,12 @@ def _fetch_bot_ratings() -> Optional[dict]:
         with conn, conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT p.username, p.elo, p.games_played, p.games_won
+                SELECT p.username, p.elo, count(pg.player_id),
+                       count(*) FILTER (WHERE pg.is_winner)
                 FROM players p
+                LEFT JOIN player_games pg ON pg.player_id = p.id
                 WHERE p.id IN (SELECT player_id FROM bots)
+                GROUP BY p.id
                 """
             )
             return {u: (e, gp, gw) for u, e, gp, gw in cur.fetchall()}
@@ -2364,7 +2393,8 @@ def record_finished_game(*, room_code: str, seats: int, bot_mix: list,
                           is_finished_successfully: bool = True,
                           auction_rounds: Optional[list] = None,
                           seed: Optional[int] = None, actions: Optional[list] = None,
-                          rewarm_leaderboard: bool = True) -> dict:
+                          rewarm_leaderboard: bool = True,
+                          on_new_achievements: Optional[Callable[[dict], None]] = None) -> dict:
     """
     Returns {rating_key: {"old_rating", "new_rating", "rating_change"}} for
     every participant whose rating actually changed this game (a human's
@@ -2570,6 +2600,8 @@ def record_finished_game(*, room_code: str, seats: int, bot_mix: list,
             game_results_seen = set()
             linked_ids_to_count = []  # Google-linked humans, for the career milestones
             achievement_rows = []
+            linked_username_by_id: dict = {}
+            new_achievements: dict[str, list[str]] = {}
             for index, p in enumerate(participants):
                 player_id = google_id = elo_before = bot_name = None
                 if p["is_bot"]:
@@ -2626,6 +2658,7 @@ def record_finished_game(*, room_code: str, seats: int, bot_mix: list,
                     for achievement_id in sorted(set(achievement_unlocks.get(p["username"]) or ())):
                         achievement_rows.append((player_id, achievement_id))
                     linked_ids_to_count.append(player_id)
+                    linked_username_by_id[player_id] = p["username"]
 
             # The games row goes in last of the "who" writes, once the
             # winner and every seat's player_id are already known.
@@ -2779,9 +2812,16 @@ def record_finished_game(*, room_code: str, seats: int, bot_mix: list,
                     INSERT INTO player_achievements (player_id, achievement_id)
                     VALUES {_values_placeholder(len(achievement_rows), 2)}
                     ON CONFLICT (player_id, achievement_id) DO NOTHING
+                    RETURNING player_id, achievement_id
                     """,
                     _flatten(achievement_rows),
                 )
+                # RETURNING skips conflicts, so this is exactly what this game
+                # newly unlocked, not everything it qualified for again.
+                for player_id, achievement_id in cur.fetchall():
+                    username = linked_username_by_id.get(player_id)
+                    if username is not None:
+                        new_achievements.setdefault(username, []).append(achievement_id)
 
             seat_by_game_username = {p["game_username"]: p["seat"] for p in participants
                                      if p.get("game_username") is not None and p.get("seat") is not None}
@@ -2803,6 +2843,8 @@ def record_finished_game(*, room_code: str, seats: int, bot_mix: list,
     # own comment on why this can't happen any earlier.
     for username, new_rating in cache_refreshes:
         _refresh_cached_elo(username, new_rating)
+    if on_new_achievements is not None and new_achievements:
+        on_new_achievements(new_achievements)
     if participants:
         # Any finished game can change the leaderboard -- not just Elo
         # (cache_refreshes), but games_played/games_won too, which move

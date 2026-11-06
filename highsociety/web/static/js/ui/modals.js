@@ -1,4 +1,5 @@
 // Generic confirm dialog + the public profile-viewer modal.
+import { setAvatar } from './avatar.js';
 import { $, hide, show } from '../utils/dom.js';
 import { escapeHtml } from '../utils/formatting.js';
 import { fetchJSON } from '../lobby/lobby.js';
@@ -48,6 +49,7 @@ export function resolveConfirmDialog(result) {
 export async function openProfileModal(username) {
   $('profile-view-username').textContent = username;
   $('profile-view-avatar').textContent = username.charAt(0).toUpperCase();
+  hide($('profile-view-bio'));
   hide($('profile-view-elo-line'));
   hide($('profile-view-stats-row'));
   hide($('profile-view-empty'));
@@ -55,6 +57,10 @@ export async function openProfileModal(username) {
   // Same cache entry as account.js's profileStats -- painted at once if
   // seen before, then refreshed.
   const paint = (stats) => {
+    setAvatar($('profile-view-avatar'), stats.display_name || username, stats.avatar_url);
+    if (stats.display_name) $('profile-view-username').textContent = stats.display_name;
+    $('profile-view-bio').textContent = stats.bio || '';
+    $('profile-view-bio').classList.toggle('hidden', !stats.bio);
     $('profile-view-elo').textContent = stats.elo;
     show($('profile-view-elo-line'));
     $('profile-view-games').textContent = stats.games_played;

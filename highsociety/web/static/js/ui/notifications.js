@@ -23,6 +23,53 @@ export function showToast(message, durationMs = 3500) {
   }, durationMs);
 }
 
+// ------------------------------------------------- achievement unlocked --
+//
+// Shown one at a time at the end of a game, a beat after the results appear so
+// it doesn't compete with them. Tap to dismiss early.
+const ACHIEVEMENT_TOAST_MS = 3800;
+const ACHIEVEMENT_TOAST_DELAY_MS = 900;
+const achievementQueue = [];
+let achievementToastBusy = false;
+let dismissAchievementToast = null;
+
+export function showAchievementToasts(achievements) {
+  if (!achievements.length) return;
+  achievementQueue.push(...achievements);
+  if (!achievementToastBusy) {
+    achievementToastBusy = true;
+    setTimeout(nextAchievementToast, ACHIEVEMENT_TOAST_DELAY_MS);
+  }
+}
+
+function nextAchievementToast() {
+  const toast = $('achievement-toast');
+  const achievement = achievementQueue.shift();
+  if (!achievement) {
+    achievementToastBusy = false;
+    return;
+  }
+  $('achievement-toast-icon').innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">${achievement.icon}</svg>`;
+  $('achievement-toast-name').textContent = achievement.name;
+  $('achievement-toast-desc').textContent = achievement.description;
+  show(toast);
+  requestAnimationFrame(() => toast.classList.add('show'));
+  const timer = setTimeout(() => dismissAchievementToast(), ACHIEVEMENT_TOAST_MS);
+  dismissAchievementToast = () => {
+    clearTimeout(timer);
+    dismissAchievementToast = null;
+    toast.classList.remove('show');
+    setTimeout(() => {
+      hide(toast);
+      nextAchievementToast();
+    }, 250);
+  };
+}
+
+export function onAchievementToastClick() {
+  if (dismissAchievementToast) dismissAchievementToast();
+}
+
 // ------------------------------------------------- transient event queue --
 //
 // Persistent game state (auction card, current bid, whose turn, player

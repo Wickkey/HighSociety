@@ -320,6 +320,9 @@ class GameRoom:
         # None at the top of every fresh game (including a rematch) so a
         # previous game's numbers can never leak into a new one's reveal.
         self.elo_changes: Optional[dict] = None
+        # username -> achievement ids this game newly unlocked. Set before
+        # elo_changes, so a client that sees the Elo result has these too.
+        self.new_achievements: dict[str, list[str]] = {}
         # sender -> recent chat/reaction timestamps, see _chat_allowed.
         self.chat_times: dict[str, list[float]] = {}
         # seat username -> current Elo, for the seats that are rated (see
@@ -338,7 +341,8 @@ class GameRoom:
             # bot (each name has a fixed one, see common/bot_roster.py),
             # None for a human or a heuristic bot.
             {"username": p.username, "name": p.name, "is_bot": not isinstance(p, NetworkPlayer),
-             "difficulty": getattr(p, "difficulty", None), "elo": self.seat_ratings.get(p.username)}
+             "difficulty": getattr(p, "difficulty", None), "elo": self.seat_ratings.get(p.username),
+             **_seat_profile(p)}
             for p in self.players
         ]
 
@@ -449,6 +453,15 @@ class GameRoom:
         threading.Thread(target=_run, daemon=True, name=f"Game-{self.game_id}").start()
 
 
+def _seat_profile(player) -> dict:
+    """What a client needs to show a seat's profile: a roster bot's profile
+    page and picture. Both None for a human or an unnamed bot."""
+    if isinstance(player, NetworkPlayer):
+        return {"profile_username": None, "avatar_url": None}
+    username = _rated_username(player)
+    return {"profile_username": username, "avatar_url": _BOT_AVATARS.get(username)}
+
+
 def _rated_username(player) -> Optional[str]:
     """The players-table username a seat is rated under: a human's own
     username, or a roster bot's namespaced identity (only when the seat
@@ -520,6 +533,9 @@ def _record_game_history(room: "GameRoom", game: PlayGame, started_at: datetime.
         auction_rounds=auction_rounds,
         bot_mix=room.bot_mix,
     )
+    def _store_new_achievements(unlocked: dict) -> None:
+        room.new_achievements = unlocked
+
     def _store_elo_changes(changes: dict) -> None:
         # Written from the background write's own thread -- under the
         # lock since it's a genuine cross-thread write, even though a
@@ -544,6 +560,7 @@ def _record_game_history(room: "GameRoom", game: PlayGame, started_at: datetime.
         host_username=room.host_username,
         time_control=int(room.turn_time_limit) if room.turn_time_limit else None,
         on_complete=_store_elo_changes,
+        on_new_achievements=_store_new_achievements,
     )
 
 
@@ -1202,6 +1219,27 @@ def api_achievements():
 
 
 
+_MAX_BIO_LENGTH = 160
+
+# Profile pictures, bots first. Drop <roster key>.(webp|png|jpg|jpeg) into
+# static/avatars/bots/ (e.g. magnus_carlsen.webp) and that bot shows it, cropped
+# to fit its square; a bot without one keeps its letter or emoji square. Square
+# images about 256px wide look best. Read once at startup.
+_AVATAR_EXTENSIONS = (".webp", ".png", ".jpg", ".jpeg")
+
+
+def _find_bot_avatars(folder: str) -> dict:
+    found = {}
+    for bot in bot_roster.BOT_ROSTER:
+        for extension in _AVATAR_EXTENSIONS:
+            if os.path.isfile(os.path.join(folder, bot.key + extension)):
+                found[bot_roster.roster_username(bot)] = f"/static/avatars/bots/{bot.key}{extension}"
+                break
+    return found
+
+
+_BOT_AVATARS = _find_bot_avatars(os.path.join(app.static_folder, "avatars", "bots"))
+
 # Bot identities get a public profile too -- real aggregate stats already
 # exist for them (bots are real rated participants, see
 # record_finished_game's docstring), they just need a friendlier display
@@ -1263,10 +1301,35 @@ def api_profile(username):
         "last_played_at": stats["last_played_at"],
         "is_bot": bot_profile is not None,
         "display_name": bot_profile["display_name"] if bot_profile else username,
-        "bio": bot_profile["bio"] if bot_profile else None,
+        "bio": bot_profile["bio"] if bot_profile else stats.get("bio"),
+        "avatar_url": _BOT_AVATARS.get(username),
         "bot_difficulty": bot_profile["difficulty"] if bot_profile else None,
         "bot_legacy": bot_profile["legacy"] if bot_profile else False,
     })
+
+
+@app.route("/api/profile/bio", methods=["POST"])
+def api_profile_bio():
+    """Sets the signed-in player's own bio; an empty one clears it. Always
+    shown as plain text. A bot's bio comes from common/bot_roster.py."""
+    body = request.get_json(silent=True) or {}
+    username = (body.get("username") or "").strip()
+    bio = body.get("bio")
+    if not isinstance(bio, str):
+        return jsonify({"error": "bio must be text"}), 400
+    bio = " ".join(bio.split())  # one line, however it was pasted
+    if len(bio) > _MAX_BIO_LENGTH:
+        return jsonify({"error": f"Bio must be {_MAX_BIO_LENGTH} characters or fewer"}), 400
+    if not game_history.is_configured():
+        return jsonify({"error": "Bios need a database, and this server has none."}), 503
+    # A positive match, unlike taking a seat (see _identity_rejected): a database
+    # blip can wait, and must not let anyone write on someone else's profile.
+    if (not username or username in BOT_PROFILES
+            or game_history.login_token_matches(username, body.get("login_token")) is not True):
+        return jsonify({"error": _SIGN_IN_AGAIN}), 403
+    if not game_history.set_player_bio(username, bio or None):
+        return jsonify({"error": "Couldn't save your bio. Try again in a moment."}), 503
+    return jsonify({"bio": bio})
 
 
 @app.route("/api/global_stats")
@@ -1598,6 +1661,7 @@ def _status_payload(room: Optional[GameRoom]) -> dict:
         # revealEloChange) polls this same endpoint a few more times
         # until it's non-null. See GameRoom.elo_changes's own comment.
         payload["elo_changes"] = room.elo_changes
+        payload["new_achievements"] = room.new_achievements
 
         # Everything a finished-screen client needs to render the rematch
         # panel from a plain page load/status poll, not just from the live
@@ -1932,6 +1996,7 @@ def _maybe_start_rematch(room: "GameRoom") -> None:
         # thread gets going, so nothing can read the last game's as this one's.
         room.game_id = generate_game_id()
         room.elo_changes = None
+        room.new_achievements = {}
         room.game = None
         for p in eligible:
             p.game_id = room.game_id
@@ -2132,6 +2197,7 @@ def _send_opponent_roster(player: "NetworkPlayer | NetworkSpectator", room: "Gam
                 # client doesn't show everyone back in with no bids.
                 "in_auction": other.current_participation_in_auction,
                 "current_bid": other.current_bid_value,
+                **_seat_profile(other),
             },
         )
 
