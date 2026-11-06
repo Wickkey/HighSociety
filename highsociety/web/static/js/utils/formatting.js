@@ -7,7 +7,8 @@
 const _escapeHtmlEl = document.createElement('div');
 export function escapeHtml(text) {
   _escapeHtmlEl.textContent = text;
-  return _escapeHtmlEl.innerHTML;
+  // innerHTML leaves quotes alone, and this output also goes inside attributes.
+  return _escapeHtmlEl.innerHTML.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
 export function ordinal(n) {
