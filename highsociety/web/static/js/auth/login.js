@@ -86,7 +86,7 @@ export function proceedPastLogin() {
     showPlayerProfileScreen(username, 'leaderboard');
     return;
   }
-  const replayPath = location.pathname.match(/^\/replay\/(\d+)$/);
+  const replayPath = location.pathname.match(/^\/review\/(\d+)$/);
   if (replayPath) {
     showReplayScreen(replayPath[1]);
     return;

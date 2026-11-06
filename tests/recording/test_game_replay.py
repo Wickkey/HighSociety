@@ -279,3 +279,22 @@ def test_replaying_leaves_time_sleep_alone(monkeypatch):
     replay_steps(record)
     assert time.sleep is patched is not original
     assert seen == []
+
+
+class _QuitsOnFirstTurn(GreedyBot):
+    """Plays like a greedy bot, except that it walks out at its first prompt,
+    the way a closed tab does during a live prompt."""
+
+    def get_bid(self, timeout=None):
+        return "quit"
+
+
+def test_a_seat_that_quit_on_its_turn_stays_out_of_the_replay():
+    players = [GreedyBot("Ann", "ann"), _QuitsOnFirstTurn("Quitter", "quitter"), GreedyBot("Cal", "cal")]
+    game = _play(players, seed=4)
+    record = _record(game)
+    assert any(a["action"] == "quit" for a in record["actions"])
+    replay_record(record)
+    steps = replay_steps(record)["steps"]
+    quit_at = next(i for i, s in enumerate(steps) if s["kind"] == "quit")
+    assert all(not s["players"][steps[quit_at]["seat"]]["active"] for s in steps[quit_at:])

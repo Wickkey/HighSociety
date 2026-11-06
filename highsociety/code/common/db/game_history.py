@@ -2399,7 +2399,8 @@ def record_finished_game(*, room_code: str, seats: int, bot_mix: list,
                           auction_rounds: Optional[list] = None,
                           seed: Optional[int] = None, actions: Optional[list] = None,
                           rewarm_leaderboard: bool = True,
-                          on_new_achievements: Optional[Callable[[dict], None]] = None) -> dict:
+                          on_new_achievements: Optional[Callable[[dict], None]] = None,
+                          on_saved: Optional[Callable[[int], None]] = None) -> dict:
     """
     Returns {rating_key: {"old_rating", "new_rating", "rating_change"}} for
     every participant whose rating actually changed this game (a human's
@@ -2857,6 +2858,8 @@ def record_finished_game(*, room_code: str, seats: int, bot_mix: list,
         _refresh_cached_elo(username, new_rating)
     if on_new_achievements is not None and new_achievements:
         on_new_achievements(new_achievements)
+    if on_saved is not None and participants:
+        on_saved(game_id)
     if participants:
         # Any finished game can change the leaderboard -- not just Elo
         # (cache_refreshes), but games_played/games_won too, which move

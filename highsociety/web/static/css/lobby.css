@@ -2516,7 +2516,8 @@ button.secondary.standalone { margin-top: 0.9rem; display: inline-block; }
 /* Results popup: what to do next with this game, right under its table. */
 .game-detail-actions { display: flex; gap: 0.6rem; margin-top: 1rem; }
 .game-detail-actions button { flex: 1; width: auto; margin: 0; }
-.game-detail-actions button:disabled { opacity: 0.45; cursor: not-allowed; }
+.game-detail-actions button:disabled { opacity: 0.6; cursor: progress; }
+.review-error { margin: 0.6rem 0 0; color: var(--muted); font-size: 0.88rem; text-align: center; }
 
 /* Replay screen. */
 .replay-panel { max-width: 760px; margin-left: auto; margin-right: auto; }

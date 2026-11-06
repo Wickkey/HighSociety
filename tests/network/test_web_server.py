@@ -2956,11 +2956,31 @@ def test_replay_api_for_an_unknown_game_is_a_404_and_isnt_remembered(monkeypatch
     assert 10 not in web_server._replay_cache
 
 
-def test_the_replay_page_is_served_and_kept_out_of_search_results():
-    response = web_server.app.test_client().get("/replay/12")
+def test_the_review_page_is_served_and_kept_out_of_search_results():
+    response = web_server.app.test_client().get("/review/12")
     assert response.status_code == 200
     html = response.get_data(as_text=True)
-    assert "Game Replay" in html and "noindex" in html
+    assert "Game Review" in html and "noindex" in html
+
+
+def test_live_games_counts_games_and_waiting_people_but_says_nothing_about_them():
+    client = web_server.app.test_client()
+    with web_server._rooms_lock:
+        saved = dict(web_server._rooms)
+        web_server._rooms.clear()
+    try:
+        assert client.get("/api/live_games").get_json() == {
+            "games_in_progress": 0, "players_in_games": 0, "lobbies_waiting": 0}
+        code = client.post("/api/create_game", json={"seats": 3, "bot_mix": ["pass"], "bot_think_time": 0}).get_json()["room_code"]
+        room = web_server._get_room(code)
+        room.state = "in_progress"
+        assert client.get("/api/live_games").get_json()["games_in_progress"] == 1
+        room.state = "finished"
+        assert client.get("/api/live_games").get_json()["games_in_progress"] == 0
+    finally:
+        with web_server._rooms_lock:
+            web_server._rooms.clear()
+            web_server._rooms.update(saved)
 
 
 @pytest.mark.parametrize("bad", ['x"y', "o'neil", "<b>", "a&b", "a`b", "tab\tname"])

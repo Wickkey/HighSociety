@@ -1,4 +1,4 @@
-// Replay screen: steps through a finished game with a slider, arrows and
+// Game Review screen: steps through a finished game with a slider, arrows and
 // autoplay. The server sends the whole table at every moment (see
 // recording/game_replay.py's replay_steps), so moving anywhere is just drawing
 // that step: there's nothing to rewind.
@@ -13,9 +13,16 @@ let stepIndex = 0;
 let autoplayTimer = null;
 let loadingGameId = null; // stale-response guard: the newest screen open wins
 let returnTo = null;
+let returnUrl = null; // the finished screen's address holds its room, which Back must restore
 
 export function getReplayReturnTo() {
   return returnTo;
+}
+
+// Back to the results a review was opened from, room and rematch offer intact.
+export function returnToFinishedScreen() {
+  showScreen('screen-finished');
+  history.replaceState(null, '', returnUrl);
 }
 
 function nameOf(seat) {
@@ -168,29 +175,59 @@ function auctionStartIndex(direction) {
   return direction < 0 ? 0 : steps.length - 1;
 }
 
-export async function showReplayScreen(gameId, from = null) {
+const CANT_REVIEW = 'This game can\'t be reviewed.';
+const REVIEW_LOAD_FAILED = 'Couldn\'t load this review. Try again in a moment.';
+
+export function reviewUnavailableMessage(failure) {
+  return failure && failure.status === 409 ? CANT_REVIEW : REVIEW_LOAD_FAILED;
+}
+
+export function fetchReview(gameId) {
+  return fetchJSON(`/api/games/replay/${encodeURIComponent(gameId)}`);
+}
+
+// From a button: stays put while it loads, and only moves if there's something
+// to show. `say` puts the reason on the page the button is on.
+export async function openReview(gameId, from, say, stillWanted = () => true) {
+  let review;
+  try {
+    review = await fetchReview(gameId);
+  } catch (failure) {
+    say(reviewUnavailableMessage(failure));
+    return false;
+  }
+  if (!stillWanted()) return false;
+  showReplayScreen(gameId, from, review);
+  return true;
+}
+
+// `loaded` is the review when the caller already has it. Without it (a direct
+// link, where there's no earlier page to stay on) this screen loads it and says
+// so itself if it can't.
+export async function showReplayScreen(gameId, from = null, loaded = null) {
   stopAutoplayIfLoaded();
   replay = null;
   returnTo = from;
+  returnUrl = location.pathname + location.search;
   loadingGameId = gameId;
   showScreen('screen-replay');
-  setScreenPath(`/replay/${gameId}`);
+  setScreenPath(`/review/${gameId}`);
   hide($('replay-unavailable'));
   hide($('replay-table'));
   show($('replay-loading'));
-  let result = null;
+  let result = loaded;
   let failure = null;
-  try {
-    result = await fetchJSON(`/api/games/replay/${encodeURIComponent(gameId)}`);
-  } catch (e) {
-    failure = e;
+  if (!result) {
+    try {
+      result = await fetchReview(gameId);
+    } catch (e) {
+      failure = e;
+    }
   }
   if (loadingGameId !== gameId) return;
   hide($('replay-loading'));
   if (!result) {
-    $('replay-unavailable').textContent = failure && failure.status === 409
-      ? 'This game can\'t be replayed.'
-      : 'Couldn\'t load this replay. Try again in a moment.';
+    $('replay-unavailable').textContent = reviewUnavailableMessage(failure);
     show($('replay-unavailable'));
     return;
   }

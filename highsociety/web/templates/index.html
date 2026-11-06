@@ -764,12 +764,12 @@
       </div>
     </section>
 
-    <!-- ===================== REPLAY ===================== -->
+    <!-- ===================== GAME REVIEW ===================== -->
     <section id="screen-replay" class="screen hidden">
       <div class="card panel account-panel replay-panel">
         <button type="button" class="screen-back" id="btn-replay-back">← Back</button>
         <div class="replay-title-row">
-          <h2>Game Replay</h2>
+          <h2>Game Review</h2>
           <span id="replay-date" class="muted"></span>
         </div>
         <div id="replay-loading" class="replay-loading tile-loading-spinner"></div>
@@ -862,9 +862,10 @@
           <tbody id="game-detail-body"></tbody>
         </table>
         <div class="game-detail-actions">
-          <button type="button" id="game-detail-replay" class="secondary">Replay</button>
+          <button type="button" id="game-detail-replay" class="secondary">Review</button>
           <button type="button" id="game-detail-play-again" class="primary">Play again</button>
         </div>
+        <p id="game-detail-review-error" class="review-error hidden" role="status"></p>
         <div class="button-row modal-actions">
           <button type="button" id="game-detail-close" class="secondary">Close</button>
         </div>
@@ -1962,8 +1963,12 @@
           </p>
         </details>
 
+        <div class="finished-offers">
+          <button id="btn-request-rematch" class="primary hidden">Request Rematch</button>
+          <button type="button" id="btn-finished-review" class="secondary hidden">Review</button>
+        </div>
+        <p id="finished-review-error" class="review-error hidden" role="status"></p>
         <div id="rematch-panel" class="rematch-panel hidden">
-          <button id="btn-request-rematch" class="primary">Request Rematch</button>
           <div id="rematch-bot-form" class="rematch-bot-form hidden">
             <div class="rematch-bot-head">
               <h3>Choose your opponents</h3>

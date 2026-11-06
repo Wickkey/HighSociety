@@ -116,16 +116,23 @@ def _make_replay_seat_class():
                                and a.get("reason") != "disconnected"]
             self._liveness = [a for a in mine if a["action"] in LIVENESS_ACTIONS]
             self.decisions_used = 0
+            self._latest_check = 0
+            self._quit_at_check = None
 
         def send_message(self, *args, **kwargs) -> None:
             pass
 
         def replay_liveness(self, check: int) -> bool:
             """Connected as of liveness check `check`: every recorded change
-            for this seat seen at or before that check, applied in order."""
-            live = True
+            for this seat seen at or before that check, applied in order. A
+            quit on its own turn takes the seat out with no liveness row, so
+            it stays out until a reconnect recorded after that quit."""
+            self._latest_check = check
+            live = self._quit_at_check is None
             self.resigned = False
             for change in self._liveness:
+                if self._quit_at_check is not None and change["amount"] <= self._quit_at_check:
+                    continue
                 if change["amount"] <= check:
                     live = change["action"] == "reconnect"
                     self.resigned = change["action"] == "resign"
@@ -138,6 +145,8 @@ def _make_replay_seat_class():
             if action["action"] not in wanted:
                 return None
             self.decisions_used += 1
+            if action["action"] == "quit":
+                self._quit_at_check = self._latest_check
             return action
 
         def get_bid(self, timeout=None):

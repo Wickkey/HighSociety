@@ -325,6 +325,8 @@ class GameRoom:
         # username -> achievement ids this game newly unlocked. Set before
         # elo_changes, so a client that sees the Elo result has these too.
         self.new_achievements: dict[str, list[str]] = {}
+        # The saved game's id, once saved: what the finished screen's Review opens.
+        self.review_game_id: Optional[int] = None
         # sender -> recent chat/reaction timestamps, see _chat_allowed.
         self.chat_times: dict[str, list[float]] = {}
         # seat username -> current Elo, for the seats that are rated (see
@@ -371,6 +373,7 @@ class GameRoom:
             # Elo reveal data would otherwise be readable as if it belonged
             # to the game that's only just starting now.
             self.elo_changes = None
+            self.review_game_id = None
             # Setting the game up is inside the same guard as playing it: a
             # failure here used to escape the thread entirely, leaving the
             # room "starting" forever with every player waiting on a game
@@ -541,6 +544,13 @@ def _record_game_history(room: "GameRoom", game: PlayGame, started_at: datetime.
     def _store_new_achievements(unlocked: dict) -> None:
         room.new_achievements = unlocked
 
+    finished_room_game_id = room.game_id
+
+    def _store_saved_game_id(saved_game_id: int) -> None:
+        with room.lock:
+            if room.game_id == finished_room_game_id:  # a rematch may already be under way
+                room.review_game_id = saved_game_id
+
     def _store_elo_changes(changes: dict) -> None:
         # Written from the background write's own thread -- under the
         # lock since it's a genuine cross-thread write, even though a
@@ -566,6 +576,7 @@ def _record_game_history(room: "GameRoom", game: PlayGame, started_at: datetime.
         time_control=int(room.turn_time_limit) if room.turn_time_limit else None,
         on_complete=_store_elo_changes,
         on_new_achievements=_store_new_achievements,
+        on_saved=_store_saved_game_id,
     )
 
 
@@ -1499,7 +1510,7 @@ def api_rating_history(username):
 @app.route("/achievements")
 @app.route("/my-games")
 @app.route("/players/<username>")
-@app.route("/replay/<int:game_id>")
+@app.route("/review/<int:game_id>")
 def index(username=None, game_id=None):
     # Two different routes share this same `username` param, for two
     # different reasons -- neither actually reads it here:
@@ -1515,7 +1526,7 @@ def index(username=None, game_id=None):
     # Both are otherwise the same client-decides-what-to-show model every
     # other route on this one shared shell template already uses.
     path = request.path
-    if path.startswith(("/account/", "/players/", "/replay/")):
+    if path.startswith(("/account/", "/players/", "/review/")):
         path = path[:path.index("/", 1)]
     title, description = _PAGE_META.get(path, _PAGE_META["/"])
     return render_template(
@@ -1552,9 +1563,9 @@ _PAGE_META = {
     "/achievements": ("Achievements – High Society", _HOME_DESCRIPTION),
     "/my-games": ("My Games – High Society", _HOME_DESCRIPTION),
     "/players": ("Player Profile – High Society", _HOME_DESCRIPTION),
-    "/replay": ("Game Replay – High Society", _HOME_DESCRIPTION),
+    "/review": ("Game Review – High Society", _HOME_DESCRIPTION),
 }
-_PRIVATE_PATHS = {"/account", "/achievements", "/my-games", "/players", "/replay"}
+_PRIVATE_PATHS = {"/account", "/achievements", "/my-games", "/players", "/review"}
 _SITEMAP_PATHS = ["/", "/rules", "/play", "/host", "/join", "/leaderboard", "/privacy"]
 
 
@@ -1728,6 +1739,7 @@ def _status_payload(room: Optional[GameRoom]) -> dict:
         # until it's non-null. See GameRoom.elo_changes's own comment.
         payload["elo_changes"] = room.elo_changes
         payload["new_achievements"] = room.new_achievements
+        payload["review_game_id"] = room.review_game_id
 
         # Everything a finished-screen client needs to render the rematch
         # panel from a plain page load/status poll, not just from the live
@@ -1744,6 +1756,27 @@ def _status_payload(room: Optional[GameRoom]) -> dict:
 @app.route("/api/status")
 def api_status():
     return jsonify(_status_payload(_get_room(request.args.get("room"))))
+
+
+@app.route("/api/live_games")
+def api_live_games():
+    """How many games are being played right now, and how many people are in
+    them or waiting in a lobby. A deploy restarts this process, and live games
+    only exist in its memory, so this is what to check before pushing. Counts
+    only: nothing about who or where."""
+    with _rooms_lock:
+        rooms = list(_rooms.values())
+
+    def humans(room) -> int:
+        return sum(1 for p in list(room.players) if isinstance(p, NetworkPlayer) and p.active)
+
+    in_progress = [r for r in rooms if r.state in ("starting", "in_progress")]
+    waiting = [r for r in rooms if r.state == "lobby" and humans(r)]
+    return jsonify({
+        "games_in_progress": len(in_progress),
+        "players_in_games": sum(humans(r) for r in in_progress),
+        "lobbies_waiting": len(waiting),
+    })
 
 
 @app.route("/api/rooms")
@@ -2063,6 +2096,7 @@ def _maybe_start_rematch(room: "GameRoom") -> None:
         room.game_id = generate_game_id()
         room.elo_changes = None
         room.new_achievements = {}
+        room.review_game_id = None
         room.game = None
         for p in eligible:
             p.game_id = room.game_id

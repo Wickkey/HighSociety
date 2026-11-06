@@ -9,6 +9,7 @@
 // game/gameState.js, game/gameEvents.js, and game/gameRenderer.js import
 // nothing from this file, so those three imports below are plain, ordinary,
 // non-circular static imports.
+import { showToast } from '../ui/notifications.js';
 import { $, hide, show, showError, showScreen } from '../utils/dom.js';
 import { escapeHtml } from '../utils/formatting.js';
 import { clearRejoinInfo, currentRoomCode, fetchJSON, lastStatus, loadRejoinInfo, setGameFinished } from './lobby.js';
@@ -105,6 +106,7 @@ export function renderFinished(status) {
   rematchBotSeats = status.rematch_bot_seats || 0;
   rematchDefaultBotMix = status.rematch_default_bot_mix || [];
   renderRematchPanel();
+  trackReviewButton(status);
 
   // Guarded by game_id, not just game.myUsername -- renderFinished itself
   // can legitimately run more than once for the exact same finished game
@@ -273,6 +275,47 @@ function animateEloNumber(el, from, to, durationMs = 1100) {
 // to actually request/vote on a rematch over, so this hides the whole
 // panel for anyone else rather than showing controls that couldn't do
 // anything.
+const REVIEW_POLL_MS = 1000;
+const REVIEW_POLL_LIMIT = 30;
+let reviewTrackedGameId = null; // the newest game wins, if a rematch starts mid-poll
+
+// True once the button has reached its final state. It waits, disabled, in its
+// own slot while the game saves; a game that's never saved (the tutorial, no
+// database) has nothing to review, so the button goes.
+function paintReviewButton(status) {
+  const button = $('btn-finished-review');
+  if (status.review_game_id != null) {
+    button.dataset.gameId = status.review_game_id;
+    button.disabled = false;
+    show(button);
+    return true;
+  }
+  if (status.elo_changes == null) {
+    button.disabled = true;
+    show(button);
+    return false;
+  }
+  hide(button);
+  return true;
+}
+
+// Separate from the Elo reveal's own polling, which only runs for players:
+// spectators can review too.
+async function trackReviewButton(status) {
+  reviewTrackedGameId = status.game_id;
+  hide($('finished-review-error'));
+  if (paintReviewButton(status)) return;
+  const roomCode = currentRoomCode();
+  for (let i = 0; i < REVIEW_POLL_LIMIT; i += 1) {
+    await new Promise((resolve) => { setTimeout(resolve, REVIEW_POLL_MS); });
+    if (reviewTrackedGameId !== status.game_id) return;
+    const fresh = await fetchJSON(`/api/status?room=${encodeURIComponent(roomCode)}`).catch(() => null);
+    if (reviewTrackedGameId !== status.game_id) return;
+    if (fresh && fresh.game_id === status.game_id && paintReviewButton(fresh)) return;
+  }
+  hide($('btn-finished-review')); // the save never landed
+}
+
 export function renderRematchPanel() {
   const panel = $('rematch-panel');
   // A rematch vote makes no sense for the fixed-seed, bots-only-vs-you
@@ -280,12 +323,14 @@ export function renderRematchPanel() {
   // (see onStartTutorial), not reusing this one's votes/bot-mix flow.
   if (game.isTutorial) {
     hide(panel);
+    hide($('btn-request-rematch'));
     show($('tutorial-finished-actions'));
     return;
   }
   hide($('tutorial-finished-actions'));
   if (!ws || ws.readyState !== WebSocket.OPEN || !game.myUsername) {
     hide(panel);
+    hide($('btn-request-rematch'));
     return;
   }
   show(panel);
@@ -442,6 +487,9 @@ function showRematchDeclinedNotice(declinedBy) {
 // to know these three cases' individual handling, just that they're
 // "rematch messages."
 export function handleRematchMessage(msg) {
+  if (msg.message_type === 'REMATCH_UPDATE' && !$('screen-replay').classList.contains('hidden')) {
+    showToast('Rematch requested. Go back to answer it.');
+  }
   if (msg.message_type === 'REMATCH_UPDATE') {
     currentRematch = { requestedBy: msg.data.requested_by, botMix: msg.data.bot_mix, votes: msg.data.votes };
     renderRematchPanel();

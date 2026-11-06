@@ -13,7 +13,7 @@ import { readCache, swr, writeCache } from '../utils/swrCache.js';
 // gameHistory.js), never at any module's own top-level evaluation.
 import { showPlayerProfileScreen } from '../lobby/playerProfile.js';
 import { playAgain } from '../lobby/lobby.js';
-import { showReplayScreen } from '../lobby/replay.js';
+import { openReview } from '../lobby/replay.js';
 
 // In-page confirm dialog (resign, leaving mid-game — see gameActions.js's
 // onResign/lobby.js's onHomeLinkClick) styled like every other panel in the
@@ -84,10 +84,27 @@ export function closeProfileModal() { hide($('profile-view-modal')); }
 // list; this owns the one detail view every caller opens into).
 let gameDetailActions = null;
 
-export function onGameDetailReplayClick() {
+const CANT_REVIEW = 'This game can\'t be reviewed.';
+
+function sayInGameDetail(message) {
+  $('game-detail-review-error').textContent = message;
+  show($('game-detail-review-error'));
+}
+
+// Stays on the popup until there's a review to open. A game with no seed can't
+// have one, so that doesn't need the round trip.
+export async function onGameDetailReplayClick() {
+  const actions = gameDetailActions;
+  hide($('game-detail-review-error'));
+  if (!actions.replayable) { sayInGameDetail(CANT_REVIEW); return; }
+  const button = $('game-detail-replay');
+  button.disabled = true;
   const from = gameDetailOpenerScreenId;
-  closeGameDetailModal();
-  showReplayScreen(gameDetailActions.gameId, from);
+  // Closed or moved to another game meanwhile: it's no longer theirs to act on.
+  const stillHere = () => gameDetailActions === actions && !$('game-detail-modal').classList.contains('hidden');
+  const opened = await openReview(actions.gameId, from, (message) => { if (stillHere()) sayInGameDetail(message); }, stillHere);
+  button.disabled = false;
+  if (opened) closeGameDetailModal();
 }
 
 export function onGameDetailPlayAgainClick() {
@@ -108,9 +125,9 @@ export async function openGameDetailModal(gameId, { replayable = false, setup = 
   const body = $('game-detail-body');
   body.innerHTML = '';
   $('game-detail-date').textContent = '';
-  gameDetailActions = { gameId, setup };
-  $('game-detail-replay').disabled = !replayable;
-  $('game-detail-replay').title = replayable ? '' : 'This game can\'t be replayed.';
+  gameDetailActions = { gameId, setup, replayable };
+  $('game-detail-replay').disabled = false;
+  hide($('game-detail-review-error'));
   $('game-detail-play-again').classList.toggle('hidden', !setup);
   show($('game-detail-modal'));
   try {
