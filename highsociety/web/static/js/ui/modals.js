@@ -12,6 +12,8 @@ import { readCache, swr, writeCache } from '../utils/swrCache.js';
 // a function body (onGameDetailTableClick below; wireRowClicks in
 // gameHistory.js), never at any module's own top-level evaluation.
 import { showPlayerProfileScreen } from '../lobby/playerProfile.js';
+import { playAgain } from '../lobby/lobby.js';
+import { showReplayScreen } from '../lobby/replay.js';
 
 // In-page confirm dialog (resign, leaving mid-game — see gameActions.js's
 // onResign/lobby.js's onHomeLinkClick) styled like every other panel in the
@@ -80,7 +82,20 @@ export function closeProfileModal() { hide($('profile-view-modal')); }
 // widget, My Games, Account's Recent Activity, and a Player Profile's own
 // game history (see lobby/gameHistory.js, which only ever fetches the
 // list; this owns the one detail view every caller opens into).
-export async function openGameDetailModal(gameId) {
+let gameDetailActions = null;
+
+export function onGameDetailReplayClick() {
+  const from = gameDetailOpenerScreenId;
+  closeGameDetailModal();
+  showReplayScreen(gameDetailActions.gameId, from);
+}
+
+export function onGameDetailPlayAgainClick() {
+  closeGameDetailModal();
+  playAgain(gameDetailActions.setup);
+}
+
+export async function openGameDetailModal(gameId, { replayable = false, setup = null } = {}) {
   // Captured the instant the modal opens (before anything else changes)
   // -- this is a real screen id (e.g. 'screen-host-setup' for Home,
   // 'screen-game-history' for My Games, 'screen-account'), since the
@@ -93,6 +108,10 @@ export async function openGameDetailModal(gameId) {
   const body = $('game-detail-body');
   body.innerHTML = '';
   $('game-detail-date').textContent = '';
+  gameDetailActions = { gameId, setup };
+  $('game-detail-replay').disabled = !replayable;
+  $('game-detail-replay').title = replayable ? '' : 'Replays aren\'t available for older games';
+  $('game-detail-play-again').disabled = !setup;
   show($('game-detail-modal'));
   try {
     // A finished game never changes, so a cached copy is final -- only a

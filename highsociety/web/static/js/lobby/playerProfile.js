@@ -56,6 +56,11 @@ export function getPlayerProfileReturnTo() {
   return profileReturnTo;
 }
 
+// Back to the profile a replay was opened from, keeping where its own Back goes.
+export function reopenPlayerProfile() {
+  showPlayerProfileScreen(profileUsername, profileReturnTo);
+}
+
 export function showPlayerProfileScreen(username, returnTo = 'leaderboard') {
   profileUsername = username;
   profileOffset = 0;

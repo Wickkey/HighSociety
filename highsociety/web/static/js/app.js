@@ -3,7 +3,7 @@
 // its own feature module; this file only imports and attaches them.
 import { $, show, showScreen } from './utils/dom.js';
 import {
-  resolveConfirmDialog, openProfileModal, closeProfileModal, closeGameDetailModal, onGameDetailTableClick,
+  resolveConfirmDialog, openProfileModal, closeProfileModal, closeGameDetailModal, onGameDetailReplayClick, onGameDetailPlayAgainClick, onGameDetailTableClick,
 } from './ui/modals.js';
 import { initReplay, getReplayReturnTo } from './lobby/replay.js';
 import { onSpecChatSend, onPlayerChatSend, initChat } from './ui/chat.js';
@@ -37,7 +37,7 @@ import {
   onLeaderboardTabClick,
 } from './lobby/leaderboard.js';
 import {
-  getPlayerProfileReturnTo, onPlayerProfileHistoryPrevClick, onPlayerProfileHistoryMoreClick, onPlayerProfileAchievementsToggle, onPlayerProfileHistoryNextClick,
+  getPlayerProfileReturnTo, reopenPlayerProfile, onPlayerProfileHistoryPrevClick, onPlayerProfileHistoryMoreClick, onPlayerProfileAchievementsToggle, onPlayerProfileHistoryNextClick,
   onPlayerProfileEloChartRangeClick,
 } from './lobby/playerProfile.js';
 import { onPlayClick, onFindMatch, onMatchmakingCancel, onMatchmakingAddBots, onMatchmakingSeatButtonClick } from './lobby/matchmaking.js';
@@ -225,11 +225,14 @@ function wireStaticHandlers() {
     const from = getReplayReturnTo();
     if (from === 'screen-game-history') { showGameHistoryScreen(getGameHistoryReturnTo()); return; }
     if (from === 'screen-account') { showAccountScreen(); return; }
+    if (from === 'screen-player-profile') { reopenPlayerProfile(); return; }
     showScreen('screen-host-setup'); showHomeTiles(); startRoomsPolling();
   }));
   $('btn-player-profile-history-prev').addEventListener('click', onPlayerProfileHistoryPrevClick);
   $('btn-player-profile-history-next').addEventListener('click', onPlayerProfileHistoryNextClick);
   $('game-detail-close').addEventListener('click', closeGameDetailModal);
+  $('game-detail-replay').addEventListener('click', onGameDetailReplayClick);
+  $('game-detail-play-again').addEventListener('click', onGameDetailPlayAgainClick);
   $('btn-account-save').addEventListener('click', onAccountSaveClick);
   $('btn-account-edit-username').addEventListener('click', onAccountEditUsernameClick);
   $('btn-account-cancel-edit').addEventListener('click', onAccountCancelEditClick);

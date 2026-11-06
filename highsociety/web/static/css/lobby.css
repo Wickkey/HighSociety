@@ -2513,36 +2513,10 @@ button.secondary.standalone { margin-top: 0.9rem; display: inline-block; }
 .achievements-progress-track { height: 8px; border-radius: 999px; background: var(--panel-bg-log); overflow: hidden; }
 #achievements-progress-fill { display: block; height: 100%; width: 0; border-radius: inherit; background: var(--accent); transition: width 0.3s ease; }
 
-/* Game history rows: Replay and Play again sit beside the result. A row is a
-   div, not a button, because it holds buttons of its own. */
-.recent-game-row:focus-visible { outline: 2px solid var(--accent-light); outline-offset: 2px; }
-.recent-game-actions { display: flex; flex: none; align-items: center; gap: 0.35rem; margin-left: auto; cursor: default; }
-.game-action-btn {
-  width: auto;
-  margin: 0;
-  padding: 0.3rem 0.65rem;
-  border: 1px solid var(--panel-border);
-  border-radius: 999px;
-  background: var(--panel-bg);
-  box-shadow: none;
-  color: var(--text);
-  font-size: 0.78rem;
-  font-weight: 700;
-  white-space: nowrap;
-  cursor: pointer;
-}
-.game-action-btn:hover:not(:disabled) { border-color: var(--accent-light); background: var(--accent-soft); box-shadow: none; transform: none; }
-.game-action-btn:disabled { opacity: 0.45; cursor: not-allowed; }
-/* Quiet until asked for: a list of games shouldn't be a column of gold buttons
-   competing with the screen's real main action. */
-.game-action-btn.primary-action:hover:not(:disabled) { border-color: transparent; background: var(--accent); color: #fff; }
-@media (max-width: 560px) {
-  .recent-game-row { flex-wrap: wrap; }
-  /* Under the result on a phone, so the names keep their width. */
-  .recent-game-actions { order: 5; width: 100%; margin-left: 0; }
-  .recent-game-actions .game-action-btn { flex: 1; padding: 0.45rem 0.65rem; }
-  .recent-game-row .recent-game-chevron { margin-left: auto; }
-}
+/* Results popup: what to do next with this game, right under its table. */
+.game-detail-actions { display: flex; gap: 0.6rem; margin-top: 1rem; }
+.game-detail-actions button { flex: 1; width: auto; margin: 0; }
+.game-detail-actions button:disabled { opacity: 0.45; cursor: not-allowed; }
 
 /* Replay screen. */
 .replay-panel { max-width: 760px; margin-left: auto; margin-right: auto; }
