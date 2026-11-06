@@ -1,10 +1,11 @@
 // Entry point: wires every static DOM event listener and boots the app on
 // DOMContentLoaded. Owns nothing itself -- every handler it wires lives in
 // its own feature module; this file only imports and attaches them.
-import { $, show, showScreen } from './utils/dom.js';
+import { $, hide, show, showScreen } from './utils/dom.js';
 import {
-  resolveConfirmDialog, openProfileModal, closeProfileModal, closeGameDetailModal, onGameDetailTableClick,
+  resolveConfirmDialog, openProfileModal, closeProfileModal, closeGameDetailModal, onGameDetailReplayClick, onGameDetailPlayAgainClick, onGameDetailTableClick,
 } from './ui/modals.js';
+import { initReplay, getReplayReturnTo, returnToFinishedScreen, openReview } from './lobby/replay.js';
 import { onSpecChatSend, onPlayerChatSend, initChat } from './ui/chat.js';
 import {
   onContinueAsGuest, onShuffleUsername, onLoginUsernameContinue, onLoginBack, showChooseStep, initGoogleSignIn,
@@ -36,7 +37,7 @@ import {
   onLeaderboardTabClick,
 } from './lobby/leaderboard.js';
 import {
-  getPlayerProfileReturnTo, onPlayerProfileHistoryPrevClick, onPlayerProfileHistoryMoreClick, onPlayerProfileAchievementsToggle, onPlayerProfileHistoryNextClick,
+  getPlayerProfileReturnTo, reopenPlayerProfile, onPlayerProfileHistoryPrevClick, onPlayerProfileHistoryMoreClick, onPlayerProfileAchievementsToggle, onPlayerProfileHistoryNextClick,
   onPlayerProfileEloChartRangeClick,
 } from './lobby/playerProfile.js';
 import { onPlayClick, onFindMatch, onMatchmakingCancel, onMatchmakingAddBots, onMatchmakingSeatButtonClick } from './lobby/matchmaking.js';
@@ -66,6 +67,14 @@ window.__hsDebug = {
   showReactionBubble: gameEventsModule.showReactionBubble,
   renderOpponents: gameRendererModule.renderOpponents,
 };
+
+function onReviewBack() {
+  const from = getReplayReturnTo();
+  if (from === 'screen-game-history') { showGameHistoryScreen(getGameHistoryReturnTo()); return; }
+  if (from === 'screen-account') { showAccountScreen(); return; }
+  if (from === 'screen-player-profile') { reopenPlayerProfile(); return; }
+  showScreen('screen-host-setup'); showHomeTiles(); startRoomsPolling();
+}
 
 function wireStaticHandlers() {
   $('confirm-modal-cancel').addEventListener('click', () => resolveConfirmDialog(false));
@@ -219,9 +228,28 @@ function wireStaticHandlers() {
     // the tile picker -- Home has no extra state of its own to restore.
     showScreen('screen-host-setup'); showHomeTiles(); startRoomsPolling();
   }));
+  initReplay();
+  $('btn-replay-back').addEventListener('click', () => {
+    // The finished screen's socket stays open for a rematch, so this is a plain
+    // step back, not a leave.
+    if (getReplayReturnTo() === 'screen-finished') { returnToFinishedScreen(); return; }
+    navigateFromSidebar(onReviewBack);
+  });
+  $('btn-finished-review').addEventListener('click', async (e) => {
+    const button = e.currentTarget;
+    hide($('finished-review-error'));
+    button.disabled = true;
+    await openReview(button.dataset.gameId, 'screen-finished', (message) => {
+      $('finished-review-error').textContent = message;
+      show($('finished-review-error'));
+    });
+    button.disabled = false;
+  });
   $('btn-player-profile-history-prev').addEventListener('click', onPlayerProfileHistoryPrevClick);
   $('btn-player-profile-history-next').addEventListener('click', onPlayerProfileHistoryNextClick);
   $('game-detail-close').addEventListener('click', closeGameDetailModal);
+  $('game-detail-replay').addEventListener('click', onGameDetailReplayClick);
+  $('game-detail-play-again').addEventListener('click', onGameDetailPlayAgainClick);
   $('btn-account-save').addEventListener('click', onAccountSaveClick);
   $('btn-account-edit-username').addEventListener('click', onAccountEditUsernameClick);
   $('btn-account-cancel-edit').addEventListener('click', onAccountCancelEditClick);

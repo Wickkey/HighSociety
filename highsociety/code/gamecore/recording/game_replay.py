@@ -39,8 +39,6 @@ Actions:
             check number at which it was seen (see PlayGame._sync_liveness),
             which is what lets the replay drop the seat at the same moment
 """
-import contextlib
-import time
 from collections import Counter
 from typing import Optional
 
@@ -118,16 +116,23 @@ def _make_replay_seat_class():
                                and a.get("reason") != "disconnected"]
             self._liveness = [a for a in mine if a["action"] in LIVENESS_ACTIONS]
             self.decisions_used = 0
+            self._latest_check = 0
+            self._quit_at_check = None
 
         def send_message(self, *args, **kwargs) -> None:
             pass
 
         def replay_liveness(self, check: int) -> bool:
             """Connected as of liveness check `check`: every recorded change
-            for this seat seen at or before that check, applied in order."""
-            live = True
+            for this seat seen at or before that check, applied in order. A
+            quit on its own turn takes the seat out with no liveness row, so
+            it stays out until a reconnect recorded after that quit."""
+            self._latest_check = check
+            live = self._quit_at_check is None
             self.resigned = False
             for change in self._liveness:
+                if self._quit_at_check is not None and change["amount"] <= self._quit_at_check:
+                    continue
                 if change["amount"] <= check:
                     live = change["action"] == "reconnect"
                     self.resigned = change["action"] == "resign"
@@ -140,6 +145,8 @@ def _make_replay_seat_class():
             if action["action"] not in wanted:
                 return None
             self.decisions_used += 1
+            if action["action"] == "quit":
+                self._quit_at_check = self._latest_check
             return action
 
         def get_bid(self, timeout=None):
@@ -168,18 +175,6 @@ def _make_replay_seat_class():
     return ReplaySeat
 
 
-@contextlib.contextmanager
-def _no_sleep():
-    # Bots pace themselves with time.sleep; replay seats don't, but the
-    # engine's own pacing still might -- a replay should never wait.
-    original = time.sleep
-    time.sleep = lambda *a, **k: None
-    try:
-        yield
-    finally:
-        time.sleep = original
-
-
 def _comparable(actions: list[dict]) -> list[tuple]:
     rows = []
     for a in actions:
@@ -191,19 +186,71 @@ def _comparable(actions: list[dict]) -> list[tuple]:
     return rows
 
 
-def replay_record(record: dict) -> dict:
-    """
-    Rebuilds the game `record` describes from nothing but its seed and
-    actions, and raises ReplayMismatch at the first difference: any bid,
-    pass, quit or discard (who, when, how much, which cards), any round's
-    card, recipient or price, or any seat's final standing. Returns the
-    rebuilt game's own record.
+def _make_stepping_game_class():
+    from highsociety.code.gamecore.game_manager.auction_information import summarize_card
+    from highsociety.code.gamecore.game_manager.gameplay import PlayGame
 
-    Disconnect/reconnect rows are inputs (they drive when a replay seat
-    drops), so they're checked by their consequences -- the forced passes
-    and quits they cause -- rather than compared row by row. A timeout is
-    replayed as the pass it became.
-    """
+    class SteppingGame(PlayGame):
+        """A replayed game that also keeps a snapshot of the table after every
+        moment worth showing. Only reads the game's state, so it plays out
+        exactly as the plain replay does."""
+
+        def __init__(self, *args, **kwargs):
+            self.steps = []
+            self._step_card = None
+            super().__init__(*args, **kwargs)
+
+        def _step(self, kind: str, seat=None, amount=None, reason=None) -> None:
+            card = self._step_card
+            self.steps.append({
+                "kind": kind,
+                "round": self._round,
+                "seat": seat,
+                "amount": amount,
+                "reason": reason,
+                "card": card,
+                "top_bid": max(p.current_bid_value for p in self.players),
+                "players": [{
+                    "money": [c.value for c in p.money_cards],
+                    "bid": [c.value for c in p.current_money_card_bids],
+                    "cards": [_slim_card(c) for c in p.status_cards],
+                    "points": p.points,
+                    "in_auction": p.current_participation_in_auction,
+                    "active": self._is_active(p),
+                } for p in self.players],
+            })
+
+        def _log_action(self, player, action, amount=None, cards=None, think_ms=None, reason=None, record=None):
+            super()._log_action(player, action, amount=amount, cards=cards, think_ms=think_ms,
+                                reason=reason, record=record)
+            # A liveness row's amount is an internal check number, not a value.
+            shown = None if action in LIVENESS_ACTIONS else amount
+            self._step(action, seat=self.players.index(player), amount=shown, reason=reason)
+
+        def _broadcast_auction_update(self, kind, status_card, **extra):
+            super()._broadcast_auction_update(kind, status_card, **extra)
+            if kind == "auction_start":
+                self._step_card = _slim_card(status_card)
+                self._step("auction_start")
+
+        def _broadcast_auction_result(self, record):
+            super()._broadcast_auction_result(record)
+            winner = next((i for i, p in enumerate(self.players) if p.username == record.recipient), None)
+            self._step("auction_result", seat=winner,
+                       amount=record.money_spent.get(record.recipient) if record.recipient else None)
+
+    def _slim_card(card) -> dict:
+        return {k: v for k, v in summarize_card(card).items() if k != "description"}
+
+    return SteppingGame
+
+
+def _replay_and_verify(record: dict, game_class=None):
+    """Plays `record` back on a `game_class` (default PlayGame) and raises at
+    the first difference from what's recorded. Returns the finished game.
+
+    Pace_events is off, so nothing here waits: this can run inside the web
+    server next to live games without touching them."""
     from highsociety.code.gamecore.game_manager import disgrace_settlement as settlements
     from highsociety.code.gamecore.game_manager.auction_history import AuctionHistory
     from highsociety.code.gamecore.game_manager.gameplay import PlayGame
@@ -219,14 +266,18 @@ def replay_record(record: dict) -> dict:
     seats = [ReplaySeat(s["seat"], s["name"], s["username"], record["actions"])
              for s in sorted(record["seats"], key=lambda s: s["seat"])]
     settlement = getattr(settlements, record.get("settlement") or "ForfeitSettlement")()
-    game = PlayGame(players=list(seats), spectators=[], mode="network", seed=record["seed"],
-                    turn_duration=None, disgrace_settlement=settlement,
-                    auction_history=AuctionHistory(), pace_events=False, preseated=True)
+    game = (game_class or PlayGame)(players=list(seats), spectators=[], mode="network", seed=record["seed"],
+                                    turn_duration=None, disgrace_settlement=settlement,
+                                    auction_history=AuctionHistory(), pace_events=False, preseated=True)
     if game.green_card_limit != record.get("green_card_limit", game.green_card_limit):
         raise ReplayUnsupported(f"recorded with green_card_limit={record['green_card_limit']}, "
                                 f"engine now uses {game.green_card_limit}")
-    with _no_sleep():
+    try:
         game.play_game()
+    except ReplayMismatch:
+        raise
+    except Exception as e:  # noqa: BLE001 -- e.g. a recorded bid of cards this replay's seat no longer holds
+        raise ReplayMismatch(f"the engine rejected a recorded action: {e}") from e
     rebuilt = game_record(game)
 
     logged, replayed = _comparable(record["actions"]), _comparable(rebuilt["actions"])
@@ -244,4 +295,48 @@ def replay_record(record: dict) -> dict:
     unused = [s.seat for s in seats if s.decisions_used != len(s._decisions)]
     if unused:
         raise ReplayMismatch(f"seats {unused} have recorded actions the replay never asked for")
-    return rebuilt
+    return game
+
+
+def replay_record(record: dict) -> dict:
+    """
+    Rebuilds the game `record` describes from nothing but its seed and
+    actions, and raises ReplayMismatch at the first difference: any bid,
+    pass, quit or discard (who, when, how much, which cards), any round's
+    card, recipient or price, or any seat's final standing. Returns the
+    rebuilt game's own record.
+
+    Disconnect/reconnect rows are inputs (they drive when a replay seat
+    drops), so they're checked by their consequences -- the forced passes
+    and quits they cause -- rather than compared row by row. A timeout is
+    replayed as the pass it became.
+    """
+    return game_record(_replay_and_verify(record))
+
+
+def replay_steps(record: dict) -> dict:
+    """
+    What the replay screen plays: every moment of the game `record` describes
+    with the whole table's state at that moment, including every hand. Checked
+    against the record first, so a game the current rules play out differently
+    (raises ReplayMismatch) is never shown wrongly.
+
+    {"seats": [{"seat", "name", "kind"}, ...],
+     "steps": [{"kind": "auction_start" | "bid" | "pass" | "fold" | "quit" | "discard" | "disconnect"
+                        | "reconnect" | "resign" | "auction_result" | "game_over",
+                "round", "seat", "amount", "reason", "card", "top_bid",
+                "players": [{"money", "bid", "cards", "points", "in_auction", "active"}, ...]}, ...],
+     "standings": [{"seat", "points", "money_left", "is_winner", "eliminated", "left"}, ...]}
+
+    `players` is in seat order. `left` means still out at the final tally.
+    """
+    game = _replay_and_verify(record, _make_stepping_game_class())
+    game._step("game_over")
+    rebuilt = game_record(game)
+    active = {s["username"]: s["active"] for s in game.final_standings}
+    usernames = [p.username for p in game.players]
+    return {
+        "seats": [{"seat": s["seat"], "name": s["name"], "kind": s["kind"]} for s in rebuilt["seats"]],
+        "steps": game.steps,
+        "standings": [{**s, "left": not active[usernames[s["seat"]]]} for s in rebuilt["standings"]],
+    }

@@ -19,7 +19,7 @@ import {
 } from '../auth/profile.js';
 import { game, resetGameState, seedOpponents, applyRoomDisplaySettings } from '../game/gameState.js';
 import { renderOpponents } from '../game/gameRenderer.js';
-import { ws, closeSocket, attemptReconnect, connectPlayerSocket, connectSpectatorSocket } from '../network/websocket.js';
+import { ws, sendIfOpen, closeSocket, attemptReconnect, connectPlayerSocket, connectSpectatorSocket } from '../network/websocket.js';
 import { setPendingJoin, setPendingSpectate } from '../network/messages.js';
 import { confirmDialog } from '../ui/modals.js';
 import { renderFinished } from './rematch.js';
@@ -217,11 +217,7 @@ export async function loadHomeGlobalStats() {
 }
 
 // Clears whatever this tab knew about being in a room -- the part every
-// "leave" path needs regardless of what gets shown next. clearRejoin is
-// false only for the "clicked the High Society title mid-game" path (see
-// onHomeLinkClick) — that's meant to behave like closing the tab, which
-// stays reconnectable, not like clicking "Return to Home" after the
-// game's already over, which has nothing left to reconnect to.
+// "leave" path needs regardless of what gets shown next.
 //
 // Split out from leaveToHome (below) specifically so navigateFromSidebar
 // can reuse just this half without also paying for leaveToHome's own
@@ -231,8 +227,8 @@ export async function loadHomeGlobalStats() {
 // wastefully fetched/rendered the tile picker's Recent Games and global
 // stats, visibly flickering, before switching to the screen actually
 // requested.
-function resetRoomState(clearRejoin) {
-  if (clearRejoin) clearRejoinInfo(currentRoomCodeValue);
+function resetRoomState() {
+  clearRejoinInfo(currentRoomCodeValue);
   currentRoomCodeValue = null;
   if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
   clearReconnectBackoff();
@@ -254,9 +250,9 @@ function resetRoomState(clearRejoin) {
 // an open socket on a started game -- gameFinished having just been reset
 // below -- and asked "Leave the game?" for a game that was over, and (b)
 // the server still counted this player at the table for a rematch vote.
-export function leaveToHome(clearRejoin = true) {
+export function leaveToHome() {
   closeSocket();
-  resetRoomState(clearRejoin);
+  resetRoomState();
   showScreen('screen-host-setup');
   showHomeTiles();
   renderProfileChip();
@@ -268,39 +264,31 @@ export function leaveToHome(clearRejoin = true) {
 // leaving should warn first, shared by the tab-close warning and the
 // "High Society" home-link click.
 export function isActivelyPlayingLiveGame() {
-  return !!(ws && ws.readyState === WebSocket.OPEN && game && game.round > 0 && !gameFinished);
+  return !!(ws && ws.readyState === WebSocket.OPEN && game && game.myUsername && game.round > 0
+    && !gameFinished && !hasResigned);
 }
 
-// Shared by onHomeLinkClick and navigateFromSidebar below: if actually
-// mid-game, confirm first (declining aborts the whole navigation);
-// otherwise there's nothing to ask about. Returns null if declined,
-// otherwise the midGame flag itself (needed by both callers to decide
-// clearRejoin -- see resetRoomState's own comment on why that differs
-// between "closed the tab" and "the game's already over").
-async function confirmLeaveMidGameIfNeeded() {
-  const midGame = isActivelyPlayingLiveGame();
-  if (midGame) {
-    const ok = await confirmDialog('Leave the game? You can rejoin later.', 'Leave');
-    if (!ok) return null;
-  }
-  return midGame;
+// Shared by onHomeLinkClick and navigateFromSidebar below. Leaving a game you're
+// playing from inside the app means resigning, and the dialog says so. Returns
+// false if they chose to stay. Closing the tab is different: a browser can't
+// reliably send anything on the way out, so that stays a dropped connection,
+// with the usual chance to come back.
+async function confirmLeavingGame() {
+  if (!isActivelyPlayingLiveGame()) return true;
+  const ok = await confirmDialog('Go to home? This resigns you from the game.', 'Resign');
+  if (!ok) return false;
+  // Sent before the socket closes, and delivered ahead of the close. Sets no
+  // local state: the caller is about to reset all of it.
+  sendIfOpen({ message_type: 'RESIGN' });
+  return true;
 }
 
-// The "High Society" wordmark doubles as a home link (most sites' logos
-// do) — most of the time that's a free action, but mid-game it needs the
-// same confirmation a browser's own "are you sure you want to leave"
-// would give, and it closes the socket itself first rather than leaving it
-// dangling while the UI has already moved on. Closing (rather than
-// resigning) is deliberate: this should behave exactly like closing the
-// tab would — recoverable via the room's own reconnect flow — not like
-// clicking Resign, which is permanent.
+// The "High Society" wordmark doubles as a home link (most sites' logos do).
 // Returns whether it actually left (false only if a mid-game confirm was
 // shown and declined).
 export async function onHomeLinkClick() {
-  const midGame = await confirmLeaveMidGameIfNeeded();
-  if (midGame === null) return false;
-  closeSocket();
-  leaveToHome(!midGame);
+  if (!(await confirmLeavingGame())) return false;
+  leaveToHome();
   return true;
 }
 
@@ -322,10 +310,9 @@ export async function onHomeLinkClick() {
 // defaults to a no-op for callers -- every screen's own back button --
 // that just want the teardown with nothing further to do).
 export async function navigateFromSidebar(afterHome = () => {}) {
-  const midGame = await confirmLeaveMidGameIfNeeded();
-  if (midGame === null) return;
+  if (!(await confirmLeavingGame())) return;
   closeSocket();
-  resetRoomState(!midGame);
+  resetRoomState();
   renderProfileChip();
   afterHome();
 }
@@ -657,6 +644,23 @@ function syncBotSeatCapacity() {
   summary.querySelector('.host-seat-summary-text').innerHTML =
     `You + <strong>${bots} bot${bots === 1 ? '' : 's'}</strong> = <strong>${filled} of ${seats}</strong> seats filled`;
   summary.classList.toggle('full', filled === seats);
+}
+
+// Play again: the host form, filled in with a past game's table. Hard bots come
+// off first if they no longer all fit (see trimBotsToFit).
+export function playAgain({ seats, bots }) {
+  navigateFromSidebar(() => {
+    showScreen('screen-host-setup');
+    showHomeTile('host');
+    const seatButton = document.querySelector(`#host-seats-buttons .pill-choice-btn[data-value="${seats}"]`);
+    if (seatButton) seatButton.click();
+    BOT_TIERS.forEach((tier) => {
+      const input = $(`bot-${tier}`);
+      input.value = Math.min(bots[tier] || 0, parseInt(input.max, 10));
+    });
+    trimBotsToFit();
+    syncBotSeatCapacity();
+  });
 }
 
 // Rounds to the same number of decimal places as `step` (e.g. step="0.1"

@@ -582,6 +582,48 @@ def test_record_finished_game_writes_a_ratings_row_per_rated_participant(databas
     assert result["bob"] == {"old_rating": 1000, "new_rating": by_player[11][3], "rating_change": by_player[11][4]}
 
 
+def _resign_game_rows(cursor, conn, participants):
+    with patch.object(game_history, "_connect", return_value=conn):
+        game_history.record_finished_game(
+            room_code="ABCDE", seats=len(participants), bot_mix=[],
+            started_at=datetime.datetime.now(datetime.timezone.utc),
+            finished_at=datetime.datetime.now(datetime.timezone.utc),
+            participants=participants,
+        )
+    return {row[0]: row[4] for row in _rows(cursor, "INSERT INTO ratings", 5)}  # user_id -> change
+
+
+def _human(username, points, is_winner=False, left=False):
+    return {"is_bot": False, "username": username, "name": username, "points": points, "money_left": 5,
+            "is_winner": is_winner, "eliminated": False, "left": left}
+
+
+def test_three_players_one_resigned_only_the_resigner_loses_rating(database_url):
+    game_history._schema_ready = True
+    conn, cursor = _save_connection(players={"a": (10, "g-a", 1000), "b": (11, "g-b", 1000), "gone": (12, "g-c", 1000)})
+    changes = _resign_game_rows(cursor, conn, [_human("gone", 40, left=True), _human("a", 20, is_winner=True), _human("b", 5)])
+    assert changes[12] < 0
+    assert 10 not in changes and 11 not in changes  # a change of zero writes no ratings row
+
+
+def test_four_players_one_resigned_the_others_play_a_three_player_rating(database_url):
+    game_history._schema_ready = True
+    conn, cursor = _save_connection(players={"a": (10, "g-a", 1000), "b": (11, "g-b", 1000), "c": (12, "g-c", 1000),
+                                             "gone": (13, "g-d", 1000)})
+    changes = _resign_game_rows(cursor, conn, [_human("gone", 40, left=True), _human("a", 20, is_winner=True),
+                                               _human("b", 10), _human("c", 5)])
+    assert changes[13] < 0
+    assert changes[10] > 0 > changes[12]
+
+
+def test_a_resigner_with_the_most_points_is_placed_last(database_url):
+    game_history._schema_ready = True
+    conn, cursor = _save_connection(players={"a": (10, "g-a", 1000), "b": (11, "g-b", 1000), "gone": (12, "g-c", 1000)})
+    _resign_game_rows(cursor, conn, [_human("gone", 40, left=True), _human("a", 20, is_winner=True), _human("b", 5)])
+    placement_by_player = {row[1]: row[7] for row in _rows(cursor, "INSERT INTO player_games", 9)}
+    assert placement_by_player == {10: 1, 11: 2, 12: 3}
+
+
 def test_record_finished_game_averages_elo_deltas_for_same_difficulty_bot_seats(database_url):
     """Real bug, confirmed live against production (game 469): two bot
     seats sharing one player_id (same difficulty) each got their own
@@ -1499,12 +1541,12 @@ def test_get_recent_games_groups_opponents_by_game(database_url):
     cursor.fetchone.return_value = (1,)  # player id lookup
     finished_at = datetime.datetime(2026, 1, 1, tzinfo=datetime.timezone.utc)
     cursor.fetchall.side_effect = [
-        [(100, finished_at, 1), (101, finished_at, 2)],  # the two games + this player's placement
+        [(100, finished_at, 1, True, 2), (101, finished_at, 2, False, 2)],  # games, placement, has seed, seats
         [  # every participant across both games, in one query
-            (100, "alice", False, True),
-            (100, "Marble", True, False),
-            (101, "alice", False, False),
-            (101, "bob", False, True),
+            (100, "alice", False, True, None),
+            (100, "Marble", True, False, "easy"),
+            (101, "alice", False, False, None),
+            (101, "bob", False, True, None),
         ],
         [(100, True, 12), (101, False, None)],  # this player's own (is_winner, rating_change) per game
     ]
@@ -1514,10 +1556,13 @@ def test_get_recent_games_groups_opponents_by_game(database_url):
     assert result["has_more"] is False
     assert [g["game_id"] for g in games] == [100, 101]
     assert games[0]["placement"] == 1
+    assert (games[0]["replayable"], games[0]["seats"]) == (True, 2)
+    assert games[1]["replayable"] is False
     assert {o["name"] for o in games[0]["opponents"]} == {"alice", "Marble"}
+    assert {"name": "Marble", "is_bot": True, "is_winner": False, "difficulty": "easy"} in games[0]["opponents"]
     assert games[1]["opponents"] == [
-        {"name": "alice", "is_bot": False, "is_winner": False},
-        {"name": "bob", "is_bot": False, "is_winner": True},
+        {"name": "alice", "is_bot": False, "is_winner": False, "difficulty": None},
+        {"name": "bob", "is_bot": False, "is_winner": True, "difficulty": None},
     ]
     assert games[0]["is_winner"] is True
     assert games[0]["rating_change"] == 12
@@ -1535,8 +1580,8 @@ def test_get_recent_games_sets_has_more_when_another_page_exists(database_url):
     cursor.fetchone.return_value = (1,)
     finished_at = datetime.datetime(2026, 1, 1, tzinfo=datetime.timezone.utc)
     cursor.fetchall.side_effect = [
-        [(100, finished_at, 1), (101, finished_at, 2)],  # limit=1 + 1 lookahead row = 2 rows back
-        [(100, "alice", False, True), (101, "alice", False, False)],
+        [(100, finished_at, 1, True, 3), (101, finished_at, 2, True, 3)],  # limit=1 + 1 lookahead row = 2 rows back
+        [(100, "alice", False, True, None), (101, "alice", False, False, None)],
         [(100, True, 5)],  # only the kept (limit=1) game needs an own-result row
     ]
     with patch.object(game_history, "_connect", return_value=conn):
@@ -1556,8 +1601,8 @@ def test_get_recent_games_rating_change_is_none_for_an_unrated_game(database_url
     cursor.fetchone.return_value = (1,)
     finished_at = datetime.datetime(2026, 1, 1, tzinfo=datetime.timezone.utc)
     cursor.fetchall.side_effect = [
-        [(100, finished_at, 1)],
-        [(100, "alice", False, True)],
+        [(100, finished_at, 1, True, 3)],
+        [(100, "alice", False, True, None)],
         [],  # LEFT JOIN found no ratings row at all for this game -- own_result_by_game stays empty
     ]
     with patch.object(game_history, "_connect", return_value=conn):

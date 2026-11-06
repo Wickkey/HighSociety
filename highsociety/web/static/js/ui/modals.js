@@ -12,6 +12,8 @@ import { readCache, swr, writeCache } from '../utils/swrCache.js';
 // a function body (onGameDetailTableClick below; wireRowClicks in
 // gameHistory.js), never at any module's own top-level evaluation.
 import { showPlayerProfileScreen } from '../lobby/playerProfile.js';
+import { playAgain } from '../lobby/lobby.js';
+import { openReview } from '../lobby/replay.js';
 
 // In-page confirm dialog (resign, leaving mid-game — see gameActions.js's
 // onResign/lobby.js's onHomeLinkClick) styled like every other panel in the
@@ -80,7 +82,37 @@ export function closeProfileModal() { hide($('profile-view-modal')); }
 // widget, My Games, Account's Recent Activity, and a Player Profile's own
 // game history (see lobby/gameHistory.js, which only ever fetches the
 // list; this owns the one detail view every caller opens into).
-export async function openGameDetailModal(gameId) {
+let gameDetailActions = null;
+
+const CANT_REVIEW = 'This game can\'t be reviewed.';
+
+function sayInGameDetail(message) {
+  $('game-detail-review-error').textContent = message;
+  show($('game-detail-review-error'));
+}
+
+// Stays on the popup until there's a review to open. A game with no seed can't
+// have one, so that doesn't need the round trip.
+export async function onGameDetailReplayClick() {
+  const actions = gameDetailActions;
+  hide($('game-detail-review-error'));
+  if (!actions.replayable) { sayInGameDetail(CANT_REVIEW); return; }
+  const button = $('game-detail-replay');
+  button.disabled = true;
+  const from = gameDetailOpenerScreenId;
+  // Closed or moved to another game meanwhile: it's no longer theirs to act on.
+  const stillHere = () => gameDetailActions === actions && !$('game-detail-modal').classList.contains('hidden');
+  const opened = await openReview(actions.gameId, from, (message) => { if (stillHere()) sayInGameDetail(message); }, stillHere);
+  button.disabled = false;
+  if (opened) closeGameDetailModal();
+}
+
+export function onGameDetailPlayAgainClick() {
+  closeGameDetailModal();
+  playAgain(gameDetailActions.setup);
+}
+
+export async function openGameDetailModal(gameId, { replayable = false, setup = null } = {}) {
   // Captured the instant the modal opens (before anything else changes)
   // -- this is a real screen id (e.g. 'screen-host-setup' for Home,
   // 'screen-game-history' for My Games, 'screen-account'), since the
@@ -93,6 +125,10 @@ export async function openGameDetailModal(gameId) {
   const body = $('game-detail-body');
   body.innerHTML = '';
   $('game-detail-date').textContent = '';
+  gameDetailActions = { gameId, setup, replayable };
+  $('game-detail-replay').disabled = false;
+  hide($('game-detail-review-error'));
+  $('game-detail-play-again').classList.toggle('hidden', !setup);
   show($('game-detail-modal'));
   try {
     // A finished game never changes, so a cached copy is final -- only a

@@ -2893,3 +2893,118 @@ def test_link_refuses_an_account_tied_to_another_google_account(linkable):
     resp = _link({"id_token": "valid", "username": "guest-1", "login_token": "tok"})
     assert resp.status_code == 409
     assert "recompute" not in linkable
+
+
+def _a_finished_game_record():
+    from highsociety.code.ai.greedy_bot import GreedyBot
+    from highsociety.code.gamecore.game_manager.auction_history import AuctionHistory
+    from highsociety.code.gamecore.game_manager.gameplay import PlayGame
+    from highsociety.code.gamecore.recording.game_replay import game_record
+
+    bots = [GreedyBot(name, name) for name in ("Ann", "Ben", "Cal")]
+    game = PlayGame(players=bots, spectators=[], mode="network", seed=5, turn_duration=None,
+                    auction_history=AuctionHistory(), pace_events=False)
+    game.play_game()
+    return game_record(game)
+
+
+@pytest.fixture
+def clear_replay_cache():
+    web_server._replay_cache.clear()
+    yield
+    web_server._replay_cache.clear()
+
+
+def _replay_client(monkeypatch, record, detail=True):
+    monkeypatch.setattr(game_history, "get_game_detail",
+                        lambda game_id: {"finished_at": "2026-11-01T00:00:00+00:00"} if detail else None)
+    fetches = []
+    monkeypatch.setattr(game_history, "fetch_game_record", lambda game_id: fetches.append(game_id) or record)
+    return web_server.app.test_client(), fetches
+
+
+def test_replay_api_returns_every_step_and_only_builds_it_once(monkeypatch, clear_replay_cache):
+    client, fetches = _replay_client(monkeypatch, _a_finished_game_record())
+    first = client.get("/api/games/replay/7")
+    assert first.status_code == 200
+    body = first.get_json()
+    assert body["game_id"] == 7
+    assert [s["name"] for s in body["seats"]] and body["steps"][-1]["kind"] == "game_over"
+    assert client.get("/api/games/replay/7").get_json() == body
+    assert fetches == [7]
+
+
+def test_replay_api_says_when_a_game_cant_be_replayed(monkeypatch, clear_replay_cache):
+    record = _a_finished_game_record()
+    record["seed"] = None
+    client, _ = _replay_client(monkeypatch, record)
+    response = client.get("/api/games/replay/8")
+    assert response.status_code == 409
+    assert "steps" not in response.get_json()
+
+
+def test_replay_api_says_when_rules_changed_since_the_game(monkeypatch, clear_replay_cache):
+    record = _a_finished_game_record()
+    record["seed"] += 1
+    client, _ = _replay_client(monkeypatch, record)
+    assert client.get("/api/games/replay/9").status_code == 409
+
+
+def test_replay_api_for_an_unknown_game_is_a_404_and_isnt_remembered(monkeypatch, clear_replay_cache):
+    client, _ = _replay_client(monkeypatch, None, detail=False)
+    assert client.get("/api/games/replay/10").status_code == 404
+    assert 10 not in web_server._replay_cache
+
+
+def test_the_review_page_is_served_and_kept_out_of_search_results():
+    response = web_server.app.test_client().get("/review/12")
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    assert "Game Review" in html and "noindex" in html
+
+
+def test_live_games_counts_games_and_waiting_people_but_says_nothing_about_them():
+    client = web_server.app.test_client()
+    with web_server._rooms_lock:
+        saved = dict(web_server._rooms)
+        web_server._rooms.clear()
+    try:
+        assert client.get("/api/live_games").get_json() == {
+            "games_in_progress": 0, "players_in_games": 0, "lobbies_waiting": 0}
+        code = client.post("/api/create_game", json={"seats": 3, "bot_mix": ["pass"], "bot_think_time": 0}).get_json()["room_code"]
+        room = web_server._get_room(code)
+        room.state = "in_progress"
+        assert client.get("/api/live_games").get_json()["games_in_progress"] == 1
+        room.state = "finished"
+        assert client.get("/api/live_games").get_json()["games_in_progress"] == 0
+    finally:
+        with web_server._rooms_lock:
+            web_server._rooms.clear()
+            web_server._rooms.update(saved)
+
+
+@pytest.mark.parametrize("bad", ['x"y', "o'neil", "<b>", "a&b", "a`b", "tab\tname"])
+def test_new_usernames_cant_contain_characters_that_mean_something_in_html(bad):
+    client = web_server.app.test_client()
+    assert client.post("/api/auth/guest/claim", json={"username": bad}).status_code == 400
+    assert client.post("/api/auth/google/claim_username", json={"username": bad, "id_token": "x"}).status_code == 400
+    assert client.post("/api/auth/username/change", json={"old_username": "a", "new_username": bad}).status_code == 400
+    check = client.get("/api/auth/username/check", query_string={"username": bad}).get_json()
+    assert check["available"] is False and "can't contain" in check["error"]
+
+
+def test_ordinary_usernames_are_still_accepted():
+    client = web_server.app.test_client()
+    for good in ("CrimsonNaruto482", "Mary Jane", "José_99", "a.b-c"):
+        assert client.post("/api/auth/guest/claim", json={"username": good}).status_code == 200
+
+
+def test_a_google_name_with_an_apostrophe_suggests_a_username_that_can_be_claimed(monkeypatch):
+    monkeypatch.setattr(game_history, "taken_usernames", lambda candidates: set())
+    assert web_server._free_username_like("Conan O'Brien") == "Conan OBrien"
+
+
+def test_someone_with_an_older_name_can_still_keep_it():
+    check = web_server.app.test_client().get(
+        "/api/auth/username/check", query_string={"username": "o'neil", "current": "o'neil"}).get_json()
+    assert check["available"] is True

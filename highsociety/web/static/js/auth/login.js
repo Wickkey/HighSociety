@@ -1,4 +1,5 @@
 // Login screen flow: guest continuation and Google sign-in.
+import { showReplayScreen } from '../lobby/replay.js';
 import { $, hide, show, showError, showScreen } from '../utils/dom.js';
 import {
   fetchJSON, currentRoomCode, refreshStatus, startPolling, showHomeTiles, showHomeTile, startRoomsPolling,
@@ -83,6 +84,11 @@ export function proceedPastLogin() {
   if (location.pathname.startsWith('/players/')) {
     const username = decodeURIComponent(location.pathname.slice('/players/'.length));
     showPlayerProfileScreen(username, 'leaderboard');
+    return;
+  }
+  const replayPath = location.pathname.match(/^\/review\/(\d+)$/);
+  if (replayPath) {
+    showReplayScreen(replayPath[1]);
     return;
   }
   const bootHandler = BOOT_PATH_HANDLERS[location.pathname];

@@ -764,6 +764,43 @@
       </div>
     </section>
 
+    <!-- ===================== GAME REVIEW ===================== -->
+    <section id="screen-replay" class="screen hidden">
+      <div class="card panel account-panel replay-panel">
+        <button type="button" class="screen-back" id="btn-replay-back">← Back</button>
+        <div class="replay-title-row">
+          <h2>Game Review</h2>
+          <span id="replay-date" class="muted"></span>
+        </div>
+        <div id="replay-loading" class="replay-loading tile-loading-spinner"></div>
+        <p id="replay-unavailable" class="muted hidden"></p>
+        <div id="replay-table" class="hidden">
+          <div class="replay-stage">
+            <span id="replay-round" class="replay-round"></span>
+            <p id="replay-event" class="replay-event" aria-live="polite"></p>
+            <div id="replay-card-type" class="auction-card-type"></div>
+            <div id="replay-card" class="auction-card-slot"></div>
+            <div class="bid-block">
+              <span class="bid-label">Current Highest Bid</span>
+              <span id="replay-top-bid" class="bid-value">0</span>
+            </div>
+          </div>
+          <div id="replay-seats" class="replay-seats"></div>
+          <div class="replay-controls">
+            <input type="range" id="replay-slider" min="0" max="0" value="0" step="1" aria-label="Position in the game">
+            <div class="replay-buttons">
+              <button type="button" id="btn-replay-first" class="replay-btn" aria-label="Previous auction" title="Previous auction">⏮</button>
+              <button type="button" id="btn-replay-prev" class="replay-btn" aria-label="Previous move" title="Previous move (left arrow)">◀</button>
+              <button type="button" id="btn-replay-play" class="replay-btn replay-btn-play" aria-label="Play" title="Play or pause">▶</button>
+              <button type="button" id="btn-replay-next" class="replay-btn" aria-label="Next move" title="Next move (right arrow)">▶</button>
+              <button type="button" id="btn-replay-last" class="replay-btn" aria-label="Next auction" title="Next auction">⏭</button>
+              <span id="replay-position" class="replay-position muted"></span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
     <!-- ===================== LEADERBOARD ===================== -->
     <section id="screen-leaderboard" class="screen hidden">
       <div class="card panel account-panel leaderboard-panel">
@@ -824,6 +861,11 @@
           </thead>
           <tbody id="game-detail-body"></tbody>
         </table>
+        <div class="game-detail-actions">
+          <button type="button" id="game-detail-replay" class="secondary">Review</button>
+          <button type="button" id="game-detail-play-again" class="primary">Play again</button>
+        </div>
+        <p id="game-detail-review-error" class="review-error hidden" role="status"></p>
         <div class="button-row modal-actions">
           <button type="button" id="game-detail-close" class="secondary">Close</button>
         </div>
@@ -1921,8 +1963,12 @@
           </p>
         </details>
 
+        <div class="finished-offers">
+          <button id="btn-request-rematch" class="primary hidden">Request Rematch</button>
+          <button type="button" id="btn-finished-review" class="secondary hidden">Review</button>
+        </div>
+        <p id="finished-review-error" class="review-error hidden" role="status"></p>
         <div id="rematch-panel" class="rematch-panel hidden">
-          <button id="btn-request-rematch" class="primary">Request Rematch</button>
           <div id="rematch-bot-form" class="rematch-bot-form hidden">
             <div class="rematch-bot-head">
               <h3>Choose your opponents</h3>

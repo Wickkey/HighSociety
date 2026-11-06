@@ -17,12 +17,47 @@ is the part most likely to change later. Anyone revisiting this only
 needs to change compute_elo_deltas' body; nothing about how ratings get
 read from or written back to the database needs to know the formula
 changed.
+
+A player who leaves mid-game (resigns, or drops and never comes back) is
+handled separately -- see compute_elo_deltas.
 """
 
 DEFAULT_K_FACTOR = 32
 
 
-def compute_elo_deltas(standings: list, k_factor: float = DEFAULT_K_FACTOR) -> dict:
+def _pairwise_deltas(standings: list, k_factor: float) -> dict:
+    """Each player's average expected-score delta over every pair (see the
+    module docstring). Fewer than 2 players: all zeros."""
+    if len(standings) < 2:
+        return {s["username"]: 0 for s in standings}
+
+    deltas = {s["username"]: 0.0 for s in standings}
+    pairs_played = {s["username"]: 0 for s in standings}
+
+    for i in range(len(standings)):
+        for j in range(i + 1, len(standings)):
+            a, b = standings[i], standings[j]
+            # Lower placement number is the better finish (1st beats 2nd).
+            if a["placement"] < b["placement"]:
+                score_a, score_b = 1.0, 0.0
+            elif a["placement"] > b["placement"]:
+                score_a, score_b = 0.0, 1.0
+            else:
+                score_a = score_b = 0.5
+
+            expected_a = 1 / (1 + 10 ** ((b["rating"] - a["rating"]) / 400))
+            expected_b = 1 - expected_a
+
+            deltas[a["username"]] += k_factor * (score_a - expected_a)
+            deltas[b["username"]] += k_factor * (score_b - expected_b)
+            pairs_played[a["username"]] += 1
+            pairs_played[b["username"]] += 1
+
+    return {username: round(deltas[username] / pairs_played[username]) for username in deltas}
+
+
+def compute_elo_deltas(standings: list, k_factor: float = DEFAULT_K_FACTOR,
+                       seats_remaining: int = None) -> dict:
     """
     standings: one dict per rated player -- {"username", "placement",
     "rating"} (their Elo *before* this game). `placement` is this
@@ -50,34 +85,35 @@ def compute_elo_deltas(standings: list, k_factor: float = DEFAULT_K_FACTOR) -> d
     participant -- not necessarily a real players.username, see
     game_history.py's `game_username` for why a bot needs a different one.
 
+    `"left": True` marks a player who resigned, or dropped and never came
+    back. `seats_remaining` is how many seats were still in at the end,
+    counting unrated ones (a guest) that aren't in `standings`; it defaults
+    to the rated players who stayed.
+
     Returns {username: delta} (whole numbers, can be negative). Fewer
     than 2 rated players means there's no comparison to make -- returns
     all zeros rather than raising, so the caller doesn't need a separate
     guard for "everyone else at the table was a bot."
     """
-    if len(standings) < 2:
-        return {s["username"]: 0 for s in standings}
+    leavers = [s for s in standings if s.get("left")]
+    if not leavers:
+        return _pairwise_deltas(standings, k_factor)
 
-    deltas = {s["username"]: 0.0 for s in standings}
-    pairs_played = {s["username"]: 0 for s in standings}
+    # A leaver is rated as finishing last at the full table, tied with any
+    # other leaver, and can only lose rating from it: that tie with a stronger
+    # leaver would otherwise be a gain for walking away.
+    last_place = max(s["placement"] for s in standings) + 1
+    full_table = [{**s, "placement": last_place} if s.get("left") else s for s in standings]
+    full_table_deltas = _pairwise_deltas(full_table, k_factor)
+    deltas = {s["username"]: min(0, full_table_deltas[s["username"]]) for s in leavers}
 
-    for i in range(len(standings)):
-        for j in range(i + 1, len(standings)):
-            a, b = standings[i], standings[j]
-            # Lower placement number is the better finish (1st beats 2nd).
-            if a["placement"] < b["placement"]:
-                score_a, score_b = 1.0, 0.0
-            elif a["placement"] > b["placement"]:
-                score_a, score_b = 0.0, 1.0
-            else:
-                score_a = score_b = 0.5
-
-            expected_a = 1 / (1 + 10 ** ((b["rating"] - a["rating"]) / 400))
-            expected_b = 1 - expected_a
-
-            deltas[a["username"]] += k_factor * (score_a - expected_a)
-            deltas[b["username"]] += k_factor * (score_b - expected_b)
-            pairs_played[a["username"]] += 1
-            pairs_played[b["username"]] += 1
-
-    return {username: round(deltas[username] / pairs_played[username]) for username in deltas}
+    # Everyone else is rated as if the game had been played without the
+    # leavers, except that two players left (or one) can't settle a clear
+    # result, so nobody's rating moves.
+    stayers = [s for s in standings if not s.get("left")]
+    remaining = len(stayers) if seats_remaining is None else seats_remaining
+    if remaining <= 2:
+        deltas.update({s["username"]: 0 for s in stayers})
+    else:
+        deltas.update(_pairwise_deltas(stayers, k_factor))
+    return deltas

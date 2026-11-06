@@ -16,6 +16,7 @@ existing Transport interface. See README.md's "Architecture: adding a new
 frontend" section, which called this out as the intended extension point.
 """
 import argparse
+import collections
 import datetime
 import hashlib
 import json
@@ -53,6 +54,7 @@ from highsociety.code.gamecore.game_manager.gameplay import PlayGame
 from highsociety.code.gamecore.network.transport import WebSocketTransport
 from highsociety.code.gamecore.player.networkplayer import NetworkPlayer
 from highsociety.code.gamecore.player.networkspectator import NetworkSpectator
+from highsociety.code.gamecore.recording import game_replay
 
 WEB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "highsociety", "web")
 
@@ -323,6 +325,8 @@ class GameRoom:
         # username -> achievement ids this game newly unlocked. Set before
         # elo_changes, so a client that sees the Elo result has these too.
         self.new_achievements: dict[str, list[str]] = {}
+        # The saved game's id, once saved: what the finished screen's Review opens.
+        self.review_game_id: Optional[int] = None
         # sender -> recent chat/reaction timestamps, see _chat_allowed.
         self.chat_times: dict[str, list[float]] = {}
         # seat username -> current Elo, for the seats that are rated (see
@@ -369,6 +373,7 @@ class GameRoom:
             # Elo reveal data would otherwise be readable as if it belonged
             # to the game that's only just starting now.
             self.elo_changes = None
+            self.review_game_id = None
             # Setting the game up is inside the same guard as playing it: a
             # failure here used to escape the thread entirely, leaving the
             # room "starting" forever with every player waiting on a game
@@ -510,6 +515,9 @@ def _record_game_history(room: "GameRoom", game: PlayGame, started_at: datetime.
             "money_left": standing["money_left"],
             "is_winner": standing["username"] in winner_usernames,
             "eliminated": standing["eliminated"],
+            # Still out at the final tally: they resigned, or dropped and
+            # used up their chance to return.
+            "left": not standing["active"],
             # Only MCTSBot instances (the web lobby's easy/medium/hard
             # choices) have this — see game_history.py's bots table, which
             # uses it to attribute this seat to the right shared
@@ -536,6 +544,13 @@ def _record_game_history(room: "GameRoom", game: PlayGame, started_at: datetime.
     def _store_new_achievements(unlocked: dict) -> None:
         room.new_achievements = unlocked
 
+    finished_room_game_id = room.game_id
+
+    def _store_saved_game_id(saved_game_id: int) -> None:
+        with room.lock:
+            if room.game_id == finished_room_game_id:  # a rematch may already be under way
+                room.review_game_id = saved_game_id
+
     def _store_elo_changes(changes: dict) -> None:
         # Written from the background write's own thread -- under the
         # lock since it's a genuine cross-thread write, even though a
@@ -561,6 +576,7 @@ def _record_game_history(room: "GameRoom", game: PlayGame, started_at: datetime.
         time_control=int(room.turn_time_limit) if room.turn_time_limit else None,
         on_complete=_store_elo_changes,
         on_new_achievements=_store_new_achievements,
+        on_saved=_store_saved_game_id,
     )
 
 
@@ -757,6 +773,15 @@ def _identify(ws, game_id: str, first_prompt: str, second_prompt: str):
 
 
 _MAX_USERNAME_LENGTH = 24
+# Not allowed in a new username: characters that mean something in HTML. Names
+# are escaped wherever they're shown, so this is a second line of defence, and
+# accounts that already have one of these keep working.
+_USERNAME_FORBIDDEN_CHARACTERS = "<>\"'&`"
+_USERNAME_CHARACTERS_ERROR = f"Usernames can't contain {' '.join(_USERNAME_FORBIDDEN_CHARACTERS)}"
+
+
+def _username_has_forbidden_characters(username: str) -> bool:
+    return any(c in _USERNAME_FORBIDDEN_CHARACTERS or not c.isprintable() for c in username)
 # A display name arrives over the game socket, not through the sign-up
 # endpoints that check usernames, so it gets its own cap.
 _MAX_DISPLAY_NAME_LENGTH = 40
@@ -852,7 +877,8 @@ def _free_username_like(name: str) -> str:
     Google name doesn't cost them a failed attempt. Still just a suggestion
     (the box stays editable and claim_username re-checks); "" when there's
     no name or nothing free nearby, which leaves the box empty."""
-    base = " ".join(name.split())[:_MAX_USERNAME_LENGTH]
+    allowed = "".join(c for c in name if not _username_has_forbidden_characters(c) or c.isspace())
+    base = " ".join(allowed.split())[:_MAX_USERNAME_LENGTH]
     if not base:
         return ""
     candidates = [base]
@@ -896,6 +922,8 @@ def api_auth_username_check():
         return jsonify({"available": False, "error": f"Usernames are up to {_MAX_USERNAME_LENGTH} characters."})
     if current and username == current:
         return jsonify({"available": True, "username": username})
+    if _username_has_forbidden_characters(username):
+        return jsonify({"available": False, "error": _USERNAME_CHARACTERS_ERROR})
     if _username_available(username):
         return jsonify({"available": True, "username": username})
     return jsonify({"available": False, "username": username, "error": "Already taken.",
@@ -921,6 +949,8 @@ def api_auth_google_claim_username():
     username = (body.get("username") or "").strip()
     if not username or len(username) > _MAX_USERNAME_LENGTH:
         return jsonify({"error": f"Username must be 1-{_MAX_USERNAME_LENGTH} characters"}), 400
+    if _username_has_forbidden_characters(username):
+        return jsonify({"error": _USERNAME_CHARACTERS_ERROR}), 400
     display_name = (body.get("display_name") or "").strip() or username
 
     claims = _verify_google_id_token(token)
@@ -1053,6 +1083,8 @@ def api_auth_guest_claim():
     username = (body.get("username") or "").strip()
     if not username or len(username) > _MAX_USERNAME_LENGTH:
         return jsonify({"error": f"Username must be 1-{_MAX_USERNAME_LENGTH} characters"}), 400
+    if _username_has_forbidden_characters(username):
+        return jsonify({"error": _USERNAME_CHARACTERS_ERROR}), 400
 
     if not game_history.is_configured():
         return jsonify({"username": username})
@@ -1101,6 +1133,8 @@ def api_auth_username_change():
     new_username = (body.get("new_username") or "").strip()
     if not new_username or len(new_username) > _MAX_USERNAME_LENGTH:
         return jsonify({"error": f"Username must be 1-{_MAX_USERNAME_LENGTH} characters"}), 400
+    if _username_has_forbidden_characters(new_username):
+        return jsonify({"error": _USERNAME_CHARACTERS_ERROR}), 400
 
     if not game_history.is_configured():
         return jsonify({"username": new_username})
@@ -1387,6 +1421,47 @@ def api_game_detail(game_id):
     return jsonify(detail)
 
 
+# A finished game never changes, and a deploy (the only thing that can change
+# how it replays) restarts this process, so a built replay is good until then.
+_REPLAY_CACHE_SIZE = 32
+_replay_cache: "collections.OrderedDict[int, tuple]" = collections.OrderedDict()
+_replay_cache_lock = threading.Lock()
+
+
+def _build_replay(game_id: int) -> tuple:
+    """(JSON body, HTTP status) for one game's replay."""
+    detail = game_history.get_game_detail(game_id)
+    record = game_history.fetch_game_record(game_id) if detail is not None else None
+    if record is None:
+        return {"error": "No such game."}, 404
+    try:
+        replay = game_replay.replay_steps(record)
+    except (game_replay.ReplayUnsupported, game_replay.ReplayMismatch) as e:
+        LoggingManager.info(f"Game {game_id} can't be replayed: {e}")
+        return {"error": "This game can't be replayed."}, 409
+    return {"game_id": game_id, "finished_at": detail["finished_at"], **replay}, 200
+
+
+@app.route("/api/games/replay/<int:game_id>")
+def api_game_replay(game_id):
+    """Every step of a finished game for the replay screen. Hands are included:
+    the game is over, and no finished game's results are private (see
+    get_game_detail's docstring)."""
+    with _replay_cache_lock:
+        cached = _replay_cache.get(game_id)
+        if cached is not None:
+            _replay_cache.move_to_end(game_id)
+    if cached is None:
+        cached = _build_replay(game_id)
+        if cached[1] != 404:  # a 404 can be a database hiccup, so it isn't remembered
+            with _replay_cache_lock:
+                _replay_cache[game_id] = cached
+                while len(_replay_cache) > _REPLAY_CACHE_SIZE:
+                    _replay_cache.popitem(last=False)
+    body, status = cached
+    return jsonify(body), status
+
+
 @app.route("/api/leaderboard")
 def api_leaderboard():
     """Players ranked by Elo, paginated (?limit/?offset -- default 20 per
@@ -1435,7 +1510,8 @@ def api_rating_history(username):
 @app.route("/achievements")
 @app.route("/my-games")
 @app.route("/players/<username>")
-def index(username=None):
+@app.route("/review/<int:game_id>")
+def index(username=None, game_id=None):
     # Two different routes share this same `username` param, for two
     # different reasons -- neither actually reads it here:
     # - /account/<username> is purely cosmetic/shareable -- the account
@@ -1450,7 +1526,7 @@ def index(username=None):
     # Both are otherwise the same client-decides-what-to-show model every
     # other route on this one shared shell template already uses.
     path = request.path
-    if path.startswith(("/account/", "/players/")):
+    if path.startswith(("/account/", "/players/", "/review/")):
         path = path[:path.index("/", 1)]
     title, description = _PAGE_META.get(path, _PAGE_META["/"])
     return render_template(
@@ -1487,8 +1563,9 @@ _PAGE_META = {
     "/achievements": ("Achievements – High Society", _HOME_DESCRIPTION),
     "/my-games": ("My Games – High Society", _HOME_DESCRIPTION),
     "/players": ("Player Profile – High Society", _HOME_DESCRIPTION),
+    "/review": ("Game Review – High Society", _HOME_DESCRIPTION),
 }
-_PRIVATE_PATHS = {"/account", "/achievements", "/my-games", "/players"}
+_PRIVATE_PATHS = {"/account", "/achievements", "/my-games", "/players", "/review"}
 _SITEMAP_PATHS = ["/", "/rules", "/play", "/host", "/join", "/leaderboard", "/privacy"]
 
 
@@ -1662,6 +1739,7 @@ def _status_payload(room: Optional[GameRoom]) -> dict:
         # until it's non-null. See GameRoom.elo_changes's own comment.
         payload["elo_changes"] = room.elo_changes
         payload["new_achievements"] = room.new_achievements
+        payload["review_game_id"] = room.review_game_id
 
         # Everything a finished-screen client needs to render the rematch
         # panel from a plain page load/status poll, not just from the live
@@ -1678,6 +1756,27 @@ def _status_payload(room: Optional[GameRoom]) -> dict:
 @app.route("/api/status")
 def api_status():
     return jsonify(_status_payload(_get_room(request.args.get("room"))))
+
+
+@app.route("/api/live_games")
+def api_live_games():
+    """How many games are being played right now, and how many people are in
+    them or waiting in a lobby. A deploy restarts this process, and live games
+    only exist in its memory, so this is what to check before pushing. Counts
+    only: nothing about who or where."""
+    with _rooms_lock:
+        rooms = list(_rooms.values())
+
+    def humans(room) -> int:
+        return sum(1 for p in list(room.players) if isinstance(p, NetworkPlayer) and p.active)
+
+    in_progress = [r for r in rooms if r.state in ("starting", "in_progress")]
+    waiting = [r for r in rooms if r.state == "lobby" and humans(r)]
+    return jsonify({
+        "games_in_progress": len(in_progress),
+        "players_in_games": sum(humans(r) for r in in_progress),
+        "lobbies_waiting": len(waiting),
+    })
 
 
 @app.route("/api/rooms")
@@ -1997,6 +2096,7 @@ def _maybe_start_rematch(room: "GameRoom") -> None:
         room.game_id = generate_game_id()
         room.elo_changes = None
         room.new_achievements = {}
+        room.review_game_id = None
         room.game = None
         for p in eligible:
             p.game_id = room.game_id
