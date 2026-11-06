@@ -2559,3 +2559,29 @@ button.secondary.standalone { margin-top: 0.9rem; display: inline-block; }
   .replay-btn { flex: 1; width: auto; min-width: 0; }
   .replay-position { flex: none; margin-left: 0.25rem; }
 }
+
+/* What a first-time visitor can read before signing in. */
+.login-about { max-width: 640px; margin: 1.5rem auto 2.5rem; padding: 0 16px; color: #e9e4d6; line-height: 1.55; text-align: left; }
+.login-about h2 { margin: 0 0 0.5rem; color: #f5f1e6; font-size: 1.25rem; }
+.login-about h3 { margin: 1.2rem 0 0.35rem; color: #f5f1e6; font-size: 1rem; }
+.login-about p { margin: 0 0 0.5rem; }
+.login-about ul { margin: 0; padding-left: 1.2rem; }
+.login-about li { margin-bottom: 0.25rem; }
+.login-about a { color: var(--accent-light); font-weight: 700; }
+.login-about-links { display: flex; flex-wrap: wrap; gap: 1.2rem; margin-top: 1rem; }
+
+/* Rules and leaderboard before signing in: no account, so no account controls. */
+.visitor-cta { display: none; }
+body.visitor-browsing .visitor-cta {
+  display: inline-block;
+  margin: 0 0 0.9rem;
+  padding: 0.5rem 1rem;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  font-weight: 700;
+  text-decoration: none;
+}
+body.visitor-browsing .app-sidebar,
+body.visitor-browsing #profile-chip-wrap { display: none; }
+body.visitor-browsing { padding-bottom: 0; }

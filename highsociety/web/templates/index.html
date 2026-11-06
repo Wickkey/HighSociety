@@ -65,6 +65,14 @@
        Online" rather than the bare domain). -->
   <script type="application/ld+json">{{ {"@context": "https://schema.org", "@type": "WebSite",
     "name": "High Society Online", "url": site_url} | tojson }}</script>
+  {% if request.path == "/" %}
+  <script type="application/ld+json">{{ {"@context": "https://schema.org", "@type": "VideoGame",
+    "name": "High Society Online", "url": site_url, "description": page_description,
+    "genre": "Card game", "gamePlatform": "Web browser", "applicationCategory": "Game",
+    "operatingSystem": "Any", "playMode": "MultiPlayer",
+    "numberOfPlayers": {"@type": "QuantitativeValue", "minValue": 3, "maxValue": 5},
+    "offers": {"@type": "Offer", "price": "0", "priceCurrency": "USD"}} | tojson }}</script>
+  {% endif %}
 </head>
 <body>
   <div class="app-shell">
@@ -295,6 +303,22 @@
           <p id="login-username-error" class="error hidden"></p>
         </div>
         <p class="login-legal"><a href="/privacy">Privacy policy</a></p>
+      </div>
+      <!-- What a first-time visitor, and a search engine, can read before signing
+           in. Plain links, so both can follow them. -->
+      <div class="login-about">
+        <h2>Play High Society online for free</h2>
+        <p>High Society is a fast auction card game for 3–5 players. Play it in your browser, on a computer or a phone, with nothing to download. Invite friends with a link, get matched with other players, or fill the table with bots.</p>
+        <h3>How the game works</h3>
+        <p>Luxury cards come up for auction one at a time, and you bid with a hand of money cards. Paintings score points and Prestige cards multiply them, but some cards are disgraces that everyone tries to avoid. The game ends when the fourth green card appears. Then the player with the least money is out, however many points they have, and the highest score among the rest wins.</p>
+        <h3>What you can do here</h3>
+        <ul>
+          <li>Play as a guest straight away, with no sign-up.</li>
+          <li>Practise against bots at four difficulty levels, from Easy to Insane.</li>
+          <li>Connect Google to earn an Elo rating, climb the leaderboard and unlock achievements.</li>
+          <li>Review your finished games move by move.</li>
+        </ul>
+        <p class="login-about-links"><a href="/rules">Read the rules</a><a href="/leaderboard">See the leaderboard</a></p>
       </div>
     </section>
 
@@ -806,6 +830,7 @@
       <div class="card panel account-panel leaderboard-panel">
         <button type="button" class="screen-back" id="btn-leaderboard-back">← Back</button>
         <h2>Leaderboard</h2>
+        <a href="/" class="visitor-cta">Play free and join in</a>
         <div class="leaderboard-tabs" role="tablist" aria-label="Leaderboard">
           <button type="button" id="leaderboard-tab-people" class="leaderboard-tab active" role="tab" aria-selected="true" aria-controls="leaderboard-people">People</button>
           <button type="button" id="leaderboard-tab-bots" class="leaderboard-tab" role="tab" aria-selected="false" aria-controls="leaderboard-bots">Bots</button>
@@ -1090,6 +1115,7 @@
       <div id="home-panel-rules" class="card panel home-panel home-panel-rules hidden">
         <button type="button" class="home-back">← Back</button>
         <h2>How to play</h2>
+        <a href="/" class="visitor-cta">Play free, no sign-up needed</a>
         <!-- Three ways to learn, one per tab, so the screen isn't one long
              scroll (see lobby/howToPlay.js): a video, a real practice game,
              or the written rules. -->

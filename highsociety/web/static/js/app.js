@@ -68,6 +68,32 @@ window.__hsDebug = {
   renderOpponents: gameRendererModule.renderOpponents,
 };
 
+// Rules and the leaderboard are readable without signing in, by a first-time
+// visitor or a search engine. Those are the only screens on offer then, so every
+// way off them goes to the home page, which is where signing in starts.
+const VISITOR_PAGES = {
+  '/rules': () => { showScreen('screen-host-setup'); showHomeTile('rules', { openOn: 'read' }); },
+  '/leaderboard': showLeaderboardScreen,
+};
+const VISITOR_EXITS = '.home-back, #btn-leaderboard-back, #home-link, #btn-play-tutorial, .name-link';
+
+function showVisitorPage() {
+  const page = VISITOR_PAGES[location.pathname];
+  if (!page) return false;
+  document.body.classList.add('visitor-browsing');
+  const leave = (e) => {
+    if (!e.target.closest(VISITOR_EXITS)) return;
+    if (e.type === 'keydown' && e.key !== 'Enter' && e.key !== ' ') return;
+    e.preventDefault();
+    e.stopPropagation();
+    location.assign('/');
+  };
+  document.addEventListener('click', leave, true);
+  document.addEventListener('keydown', leave, true);
+  page();
+  return true;
+}
+
 function onReviewBack() {
   const from = getReplayReturnTo();
   if (from === 'screen-game-history') { showGameHistoryScreen(getGameHistoryReturnTo()); return; }
@@ -332,6 +358,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // skips straight past #screen-login -- only a genuinely new visitor, or
   // someone who explicitly logged out, sees it.
   if (!loadProfile()) {
+    if (!currentRoomCode() && showVisitorPage()) return;
     showScreen('screen-login');
     return;
   }
