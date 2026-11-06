@@ -5,7 +5,7 @@ import { $, show, showScreen } from './utils/dom.js';
 import {
   resolveConfirmDialog, openProfileModal, closeProfileModal, closeGameDetailModal, onGameDetailTableClick,
 } from './ui/modals.js';
-import { onSpecChatSend, onPlayerChatSend } from './ui/chat.js';
+import { onSpecChatSend, onPlayerChatSend, initChat } from './ui/chat.js';
 import {
   onContinueAsGuest, onShuffleUsername, onLoginUsernameContinue, onLoginBack, showChooseStep, initGoogleSignIn,
   proceedPastLogin,
@@ -17,6 +17,7 @@ import {
   showAccountScreen, onAccountSaveClick, showAchievementsScreen,
   onAccountEditUsernameClick, onAccountCancelEditClick, onEloChartRangeClick,
   onAchievementTileClick, onAchievementTileKeydown,
+  onAccountEditBioClick, onAccountBioInput, onAccountBioSave, onAccountBioCancel,
 } from './account/account.js';
 import {
   showHomeTile, showHomeTiles, onHomeLinkClick, navigateFromSidebar, onCreateGame, onJoinByCode, onJoinRoomCodeInput,
@@ -31,10 +32,11 @@ import {
   showGameHistoryScreen, onGameHistoryPrevClick, onGameHistoryNextClick, getGameHistoryReturnTo,
 } from './lobby/gameHistory.js';
 import {
-  showLeaderboardScreen, onLeaderboardPrevClick, onLeaderboardNextClick, onLeaderboardTableClick,
+  showLeaderboardScreen, onLeaderboardPrevClick, onBotLeaderboardPrevClick, onBotLeaderboardNextClick, onLeaderboardNextClick, onLeaderboardTableClick,
+  onLeaderboardTabClick,
 } from './lobby/leaderboard.js';
 import {
-  getPlayerProfileReturnTo, onPlayerProfileHistoryPrevClick, onPlayerProfileHistoryNextClick,
+  getPlayerProfileReturnTo, onPlayerProfileHistoryPrevClick, onPlayerProfileHistoryMoreClick, onPlayerProfileAchievementsToggle, onPlayerProfileHistoryNextClick,
   onPlayerProfileEloChartRangeClick,
 } from './lobby/playerProfile.js';
 import { onPlayClick, onFindMatch, onMatchmakingCancel, onMatchmakingAddBots, onMatchmakingSeatButtonClick } from './lobby/matchmaking.js';
@@ -43,11 +45,11 @@ import {
   onHowToPlayTabClick, onHowToPlayTabKeydown, onHowToPlayGotoClick, playHowToPlayVideo,
 } from './lobby/howToPlay.js';
 import {
-  onRequestRematchClick, onCancelRematchForm, onSendRematchRequest, onAcceptRematch, onDeclineRematch,
+  onRequestRematchClick, onRematchBotTierClick, onCancelRematchForm, onSendRematchRequest, onAcceptRematch, onDeclineRematch,
   onStandingsTableClick,
 } from './lobby/rematch.js';
 import { onPlaceBid, onPass, onResign, onDiscardPainting, onQuickReactionClick } from './game/gameActions.js';
-import { onTutorialCoachNextClick } from './ui/notifications.js';
+import { onTutorialCoachNextClick, onAchievementToastClick } from './ui/notifications.js';
 
 // Debug-only bridge, not part of the app's real API surface: lets a
 // browser console (or a Playwright page.evaluate, as used throughout this
@@ -177,8 +179,24 @@ function wireStaticHandlers() {
   $('sidebar-leaderboard').addEventListener('click', () => navigateFromSidebar(showLeaderboardScreen));
   $('btn-leaderboard-prev').addEventListener('click', onLeaderboardPrevClick);
   $('btn-leaderboard-next').addEventListener('click', onLeaderboardNextClick);
+  $('btn-bot-leaderboard-prev').addEventListener('click', onBotLeaderboardPrevClick);
+  $('btn-bot-leaderboard-next').addEventListener('click', onBotLeaderboardNextClick);
   $('leaderboard-body').addEventListener('click', onLeaderboardTableClick);
+  $('bot-leaderboard-body').addEventListener('click', onLeaderboardTableClick);
+  $('leaderboard-tab-people').addEventListener('click', () => onLeaderboardTabClick('people'));
+  $('leaderboard-tab-bots').addEventListener('click', () => onLeaderboardTabClick('bots'));
   $('achievements-grid').addEventListener('click', onAchievementTileClick);
+  $('player-profile-achievements').addEventListener('click', onAchievementTileClick);
+  $('player-profile-achievements').addEventListener('keydown', onAchievementTileKeydown);
+  $('btn-player-profile-achievements-toggle').addEventListener('click', onPlayerProfileAchievementsToggle);
+  $('player-profile-achievements').addEventListener('click', (e) => {
+    if (e.target.closest('.achievement-chip')) onPlayerProfileAchievementsToggle();
+  });
+  $('btn-player-profile-history-more').addEventListener('click', onPlayerProfileHistoryMoreClick);
+  $('btn-account-edit-bio').addEventListener('click', onAccountEditBioClick);
+  $('account-bio-input').addEventListener('input', onAccountBioInput);
+  $('btn-account-bio-save').addEventListener('click', onAccountBioSave);
+  $('btn-account-bio-cancel').addEventListener('click', onAccountBioCancel);
   $('achievements-grid').addEventListener('keydown', onAchievementTileKeydown);
   $('game-detail-body').addEventListener('click', onGameDetailTableClick);
   // Reached from a name click (Leaderboard, or the game detail modal
@@ -238,11 +256,10 @@ function wireStaticHandlers() {
   $('btn-pass').addEventListener('click', onPass);
   $('btn-resign').addEventListener('click', onResign);
   $('btn-discard-painting').addEventListener('click', onDiscardPainting);
+  initChat();
+  $('achievement-toast').addEventListener('click', onAchievementToastClick);
   $('btn-spec-chat-send').addEventListener('click', onSpecChatSend);
   $('spec-chat-input').addEventListener('keydown', (e) => { if (e.key === 'Enter') onSpecChatSend(); });
-  $('spec-chat-target-toggle').addEventListener('change', (e) => {
-    $('spec-chat-input').placeholder = e.target.checked ? 'Message spectators only…' : 'Message everyone…';
-  });
   $('btn-player-chat-send').addEventListener('click', onPlayerChatSend);
   $('player-chat-input').addEventListener('keydown', (e) => { if (e.key === 'Enter') onPlayerChatSend(); });
   document.querySelectorAll('.quick-reaction-btn').forEach((btn) => {
@@ -256,6 +273,7 @@ function wireStaticHandlers() {
   $('btn-request-rematch').addEventListener('click', onRequestRematchClick);
   $('btn-cancel-rematch-form').addEventListener('click', onCancelRematchForm);
   $('btn-send-rematch-request').addEventListener('click', onSendRematchRequest);
+  $('rematch-bot-tiers').addEventListener('click', onRematchBotTierClick);
   $('btn-accept-rematch').addEventListener('click', onAcceptRematch);
   $('btn-decline-rematch').addEventListener('click', onDeclineRematch);
 

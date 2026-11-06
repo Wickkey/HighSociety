@@ -10,7 +10,7 @@ import { loginToken, setSessionStatus } from '../auth/profile.js';
 import { game } from '../game/gameState.js';
 import { applyGameMessage, ensureGameScreenVisible } from '../game/gameEvents.js';
 import { ws } from './websocket.js';
-import { currentRoomCode, clearRejoinInfo, saveRejoinInfo, leaveToHome } from '../lobby/lobby.js';
+import { currentRoomCode, clearRejoinInfo, clearReconnectBackoff, saveRejoinInfo, leaveToHome } from '../lobby/lobby.js';
 import { startWaitingRoomPolling, setSpectateLinkLabel } from '../lobby/playerList.js';
 import { handleRematchMessage } from '../lobby/rematch.js';
 import { showToast } from '../ui/notifications.js';
@@ -79,6 +79,7 @@ export function handlePlayerMessage(msg) {
     case 'IDENTIFY_SUCCESS':
       if (isReconnecting) {
         isReconnecting = false;
+        clearReconnectBackoff();
         setSessionStatus('playing');
         ensureGameScreenVisible(false);
       } else {

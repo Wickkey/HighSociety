@@ -14,11 +14,97 @@ import { showPlayerProfileScreen } from './playerProfile.js';
 const PAGE_SIZE = 20;
 let leaderboardOffset = 0;
 
+// The roster is small and arrives whole, so its pages are cut here. Kept across
+// visits, like the tab: Back from a bot's profile returns to the same page.
+const BOT_PAGE_SIZE = 10;
+let botOffset = 0;
+let botRows = [];
+
+// Which tab is open. Kept across visits, so coming Back from a bot's profile
+// returns to the bots rather than dropping you on the people.
+let activeTab = 'people';
+
 export function showLeaderboardScreen() {
   showScreen('screen-leaderboard');
   setScreenPath('/leaderboard');
   leaderboardOffset = 0;
-  loadLeaderboardPage(loadProfile());
+  onLeaderboardTabClick(activeTab);
+}
+
+export function onLeaderboardTabClick(tab) {
+  activeTab = tab;
+  const isBots = tab === 'bots';
+  [['people', !isBots], ['bots', isBots]].forEach(([name, selected]) => {
+    const button = $(`leaderboard-tab-${name}`);
+    button.classList.toggle('active', selected);
+    button.setAttribute('aria-selected', String(selected));
+    (selected ? show : hide)($(`leaderboard-${name}`));
+  });
+  if (isBots) loadBotLeaderboard();
+  else loadLeaderboardPage(loadProfile());
+}
+
+async function loadBotLeaderboard() {
+  const body = $('bot-leaderboard-body');
+  const error = $('bot-leaderboard-error');
+  hide(error);
+  const { cached, freshPromise } = swr('leaderboard:bots', () => fetchJSON('/api/leaderboard/bots'));
+  if (cached && (cached.bots || []).length) {
+    paintBotLeaderboard(cached.bots);
+  } else {
+    hide($('bot-leaderboard-pagination'));
+    body.innerHTML = '<tr class="leaderboard-loading-row"><td colspan="5">Loading…</td></tr>';
+    delete body.dataset.renderedHtml;
+  }
+  const result = await freshPromise;
+  if (result && (result.bots || []).length) {
+    paintBotLeaderboard(result.bots);
+  } else if (!cached) {
+    body.innerHTML = '';
+    delete body.dataset.renderedHtml;
+    hide($('bot-leaderboard-pagination'));
+    show(error);
+  }
+}
+
+function paintBotLeaderboard(bots) {
+  botRows = bots;
+  // The roster shrinking under a saved page shouldn't strand you on a blank one.
+  botOffset = Math.min(botOffset, Math.max(0, Math.floor((bots.length - 1) / BOT_PAGE_SIZE) * BOT_PAGE_SIZE));
+  const page = bots.slice(botOffset, botOffset + BOT_PAGE_SIZE);
+  const html = page.map((bot, i) => {
+    const rank = botOffset + i + 1;
+    const rankClass = rank <= 3 ? ` leaderboard-rank-${rank}` : '';
+    const difficulty = `${bot.difficulty.charAt(0).toUpperCase()}${bot.difficulty.slice(1)}`;
+    return `
+      <tr>
+        <td class="leaderboard-rank-cell${rankClass}"><span class="leaderboard-rank-num">${rank}</span></td>
+        <td><button type="button" class="name-link" data-username="${escapeHtml(bot.username)}">${escapeHtml(bot.name)}</button><span class="leaderboard-difficulty" data-difficulty="${escapeHtml(bot.difficulty)}">${escapeHtml(difficulty)}</span></td>
+        <td>${bot.elo}</td>
+        <td>${bot.games_played}</td>
+        <td>${bot.games_won}</td>
+      </tr>
+    `;
+  }).join('');
+  const body = $('bot-leaderboard-body');
+  if (body.dataset.renderedHtml !== html) {
+    body.innerHTML = html;
+    body.dataset.renderedHtml = html;
+  }
+  $('btn-bot-leaderboard-prev').disabled = botOffset === 0;
+  $('btn-bot-leaderboard-next').disabled = botOffset + BOT_PAGE_SIZE >= bots.length;
+  $('bot-leaderboard-page-label').textContent = `${botOffset + 1}–${botOffset + page.length} of ${bots.length}`;
+  show($('bot-leaderboard-pagination'));
+}
+
+export function onBotLeaderboardPrevClick() {
+  botOffset = Math.max(0, botOffset - BOT_PAGE_SIZE);
+  paintBotLeaderboard(botRows);
+}
+
+export function onBotLeaderboardNextClick() {
+  botOffset += BOT_PAGE_SIZE;
+  paintBotLeaderboard(botRows);
 }
 
 export function onLeaderboardPrevClick() {

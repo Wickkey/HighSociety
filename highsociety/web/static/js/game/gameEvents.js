@@ -14,7 +14,7 @@ import {
   enqueueEvent, showFinalGreenOverlay, showCountdownOverlay, hideCountdownOverlay, logLine,
   enqueueTutorialCoach,
 } from '../ui/notifications.js';
-import { appendChatLine } from '../ui/chat.js';
+import { receiveChatMessage, showTableReaction } from '../ui/chat.js';
 import { refreshStatus } from '../lobby/lobby.js';
 import { revealSpectateLiveLayout } from '../lobby/playerList.js';
 import { setSessionStatus } from '../auth/profile.js';
@@ -101,6 +101,9 @@ export function applyGameMessage(msg, isSpectator) {
           o.active = d.active;
           o.statusCards = d.status_cards;
           if (d.elo != null) o.elo = d.elo;
+          if (d.profile_username) o.profileUsername = d.profile_username;
+          if (d.in_auction === false) o.outOfAuction = true;
+          if (d.current_bid) o.lastBid = d.current_bid;
           renderOpponents(isSpectator);
         }
       } else if (d && d.event === 'player_resigned') {
@@ -113,6 +116,14 @@ export function applyGameMessage(msg, isSpectator) {
           o.active = false;
           renderOpponents(isSpectator);
           enqueueEvent(isSpectator, `${d.player} resigned`, 'quit');
+        }
+      } else if (d && d.event === 'player_disconnected') {
+        // Their seat is still theirs -- player_reconnected below undoes this.
+        if (d.player !== game.myUsername) {
+          const o = ensureOpponent(d.player);
+          o.active = false;
+          renderOpponents(isSpectator);
+          enqueueEvent(isSpectator, `${nameOf(d.player)} lost connection`, 'quit');
         }
       } else if (d && d.event === 'player_reconnected') {
         // Counterpart to player_resigned above -- a dropped connection
@@ -227,7 +238,7 @@ export function applyGameMessage(msg, isSpectator) {
       }
       break;
     case 'CHAT':
-      appendChatLine(isSpectator ? 'spec-chat-log' : 'player-chat-log', msg.prompt);
+      receiveChatMessage(isSpectator ? 'spec-chat-log' : 'player-chat-log', msg);
       break;
     case 'REACTION':
       if (msg.from_user && msg.data && msg.data.emoji) {
@@ -501,6 +512,13 @@ function applyPlayerState(msg) {
   const d = msg.data;
   game.myPoints = d.points;
   game.myStatusCards = d.status_cards;
+  // Normally the 'bid' event keeps this right, but a reconnect starts from 0
+  // and has no other way to learn what's already on the table: the bid panel
+  // would read "0 -> X" and under-state every raise.
+  if (Array.isArray(d.current_bid)) {
+    game.myAuctionBid = d.current_bid.reduce((sum, value) => sum + value, 0);
+    updateBidStatus();
+  }
   renderMyPanel();
   // The server sends this at game start and after every action that
   // changes this player's money (their own bid/pass/fold, or a disgrace
@@ -549,11 +567,11 @@ function applyPlayerMove(msg) {
           + 'Tap the painting you\'d rather lose, then press Discard.', 'disgrace');
       }
     }
-    // Discard prompts never carry a per-move timer (see
-    // NetworkPlayer.choose_painting_to_discard — it waits indefinitely), so
-    // clear out any leftover countdown from this player's last bidding turn
-    // rather than leaving a stale/wrong number showing.
-    clearMoveTimer();
+    // In a timed room the server has just sent this prompt's own
+    // PLAYER_MOVE_TIMER (see NetworkPlayer.choose_painting_to_discard), and
+    // clearing unconditionally wiped it: no countdown for up to 5s, until the
+    // next resync. Only an untimed room has a leftover to clear.
+    if (!game.turnTimeLimit) clearMoveTimer();
   } else {
     // Deliberately NOT clearing #move-error here: this same branch is what
     // renders the very next bid prompt immediately after a rejected bid (see
@@ -576,30 +594,5 @@ function applyPlayerMove(msg) {
 }
 
 export function showReactionBubble(username, emoji, isSpectator) {
-  let anchor;
-  if (!isSpectator && game && username === game.myUsername) {
-    anchor = $('my-panel');
-  } else {
-    const listId = isSpectator ? 'spec-players-list' : 'opponents-list';
-    anchor = document.querySelector(`#${listId} .opponent-row[data-username="${CSS.escape(username)}"]`);
-    // The .opponent-row DOM element only exists once renderOpponents() has
-    // actually run since this player was last (re)known about -- ensureOpponent
-    // only updates the in-memory game.opponents entry, not the DOM. A reaction
-    // can easily arrive in the gap before that row has ever been rendered
-    // (e.g. early in a round, before this opponent has bid/passed yet), which
-    // used to make the bubble silently no-op with no visible symptom at all.
-    // Force a render here and retry once before giving up.
-    if (!anchor && game) {
-      ensureOpponent(username);
-      renderOpponents(isSpectator);
-      anchor = document.querySelector(`#${listId} .opponent-row[data-username="${CSS.escape(username)}"]`);
-    }
-  }
-  if (!anchor) return;
-  const bubble = document.createElement('div');
-  bubble.className = 'reaction-bubble';
-  bubble.textContent = emoji;
-  anchor.appendChild(bubble);
-  requestAnimationFrame(() => bubble.classList.add('show'));
-  setTimeout(() => bubble.remove(), 1600);
+  showTableReaction(username, emoji, { mine: !isSpectator && !!game && username === game.myUsername, isSpectator });
 }

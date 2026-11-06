@@ -96,7 +96,7 @@ function seatTileHtml(seat, index, canManage, selfUsername) {
   if (seat.is_bot) {
     const style = botAvatarStyle(seat.username);
     avatarStyle = ` style="background: ${style.bg}"`;
-    avatarContent = style.emoji;
+    avatarContent = seat.avatar_url ? `<img src="${escapeHtml(seat.avatar_url)}" alt="">` : style.emoji;
   } else {
     avatarContent = escapeHtml(seat.name.charAt(0).toUpperCase());
   }

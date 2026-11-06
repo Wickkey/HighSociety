@@ -22,7 +22,12 @@ class NetworkPlayer(BasePlayer):
                  disconnect_grace_seconds: Optional[float] = None):
         super().__init__(name, username)
         self.transport = transport
+        self._went_inactive_at: Optional[float] = None
         self.active = True
+        # Serializes "which transport is live" against the connection-lost
+        # path, which runs on the old connection's own thread (see
+        # connection_lost). Writes of `active` alone don't need it.
+        self._attach_lock = threading.Lock()
         self.game_id: str = game_id
         # True only for a genuine, explicit "quit" command actually received
         # from the client (see get_bid() below) — never set for a dropped
@@ -40,6 +45,19 @@ class NetworkPlayer(BasePlayer):
         # web_server.py computes and passes a real value per-room.
         self.disconnect_grace_seconds = disconnect_grace_seconds
         self._reconnected_event = threading.Event()
+
+    @property
+    def active(self) -> bool:
+        return self._active
+
+    @active.setter
+    def active(self, value: bool) -> None:
+        # Stamped on the True -> False edge only, wherever it comes from (a
+        # failed send, the session loop, a turn's own grace running out), so
+        # wait_for_return measures grace from the real moment of the drop.
+        if not value and getattr(self, "_active", False):
+            self._went_inactive_at = time.monotonic()
+        self._active = value
 
     def reset_for_new_game(self) -> None:
         """Extends BasePlayer.reset_for_new_game() with the two fields that
@@ -85,9 +103,33 @@ class NetworkPlayer(BasePlayer):
         landing on the wire, immediately followed by a catch-up "sync"
         snapshotted *before* it, overwriting the client's now-current state
         back to the wrong round.
+
+        The old connection may not have been noticed as dead yet (a phone
+        changing networks leaves it looking open until a ping is missed), so
+        `active` can still be True here. It's cleared for the same reason
+        finish_reconnect() exists, and the old transport is retired so a game
+        thread blocked on it wakes and re-prompts on this one.
         """
-        self.transport = transport
+        with self._attach_lock:
+            old = self.transport
+            self.active = False
+            self.transport = transport
         self.transport.start()
+        old.retire()
+
+    def connection_lost(self, transport: Transport) -> bool:
+        """
+        `transport` has died: marks this player inactive unless a reconnect
+        already replaced it, in which case its death means nothing. Returns
+        whether it was still the live connection. Locked against reattach():
+        checking and writing separately could clobber a reconnect landing
+        between the two, which then tears down the new connection too.
+        """
+        with self._attach_lock:
+            if self.transport is not transport:
+                return False
+            self.active = False
+            return True
 
     def finish_reconnect(self) -> None:
         """
@@ -108,10 +150,28 @@ class NetworkPlayer(BasePlayer):
         (web_server.py's IDENTIFY_SUCCESS + catch-up state), or those two
         message streams can interleave out of order on the wire.
         """
-        self.active = True
+        with self._attach_lock:
+            self.active = True
         self._reconnected_event.set()
 
-    def _wait_for_reconnect(self, remaining_turn_time: Optional[float]) -> bool:
+    def wait_for_return(self) -> bool:
+        """
+        For a seat whose turn comes up while it's disconnected (see
+        PlayGame._await_return): blocks for whatever is left of the grace
+        period, counted from the moment it dropped, so one drop can hold up
+        the table only once, however many turns it spans. Returns whether the
+        player is back. A resignation has nothing to wait for.
+        """
+        if self.active:
+            return True
+        if self.resigned or self.disconnect_grace_seconds is None or self._went_inactive_at is None:
+            return False
+        left = self.disconnect_grace_seconds - (time.monotonic() - self._went_inactive_at)
+        if left <= 0:
+            return False
+        return self._wait_for_reconnect(left)
+
+    def _wait_for_reconnect(self, remaining_turn_time: Optional[float], dead_transport: Optional[Transport] = None) -> bool:
         """
         Blocks the calling (game) thread up to disconnect_grace_seconds
         waiting for reattach() to run, waking immediately if it does rather
@@ -126,6 +186,12 @@ class NetworkPlayer(BasePlayer):
         which is what keeps a transport with no reconnect mechanism (plain
         socket play via scripts/network_server.py) from ever hanging with no way to
         recover.
+
+        A reconnect can finish before this thread even notices the old
+        connection died, so its wake-up lands before the clear() below and is
+        wiped. Checking for that after clearing closes the gap: without it
+        the player sat out the whole grace and was then marked as having
+        quit, while connected and waiting for their prompt.
         """
         if self.disconnect_grace_seconds is None:
             return False
@@ -133,6 +199,8 @@ class NetworkPlayer(BasePlayer):
         if remaining_turn_time is not None:
             grace = max(0.0, min(grace, remaining_turn_time))
         self._reconnected_event.clear()
+        if self.active and self.transport is not dead_transport and self.transport.is_connected:
+            return True
         return self._reconnected_event.wait(timeout=grace)
 
     def stop_receiver_thread(self) -> None:
@@ -173,11 +241,13 @@ class NetworkPlayer(BasePlayer):
             data=data,
             move_type=move_type,
         )
+        transport = self.transport
         try:
-            self.transport.send(payload)
+            transport.send(payload)
         except (BrokenPipeError, ConnectionResetError, SocketError):
-            if self.active:
-                self.active = False
+            # A failed send on a connection a reconnect has since replaced
+            # says nothing about the player.
+            if self.active and self.connection_lost(transport):
                 print(f"⚠️ Connection lost while sending to {self.username}")
 
     def _belongs_to_this_game(self, msg: dict) -> bool:
@@ -245,9 +315,15 @@ class NetworkPlayer(BasePlayer):
     # auto-pass) -- it only keeps the client's own display honest.
     _CLOCK_RESYNC_INTERVAL_SECONDS = 5.0
 
-    def _receive_with_periodic_resync(self, timeout: Optional[float], move_seq):
+    def _connection_gone(self, transport: Transport) -> bool:
+        """Whether `transport`, the one a prompt was sent on, no longer
+        reaches the player: it died, or a reconnect replaced it, in which
+        case the prompt has to be sent again on the new one."""
+        return not transport.is_connected or self.transport is not transport
+
+    def _receive_with_periodic_resync(self, timeout: Optional[float], move_seq, transport: Transport):
         """
-        self.transport.receive(timeout=timeout), except for a timed move
+        transport.receive(timeout=timeout), except for a timed move
         (timeout is truthy) it polls in shorter slices and re-sends a fresh
         PLAYER_MOVE_TIMER between them instead of one long blocking wait --
         see _CLOCK_RESYNC_INTERVAL_SECONDS above for why. Behaviorally
@@ -255,18 +331,18 @@ class NetworkPlayer(BasePlayer):
         a response arrives, still returns None if the full timeout elapses
         with nothing received, still surfaces a disconnect the same way
         (receive() returns None either way; the caller's own
-        is_connected check right after tells those two apart).
+        _connection_gone check right after tells those two apart).
         """
         if not timeout:
-            return self.transport.receive(timeout=timeout)
+            return transport.receive(timeout=timeout)
 
         deadline = time.time() + timeout
         while True:
             remaining = deadline - time.time()
             if remaining <= 0:
                 return None
-            bid = self.transport.receive(timeout=min(remaining, self._CLOCK_RESYNC_INTERVAL_SECONDS))
-            if bid is not None or not self.transport.is_connected:
+            bid = transport.receive(timeout=min(remaining, self._CLOCK_RESYNC_INTERVAL_SECONDS))
+            if bid is not None or self._connection_gone(transport):
                 return bid
             fresh_remaining = deadline - time.time()
             if fresh_remaining > 0:
@@ -290,18 +366,27 @@ class NetworkPlayer(BasePlayer):
         # invalid bid — lets the web client recognize a retry's prompt as
         # still the same decision rather than a fresh one.
         move_seq = getattr(self, '_current_move_seq', None)
+        # The one this prompt goes out on: a reconnect can swap self.transport
+        # at any moment, and whatever arrives next has to be judged against
+        # the connection that actually carried the prompt.
+        transport = self.transport
+        deadline = time.monotonic() + timeout if timeout else None
         if timeout:
             self.send_message(f"Time left: {timeout:.2f}s ⏰", message_type="PLAYER_MOVE_TIMER",
                                data={"seconds_remaining": timeout, "move_seq": move_seq})
         self.send_message("Enter your bid for the auction: ", message_type="PLAYER_MOVE",
                            data={"move_seq": move_seq})
 
-        bid = self._receive_with_periodic_resync(timeout, move_seq)
+        bid = self._receive_with_periodic_resync(timeout, move_seq, transport)
 
         if bid is None:
-            # Timed out waiting, or the transport has disconnected.
-            if not self.transport.is_connected:
-                if self._wait_for_reconnect(timeout):
+            # Timed out waiting, or the connection is gone.
+            if self._connection_gone(transport):
+                # What's left of the clock *now*: `timeout` was the time left
+                # when the prompt went out, so dropping late in a turn could
+                # run past the deadline everyone else was promised.
+                left = None if deadline is None else deadline - time.monotonic()
+                if self._wait_for_reconnect(left, dead_transport=transport):
                     # Reconnected within the grace period -- None (not
                     # "quit") tells the caller's `if bids is None: continue`
                     # (gameplay.py's _handle_player_turn) to just re-poll,
@@ -413,16 +498,17 @@ class NetworkPlayer(BasePlayer):
                 if remaining is not None and remaining <= 0:
                     self.discard_timed_out = True
                     return min(paintings.values(), key=lambda p: p.value)
+                transport = self.transport  # see get_bid()'s identical line
                 if remaining is not None:
                     self.send_message(f"Time left: {remaining:.2f}s ⏰", message_type="PLAYER_MOVE_TIMER",
                                        data={"seconds_remaining": remaining, "move_seq": move_seq})
                 self.send_message("Choose one to discard: ", message_type="PLAYER_MOVE", move_type="discard_painting",
                                    data={"move_seq": move_seq})
 
-                choice = self._receive_with_periodic_resync(remaining, move_seq)
+                choice = self._receive_with_periodic_resync(remaining, move_seq, transport)
 
                 if choice is None:
-                    if self.transport.is_connected:
+                    if not self._connection_gone(transport):
                         # The clock ran out with no answer (a disconnect is the
                         # only other way to get None here).
                         self.discard_timed_out = True
@@ -430,7 +516,8 @@ class NetworkPlayer(BasePlayer):
                     # Connection closed or receiver stopped -- mirrors
                     # get_bid()'s handling above, bounded by whatever's left
                     # of the clock (uncapped in an untimed room).
-                    if self._wait_for_reconnect(remaining):
+                    left = None if deadline is None else deadline - time.time()
+                    if self._wait_for_reconnect(left, dead_transport=transport):
                         continue  # re-sends "Choose one to discard" on the fresh transport
                     self.active = False
                     return None

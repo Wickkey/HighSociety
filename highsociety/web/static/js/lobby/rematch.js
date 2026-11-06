@@ -18,7 +18,8 @@ import { game, resetGameState, seedOpponents, applyRoomDisplaySettings, remember
 import { ensureGameScreenVisible } from '../game/gameEvents.js';
 import { renderOpponents } from '../game/gameRenderer.js';
 import { loadProfile, setSessionStatus } from '../auth/profile.js';
-import { prefetchAccountStats } from '../account/account.js';
+import { prefetchAccountStats, ACHIEVEMENTS } from '../account/account.js';
+import { showAchievementToasts } from '../ui/notifications.js';
 
 // Rematch panel state on the finished screen: null while no vote is
 // underway, else {requestedBy, botMix, votes} mirroring web_server.py's
@@ -185,12 +186,14 @@ async function revealEloChange(initialStatus) {
   // The save now usually lands within a few hundred ms, so the first few
   // checks come quickly rather than all waiting a full 800ms.
   let changes = initialStatus.elo_changes;
+  let latestStatus = initialStatus;
   for (let attempt = 0; attempt < 24 && (changes === undefined || changes === null); attempt++) {
     await new Promise((resolve) => setTimeout(resolve, attempt < 5 ? 300 : 800));
     if (token !== eloRevealToken) return; // superseded by a newer game (e.g. a rematch)
     try {
       const fresh = await fetchJSON(`/api/status?room=${encodeURIComponent(currentRoomCode())}`);
       changes = fresh.elo_changes;
+      latestStatus = fresh;
     } catch (e) { /* transient network hiccup -- next attempt (or the timeout below) handles it */ }
   }
   if (token !== eloRevealToken) return;
@@ -211,6 +214,10 @@ async function revealEloChange(initialStatus) {
   eloChangesGameId = initialStatus.game_id;
   eloChangesForGame = changes || {};
   showTableEloChanges(eloChangesForGame);
+
+  // Settled means the save has committed, so these are final.
+  const unlockedIds = (latestStatus.new_achievements || {})[game.myUsername] || [];
+  showAchievementToasts(ACHIEVEMENTS.filter((a) => unlockedIds.includes(a.id)));
 
   const mine = changes && changes[game.myUsername];
   const profile = loadProfile();
@@ -315,16 +322,65 @@ export function renderRematchPanel() {
   }
 }
 
+const REMATCH_BOT_TIERS = [
+  { key: 'easy', name: 'Easy', desc: 'Plays for fun' },
+  { key: 'medium', name: 'Medium', desc: 'Thinks ahead' },
+  { key: 'hard', name: 'Hard', desc: 'Counts cards' },
+  { key: 'insane', name: 'Insane', desc: 'Self-trained AI' },
+];
+let rematchBotCounts = {};
+
 function fillRematchBotForm(mix) {
-  const counts = { easy: 0, medium: 0, hard: 0, insane: 0 };
-  mix.forEach((b) => { if (counts[b] !== undefined) counts[b] += 1; });
-  $('rematch-bot-easy').value = counts.easy;
-  $('rematch-bot-medium').value = counts.medium;
-  $('rematch-bot-hard').value = counts.hard;
-  $('rematch-bot-insane').value = counts.insane;
-  $('rematch-bot-hint').textContent = rematchBotSeats
-    ? `${rematchBotSeats} bot seat${rematchBotSeats === 1 ? '' : 's'} to fill (same as last time by default, but changeable).`
-    : 'No bot seats this time. Every seat is a returning player.';
+  rematchBotCounts = Object.fromEntries(REMATCH_BOT_TIERS.map((t) => [t.key, 0]));
+  mix.forEach((b) => { if (rematchBotCounts[b] !== undefined) rematchBotCounts[b] += 1; });
+  $('rematch-bot-tiers').innerHTML = REMATCH_BOT_TIERS.map((t) => `
+    <div class="rematch-tier" data-tier="${t.key}">
+      <div class="rematch-tier-text">
+        <span class="rematch-tier-name">${t.name}</span>
+        <span class="rematch-tier-desc">${t.desc}</span>
+      </div>
+      <div class="host-stepper-controls">
+        <button type="button" class="host-stepper-btn" data-delta="-1" aria-label="One fewer ${t.name} bot">−</button>
+        <span class="host-stepper-value" aria-live="polite"></span>
+        <button type="button" class="host-stepper-btn" data-delta="1" aria-label="One more ${t.name} bot">+</button>
+      </div>
+    </div>`).join('');
+  renderRematchBotForm();
+}
+
+function rematchBotTotal() {
+  return Object.values(rematchBotCounts).reduce((sum, n) => sum + n, 0);
+}
+
+function renderRematchBotForm() {
+  const total = rematchBotTotal();
+  const full = total === rematchBotSeats;
+  const count = $('rematch-seat-count');
+  count.textContent = `${total} of ${rematchBotSeats} seat${rematchBotSeats === 1 ? '' : 's'} filled`;
+  count.classList.toggle('full', full);
+  $('rematch-seat-pips').innerHTML = Array.from({ length: rematchBotSeats }, (_, i) => (
+    `<span class="rematch-seat-pip${i < total ? ' filled' : ''}"></span>`)).join('');
+  document.querySelectorAll('#rematch-bot-tiers .rematch-tier').forEach((tile) => {
+    const n = rematchBotCounts[tile.dataset.tier];
+    tile.classList.toggle('chosen', n > 0);
+    tile.querySelector('.host-stepper-value').textContent = n;
+    tile.querySelector('[data-delta="-1"]').disabled = n === 0;
+    tile.querySelector('[data-delta="1"]').disabled = full;
+  });
+  // Can't be sent short: the button says what's missing rather than erroring after.
+  const send = $('btn-send-rematch-request');
+  send.disabled = !full;
+  send.textContent = full
+    ? 'Send Rematch Request'
+    : `Choose ${rematchBotSeats - total} more bot${rematchBotSeats - total === 1 ? '' : 's'}`;
+}
+
+export function onRematchBotTierClick(e) {
+  const button = e.target.closest('[data-delta]');
+  if (!button || button.disabled) return;
+  const { tier } = button.closest('.rematch-tier').dataset;
+  rematchBotCounts[tier] += Number(button.dataset.delta);
+  renderRematchBotForm();
 }
 
 export function onRequestRematchClick() {
@@ -343,18 +399,9 @@ export function onCancelRematchForm() {
 }
 
 export function onSendRematchRequest() {
-  const counts = {
-    easy: parseInt($('rematch-bot-easy').value || '0', 10),
-    medium: parseInt($('rematch-bot-medium').value || '0', 10),
-    hard: parseInt($('rematch-bot-hard').value || '0', 10),
-    insane: parseInt($('rematch-bot-insane').value || '0', 10),
-  };
+  if (rematchBotTotal() !== rematchBotSeats) return; // the button is disabled until it matches
   const botMix = [];
-  for (const [type, n] of Object.entries(counts)) for (let i = 0; i < n; i += 1) botMix.push(type);
-  if (botMix.length !== rematchBotSeats) {
-    showError($('rematch-error'), `Choose exactly ${rematchBotSeats} bot${rematchBotSeats === 1 ? '' : 's'} total.`);
-    return;
-  }
+  for (const [type, n] of Object.entries(rematchBotCounts)) for (let i = 0; i < n; i += 1) botMix.push(type);
   sendRematchRequest(botMix);
 }
 
@@ -407,6 +454,10 @@ export function handleRematchMessage(msg) {
   }
   // REMATCH_STARTING
   currentRematch = null;
+  eloRevealToken += 1; // the last game's reveal, if still polling, must not land on this one
+  hide($('elo-reveal'));
+  hide($('elo-reveal-guest-note'));
+  hide($('elo-reveal-calculating'));
   const myUsername = game.myUsername;
   // Passing lastStatus() here (not null) matters: reveal_cards/show_logs/
   // turn_time_limit are GameRoom-level settings _maybe_start_rematch never

@@ -70,6 +70,10 @@ ACHIEVEMENTS: list[Achievement] = [
     Achievement("narrow_escape", "Narrow Escape", "Escape elimination with just 1 more money than the poorest player."),
     Achievement("good_company", "Good Company", "Win a game against another person."),
     Achievement("hard_times", "Hard Times", "Win a game with two or more Hard bots at the table."),
+    # Beating the self-trained network.
+    Achievement("turing_test", "Turing Test", "Win a game with an Insane bot at the table."),
+    Achievement("man_vs_machine", "Man vs. Machine", "Win a game with two or more Insane bots at the table."),
+    Achievement("singularity", "Singularity", "Win a game against four Insane bots at once."),
     # Losing has its moments too.
     Achievement("good_sport", "Good Sport", "Finish a game you didn't win."),
     Achievement("thick_skin", "Thick Skin", "Lose 10 games.", CAREER),
@@ -125,6 +129,7 @@ _TOP_PAINTING_VALUE = 10
 _HIGH_ROLLER_PRICE = 20
 _LANDSLIDE_MARGIN = 10
 _PHOTO_FINISH_MARGIN = 1
+_SINGULARITY_INSANE_BOTS = 4  # a five-seat table: you against nothing but them
 
 
 def detect_per_game_achievements(
@@ -222,6 +227,13 @@ def detect_per_game_achievements(
             unlocked[username].add("giant_slayer")
         if bot_mix.count("hard") >= 2:
             unlocked[username].add("hard_times")
+        insane_bots = bot_mix.count("insane")
+        if insane_bots >= 1:
+            unlocked[username].add("turing_test")
+        if insane_bots >= 2:
+            unlocked[username].add("man_vs_machine")
+        if insane_bots >= _SINGULARITY_INSANE_BOTS:
+            unlocked[username].add("singularity")
         if not ever_passed_or_folded[username]:
             unlocked[username].add("fearless")
         if not took_disgrace[username]:

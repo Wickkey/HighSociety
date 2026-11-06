@@ -320,6 +320,9 @@ class GameRoom:
         # None at the top of every fresh game (including a rematch) so a
         # previous game's numbers can never leak into a new one's reveal.
         self.elo_changes: Optional[dict] = None
+        # username -> achievement ids this game newly unlocked. Set before
+        # elo_changes, so a client that sees the Elo result has these too.
+        self.new_achievements: dict[str, list[str]] = {}
         # sender -> recent chat/reaction timestamps, see _chat_allowed.
         self.chat_times: dict[str, list[float]] = {}
         # seat username -> current Elo, for the seats that are rated (see
@@ -338,7 +341,8 @@ class GameRoom:
             # bot (each name has a fixed one, see common/bot_roster.py),
             # None for a human or a heuristic bot.
             {"username": p.username, "name": p.name, "is_bot": not isinstance(p, NetworkPlayer),
-             "difficulty": getattr(p, "difficulty", None), "elo": self.seat_ratings.get(p.username)}
+             "difficulty": getattr(p, "difficulty", None), "elo": self.seat_ratings.get(p.username),
+             **_seat_profile(p)}
             for p in self.players
         ]
 
@@ -449,6 +453,15 @@ class GameRoom:
         threading.Thread(target=_run, daemon=True, name=f"Game-{self.game_id}").start()
 
 
+def _seat_profile(player) -> dict:
+    """What a client needs to show a seat's profile: a roster bot's profile
+    page and picture. Both None for a human or an unnamed bot."""
+    if isinstance(player, NetworkPlayer):
+        return {"profile_username": None, "avatar_url": None}
+    username = _rated_username(player)
+    return {"profile_username": username, "avatar_url": _BOT_AVATARS.get(username)}
+
+
 def _rated_username(player) -> Optional[str]:
     """The players-table username a seat is rated under: a human's own
     username, or a roster bot's namespaced identity (only when the seat
@@ -520,6 +533,9 @@ def _record_game_history(room: "GameRoom", game: PlayGame, started_at: datetime.
         auction_rounds=auction_rounds,
         bot_mix=room.bot_mix,
     )
+    def _store_new_achievements(unlocked: dict) -> None:
+        room.new_achievements = unlocked
+
     def _store_elo_changes(changes: dict) -> None:
         # Written from the background write's own thread -- under the
         # lock since it's a genuine cross-thread write, even though a
@@ -544,6 +560,7 @@ def _record_game_history(room: "GameRoom", game: PlayGame, started_at: datetime.
         host_username=room.host_username,
         time_control=int(room.turn_time_limit) if room.turn_time_limit else None,
         on_complete=_store_elo_changes,
+        on_new_achievements=_store_new_achievements,
     )
 
 
@@ -1202,6 +1219,27 @@ def api_achievements():
 
 
 
+_MAX_BIO_LENGTH = 160
+
+# Profile pictures, bots first. Drop <roster key>.(webp|png|jpg|jpeg) into
+# static/avatars/bots/ (e.g. magnus_carlsen.webp) and that bot shows it, cropped
+# to fit its square; a bot without one keeps its letter or emoji square. Square
+# images about 256px wide look best. Read once at startup.
+_AVATAR_EXTENSIONS = (".webp", ".png", ".jpg", ".jpeg")
+
+
+def _find_bot_avatars(folder: str) -> dict:
+    found = {}
+    for bot in bot_roster.BOT_ROSTER:
+        for extension in _AVATAR_EXTENSIONS:
+            if os.path.isfile(os.path.join(folder, bot.key + extension)):
+                found[bot_roster.roster_username(bot)] = f"/static/avatars/bots/{bot.key}{extension}"
+                break
+    return found
+
+
+_BOT_AVATARS = _find_bot_avatars(os.path.join(app.static_folder, "avatars", "bots"))
+
 # Bot identities get a public profile too -- real aggregate stats already
 # exist for them (bots are real rated participants, see
 # record_finished_game's docstring), they just need a friendlier display
@@ -1263,10 +1301,35 @@ def api_profile(username):
         "last_played_at": stats["last_played_at"],
         "is_bot": bot_profile is not None,
         "display_name": bot_profile["display_name"] if bot_profile else username,
-        "bio": bot_profile["bio"] if bot_profile else None,
+        "bio": bot_profile["bio"] if bot_profile else stats.get("bio"),
+        "avatar_url": _BOT_AVATARS.get(username),
         "bot_difficulty": bot_profile["difficulty"] if bot_profile else None,
         "bot_legacy": bot_profile["legacy"] if bot_profile else False,
     })
+
+
+@app.route("/api/profile/bio", methods=["POST"])
+def api_profile_bio():
+    """Sets the signed-in player's own bio; an empty one clears it. Always
+    shown as plain text. A bot's bio comes from common/bot_roster.py."""
+    body = request.get_json(silent=True) or {}
+    username = (body.get("username") or "").strip()
+    bio = body.get("bio")
+    if not isinstance(bio, str):
+        return jsonify({"error": "bio must be text"}), 400
+    bio = " ".join(bio.split())  # one line, however it was pasted
+    if len(bio) > _MAX_BIO_LENGTH:
+        return jsonify({"error": f"Bio must be {_MAX_BIO_LENGTH} characters or fewer"}), 400
+    if not game_history.is_configured():
+        return jsonify({"error": "Bios need a database, and this server has none."}), 503
+    # A positive match, unlike taking a seat (see _identity_rejected): a database
+    # blip can wait, and must not let anyone write on someone else's profile.
+    if (not username or username in BOT_PROFILES
+            or game_history.login_token_matches(username, body.get("login_token")) is not True):
+        return jsonify({"error": _SIGN_IN_AGAIN}), 403
+    if not game_history.set_player_bio(username, bio or None):
+        return jsonify({"error": "Couldn't save your bio. Try again in a moment."}), 503
+    return jsonify({"bio": bio})
 
 
 @app.route("/api/global_stats")
@@ -1337,6 +1400,13 @@ def api_leaderboard():
     limit, offset = paging
     result = game_history.get_leaderboard(limit=limit, offset=offset)
     return jsonify({"leaderboard": result["rows"], "has_more": result["has_more"]})
+
+
+@app.route("/api/leaderboard/bots")
+def api_bot_leaderboard():
+    """Every roster bot ranked by Elo, played or not -- see
+    get_bot_leaderboard. Short and fixed in size, so not paginated."""
+    return jsonify({"bots": game_history.get_bot_leaderboard()})
 
 
 @app.route("/api/profile/<username>/rating_history")
@@ -1591,6 +1661,7 @@ def _status_payload(room: Optional[GameRoom]) -> dict:
         # revealEloChange) polls this same endpoint a few more times
         # until it's non-null. See GameRoom.elo_changes's own comment.
         payload["elo_changes"] = room.elo_changes
+        payload["new_achievements"] = room.new_achievements
 
         # Everything a finished-screen client needs to render the rematch
         # panel from a plain page load/status poll, not just from the live
@@ -1918,6 +1989,17 @@ def _maybe_start_rematch(room: "GameRoom") -> None:
         # every rematch to it too.
         room.seed = random.randint(0, 2 ** 31 - 1)
         room.manual_seed = False  # always auto-rolled on rematch, see comment above
+        # A rematch is a new game, so it gets its own id. The finished screen
+        # tells games apart by this: with the old id it took the rematch for
+        # the game it had already revealed and left that game's rating change
+        # on screen. Its result and state are cleared here, not when the game
+        # thread gets going, so nothing can read the last game's as this one's.
+        room.game_id = generate_game_id()
+        room.elo_changes = None
+        room.new_achievements = {}
+        room.game = None
+        for p in eligible:
+            p.game_id = room.game_id
         bots = create_bot_players(
             bot_mix, think_time=room.bot_think_time,
             taken_usernames={p.username for p in eligible},
@@ -2009,22 +2091,44 @@ def _run_player_session(player: NetworkPlayer, transport: WebSocketTransport, ro
     tests/network/test_transport.py's note on this exact gotcha), which would
     turn the idle branch into a real busy-spin instead of an idle wait.
     """
-    while player.active and transport.is_connected:
+    # A transport a reconnect has replaced idles here until its socket dies:
+    # returning would close it, and if a second tab owns that socket it would
+    # reconnect and take the seat back, and so on (see WebSocketTransport.retire).
+    while transport.is_connected and (player.active or player.transport is not transport):
         if room.state == "finished":
             msg = transport.receive(timeout=0.5)
             if msg is not None:
                 _handle_post_game_message(player, room, msg)
         else:
             threading.Event().wait(0.5)
-    # Only clear `active` if this transport is still the one attached to the
-    # player. A concurrent reconnect (see NetworkPlayer.reattach) may have
-    # already swapped in a fresh transport and marked them active again by
-    # the time this loop notices the *old* transport died — without this
-    # check, that reconnect gets silently clobbered back to inactive right
-    # after succeeding, which then tears the new connection down too (its
-    # own copy of this same loop reads active=False and exits immediately).
-    if player.transport is transport:
-        player.active = False
+    # Only if this transport is still the one attached to the player: a
+    # concurrent reconnect may have already swapped in a fresh one by the time
+    # this loop notices the *old* transport died (see
+    # NetworkPlayer.connection_lost).
+    if player.connection_lost(transport):
+        _announce_player_left(player, room)
+
+
+def _announce_player_left(player: NetworkPlayer, room: "GameRoom") -> None:
+    """A live connection just ended. During a game, tells the table: nothing
+    did until the engine next reached that seat, so a dropped player looked
+    connected for up to a whole round, and the table sat waiting on them with
+    no explanation. On the finished screen, counts as declining a pending
+    rematch vote: the vote needs every voter's yes, so it would otherwise wait
+    forever on someone who has left."""
+    if room.state in ("starting", "in_progress"):
+        if player.resigned:
+            return  # _handle_out_of_turn_resign already said so
+        formatted = f"🔌 {player.username} disconnected."
+        data = {"event": "player_disconnected", "player": player.username}
+        for p in list(room.players):
+            if isinstance(p, NetworkPlayer) and p is not player and p.active:
+                p.send_message(formatted, message_type="GLOBAL_EVENT", data=data)
+        for s in list(room.spectators):
+            if s.active:
+                s.send_message(formatted, message_type="GLOBAL_EVENT", data=data)
+    elif room.state == "finished":
+        _handle_rematch_vote(player, room, {"accept": False})
 
 
 def _broadcast_spectator_count(room: "GameRoom") -> None:
@@ -2089,6 +2193,11 @@ def _send_opponent_roster(player: "NetworkPlayer | NetworkSpectator", room: "Gam
                 "active": other.active,
                 "status_cards": [summarize_card(c) for c in other.status_cards],
                 "elo": room.seat_ratings.get(other.username),
+                # Where they stand in the current auction, so a reconnecting
+                # client doesn't show everyone back in with no bids.
+                "in_auction": other.current_participation_in_auction,
+                "current_bid": other.current_bid_value,
+                **_seat_profile(other),
             },
         )
 

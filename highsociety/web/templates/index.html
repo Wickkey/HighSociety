@@ -204,6 +204,7 @@
         <div>
           <h2 id="profile-view-username"></h2>
           <p id="profile-view-elo-line" class="muted hidden">Elo <span id="profile-view-elo"></span></p>
+          <p id="profile-view-bio" class="profile-view-bio muted hidden"></p>
         </div>
       </div>
       <div id="profile-view-stats-row" class="account-stats-row hidden">
@@ -401,6 +402,23 @@
           <p id="account-error" class="error hidden"></p>
         </div>
         <p id="account-saved" class="account-saved hidden">Saved.</p>
+
+        <div id="account-bio-view" class="account-bio-block">
+          <p id="account-bio" class="account-bio hidden"></p>
+          <button type="button" id="btn-account-edit-bio" class="account-bio-edit">Add a bio</button>
+        </div>
+        <div id="account-bio-edit" class="account-bio-editor hidden">
+          <label for="account-bio-input" class="username-label">Bio</label>
+          <textarea id="account-bio-input" rows="2" maxlength="160" placeholder="A line about you, shown on your profile"></textarea>
+          <div class="username-status-row">
+            <p id="account-bio-error" class="error hidden"></p>
+            <span id="account-bio-count" class="username-count"></span>
+          </div>
+          <div class="button-row">
+            <button type="button" id="btn-account-bio-save" class="primary">Save</button>
+            <button type="button" id="btn-account-bio-cancel" class="secondary">Cancel</button>
+          </div>
+        </div>
 
         <!-- A guest connects Google here and keeps this username and every
              past game (see login.js's connectGoogleToGuest). Full panel
@@ -724,11 +742,24 @@
           </h3>
           <div id="player-profile-history-list" class="recent-games-list tile-loading-spinner"></div>
           <p id="player-profile-history-empty" class="muted hidden">No games recorded yet.</p>
+          <button type="button" id="btn-player-profile-history-more" class="see-more-btn hidden">See more games</button>
           <div id="player-profile-history-pagination" class="leaderboard-pagination hidden">
             <button type="button" id="btn-player-profile-history-prev" class="secondary" disabled>← Prev</button>
             <span id="player-profile-history-page-label" class="muted"></span>
             <button type="button" id="btn-player-profile-history-next" class="secondary" disabled>Next →</button>
           </div>
+        </div>
+
+        <!-- Hidden only for a bot, decided from the username before anything
+             loads (see showPlayerProfileScreen), so it never pops in late. -->
+        <div id="player-profile-achievements-section" class="card panel account-panel">
+          <div class="profile-achievements-head">
+            <h3>Achievements</h3>
+            <span id="player-profile-achievements-count" class="muted"></span>
+          </div>
+          <div id="player-profile-achievements" class="profile-achievements-strip"></div>
+          <p id="player-profile-achievements-empty" class="muted hidden">No achievements yet.</p>
+          <button type="button" id="btn-player-profile-achievements-toggle" class="see-more-btn hidden" aria-expanded="false"></button>
         </div>
       </div>
     </section>
@@ -738,6 +769,11 @@
       <div class="card panel account-panel leaderboard-panel">
         <button type="button" class="screen-back" id="btn-leaderboard-back">← Back</button>
         <h2>Leaderboard</h2>
+        <div class="leaderboard-tabs" role="tablist" aria-label="Leaderboard">
+          <button type="button" id="leaderboard-tab-people" class="leaderboard-tab active" role="tab" aria-selected="true" aria-controls="leaderboard-people">People</button>
+          <button type="button" id="leaderboard-tab-bots" class="leaderboard-tab" role="tab" aria-selected="false" aria-controls="leaderboard-bots">Bots</button>
+        </div>
+        <div id="leaderboard-people" role="tabpanel" aria-labelledby="leaderboard-tab-people">
         <p class="muted">Top-rated players (Google-linked accounts).</p>
         <!-- The rating-history chart used to live here (see leaderboard.js's
              renderSparkline/loadMyRatingChart, still there for reuse
@@ -757,6 +793,22 @@
           <button type="button" id="btn-leaderboard-prev" class="secondary" disabled>← Prev</button>
           <span id="leaderboard-page-label" class="muted"></span>
           <button type="button" id="btn-leaderboard-next" class="secondary" disabled>Next →</button>
+        </div>
+        </div>
+        <div id="leaderboard-bots" class="hidden" role="tabpanel" aria-labelledby="leaderboard-tab-bots">
+          <p class="muted">Every bot you can meet at the table, and how it's rated.</p>
+          <table class="leaderboard-table">
+            <thead>
+              <tr><th>#</th><th>Bot</th><th>Elo</th><th>Games</th><th>Wins</th></tr>
+            </thead>
+            <tbody id="bot-leaderboard-body"></tbody>
+          </table>
+          <p id="bot-leaderboard-error" class="muted hidden">Couldn't load the bots just now. Try again in a moment.</p>
+          <div id="bot-leaderboard-pagination" class="leaderboard-pagination hidden">
+            <button type="button" id="btn-bot-leaderboard-prev" class="secondary" disabled>← Prev</button>
+            <span id="bot-leaderboard-page-label" class="muted"></span>
+            <button type="button" id="btn-bot-leaderboard-next" class="secondary" disabled>Next →</button>
+          </div>
         </div>
       </div>
     </section>
@@ -783,6 +835,10 @@
       <div class="card panel account-panel">
         <button type="button" class="screen-back" id="btn-achievements-back">← Back</button>
         <h2>Achievements</h2>
+        <div class="achievements-progress">
+          <span id="achievements-count" class="achievements-count">&nbsp;</span>
+          <div class="achievements-progress-track" aria-hidden="true"><span id="achievements-progress-fill"></span></div>
+        </div>
         <div id="account-achievements-guest-note" class="connect-google hidden">
           <p class="muted">Connect Google to unlock the achievements your games have already earned.</p>
           <div id="achievements-connect-google" class="connect-google-button" data-google-button></div>
@@ -1579,6 +1635,8 @@
             </div>
             <div class="auction-stage">
               <div id="event-toast" class="event-toast"></div>
+              <div id="player-table-talk-others" class="table-talk others" aria-live="polite"></div>
+              <div id="player-table-talk-mine" class="table-talk mine"></div>
               <div id="auction-card-type" class="auction-card-type"></div>
               <div id="auction-card" class="auction-card-slot"></div>
               <div id="final-green-overlay" class="final-green-overlay">
@@ -1641,22 +1699,6 @@
             <summary>Game log (advanced) <span id="seed-display" class="muted"></span></summary>
             <div id="game-log" class="log"></div>
           </details>
-
-          <div class="card panel chat-panel">
-            <h3>Chat</h3>
-            <div id="player-chat-log" class="log"></div>
-            <div id="quick-reactions" class="quick-reactions">
-              <button type="button" class="quick-reaction-btn" data-emoji="🗣️" title="Send a reaction">🗣️</button>
-              <button type="button" class="quick-reaction-btn" data-emoji="😂" title="Send a reaction">😂</button>
-              <button type="button" class="quick-reaction-btn" data-emoji="💀" title="Send a reaction">💀</button>
-              <button type="button" class="quick-reaction-btn" data-emoji="🔥" title="Send a reaction">🔥</button>
-              <button type="button" class="quick-reaction-btn" data-emoji="🤔" title="Send a reaction">🤔</button>
-            </div>
-            <div class="button-row">
-              <input type="text" id="player-chat-input" placeholder="Say something…" maxlength="300">
-              <button id="btn-player-chat-send" class="secondary">Send</button>
-            </div>
-          </div>
         </div>
 
         <div class="side-col">
@@ -1678,6 +1720,41 @@
               </span>
             </div>
             <div id="opponents-list"></div>
+          </div>
+        </div>
+      </div>
+      <!-- Chat lives in this slim bar rather than a card in the page: always in
+           reach, and the page keeps room for it (.table-layout's bottom padding)
+           so it never permanently covers anything. Messages also appear briefly
+           beside the auction card (.table-talk). The full log opens on demand. -->
+      <div class="chat-dock">
+        <div class="chat-dock-inner">
+          <div id="player-chat-panel" class="chat-panel hidden" role="region" aria-label="Chat log">
+            <div class="chat-header">
+              <h3>Chat</h3>
+              <button type="button" class="chat-close" data-chat-toggle="player-chat-log" aria-label="Close chat log">×</button>
+            </div>
+            <div class="chat-log-wrap">
+              <div id="player-chat-log" class="chat-log" role="log" aria-label="Chat messages" data-empty="No messages yet. Say hello!"></div>
+              <button type="button" class="chat-new-pill hidden" data-chat-pill="player-chat-log">New messages ↓</button>
+            </div>
+          </div>
+          <div class="chat-bar">
+            <button type="button" id="btn-player-chat-log" class="chat-bar-btn" data-chat-toggle="player-chat-log" aria-expanded="false" aria-controls="player-chat-panel" aria-label="Open chat log" title="Chat log">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a8 8 0 0 1-8 8H4l2.2-3.1A8 8 0 1 1 21 12z"/></svg><span class="chat-unread hidden" data-chat-unread></span>
+            </button>
+            <div class="reaction-picker">
+              <button type="button" id="btn-reaction-picker" class="chat-bar-btn" aria-expanded="false" aria-controls="quick-reactions" aria-label="Send a reaction" title="Send a reaction"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M8.5 14.5a4.5 4.5 0 0 0 7 0"/><path d="M9 9.5h.01M15 9.5h.01"/></svg></button>
+              <div id="quick-reactions" class="quick-reactions">
+                <button type="button" class="quick-reaction-btn" data-emoji="🗣️" title="Send a reaction">🗣️</button>
+                <button type="button" class="quick-reaction-btn" data-emoji="😂" title="Send a reaction">😂</button>
+                <button type="button" class="quick-reaction-btn" data-emoji="💀" title="Send a reaction">💀</button>
+                <button type="button" class="quick-reaction-btn" data-emoji="🔥" title="Send a reaction">🔥</button>
+                <button type="button" class="quick-reaction-btn" data-emoji="🤔" title="Send a reaction">🤔</button>
+              </div>
+            </div>
+            <input type="text" id="player-chat-input" placeholder="Say something…" maxlength="300" enterkeyhint="send" autocomplete="off" aria-label="Chat message">
+            <button id="btn-player-chat-send" class="chat-send">Send</button>
           </div>
         </div>
       </div>
@@ -1728,6 +1805,8 @@
             </div>
             <div class="auction-stage">
               <div id="spec-event-toast" class="event-toast"></div>
+              <div id="spec-table-talk-others" class="table-talk others" aria-live="polite"></div>
+              <div id="spec-table-talk-mine" class="table-talk mine"></div>
               <div id="spec-auction-card-type" class="auction-card-type"></div>
               <div id="spec-auction-card" class="auction-card-slot"></div>
               <div id="spec-final-green-overlay" class="final-green-overlay">
@@ -1753,19 +1832,6 @@
             <summary>Game log <span id="spec-seed-display" class="muted"></span></summary>
             <div id="spec-game-log" class="log"></div>
           </details>
-
-          <div class="card panel chat-panel">
-            <h3>Chat</h3>
-            <div id="spec-chat-log" class="log"></div>
-            <label class="reveal-toggle chat-target-toggle">
-              <input type="checkbox" id="spec-chat-target-toggle">
-              Spectators only (hide from players)
-            </label>
-            <div class="button-row">
-              <input type="text" id="spec-chat-input" placeholder="Message everyone…" maxlength="300">
-              <button id="btn-spec-chat-send" class="secondary">Send</button>
-            </div>
-          </div>
         </div>
 
         <div class="side-col">
@@ -1778,6 +1844,35 @@
             <div class="panel-footer">
               <button id="btn-stop-watching" class="secondary">Stop Watching</button>
             </div>
+          </div>
+        </div>
+      </div>
+      <!-- Chat lives in this slim bar rather than a card in the page: always in
+           reach, and the page keeps room for it (.table-layout's bottom padding)
+           so it never permanently covers anything. Messages also appear briefly
+           beside the auction card (.table-talk). The full log opens on demand. -->
+      <div class="chat-dock">
+        <div class="chat-dock-inner">
+          <div id="spec-chat-panel" class="chat-panel hidden" role="region" aria-label="Chat log">
+            <div class="chat-header">
+              <h3>Chat</h3>
+              <button type="button" class="chat-close" data-chat-toggle="spec-chat-log" aria-label="Close chat log">×</button>
+            </div>
+            <div class="chat-log-wrap">
+              <div id="spec-chat-log" class="chat-log" role="log" aria-label="Chat messages" data-empty="No messages yet."></div>
+              <button type="button" class="chat-new-pill hidden" data-chat-pill="spec-chat-log">New messages ↓</button>
+            </div>
+            <label class="reveal-toggle chat-target-toggle">
+              <input type="checkbox" id="spec-chat-target-toggle">
+              Spectators only (hide from players)
+            </label>
+          </div>
+          <div class="chat-bar">
+            <button type="button" id="btn-spec-chat-log" class="chat-bar-btn" data-chat-toggle="spec-chat-log" aria-expanded="false" aria-controls="spec-chat-panel" aria-label="Open chat log" title="Chat log">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a8 8 0 0 1-8 8H4l2.2-3.1A8 8 0 1 1 21 12z"/></svg><span class="chat-unread hidden" data-chat-unread></span>
+            </button>
+            <input type="text" id="spec-chat-input" placeholder="Message everyone…" maxlength="300" enterkeyhint="send" autocomplete="off" aria-label="Chat message">
+            <button id="btn-spec-chat-send" class="chat-send">Send</button>
           </div>
         </div>
       </div>
@@ -1828,17 +1923,13 @@
 
         <div id="rematch-panel" class="rematch-panel hidden">
           <button id="btn-request-rematch" class="primary">Request Rematch</button>
-          <div id="rematch-bot-form" class="hidden">
-            <fieldset class="bot-mix">
-              <legend>Bot seats for the rematch</legend>
-              <div class="bot-row">
-                <label>Easy <input type="number" id="rematch-bot-easy" min="0" max="4" value="0"></label>
-                <label>Medium <input type="number" id="rematch-bot-medium" min="0" max="4" value="0"></label>
-                <label>Hard <input type="number" id="rematch-bot-hard" min="0" max="4" value="0"></label>
-                <label>Insane <input type="number" id="rematch-bot-insane" min="0" max="4" value="0"></label>
-              </div>
-              <p id="rematch-bot-hint" class="hint"></p>
-            </fieldset>
+          <div id="rematch-bot-form" class="rematch-bot-form hidden">
+            <div class="rematch-bot-head">
+              <h3>Choose your opponents</h3>
+              <span id="rematch-seat-count" class="rematch-seat-count" aria-live="polite"></span>
+            </div>
+            <div id="rematch-seat-pips" class="rematch-seat-pips" aria-hidden="true"></div>
+            <div id="rematch-bot-tiers" class="rematch-bot-tiers"></div>
             <div class="button-row">
               <button id="btn-send-rematch-request" class="primary">Send Rematch Request</button>
               <button id="btn-cancel-rematch-form" class="secondary">Cancel</button>
@@ -1884,6 +1975,15 @@
        lobby.js's loadHomeGlobalStats); no database configured (local
        dev) just leaves this out entirely rather than showing a
        hardcoded 0. -->
+  <button type="button" id="achievement-toast" class="achievement-toast hidden" role="status">
+    <span id="achievement-toast-icon" class="achievement-toast-icon" aria-hidden="true"></span>
+    <span class="achievement-toast-text">
+      <span class="achievement-toast-label">Achievement unlocked</span>
+      <strong id="achievement-toast-name"></strong>
+      <span id="achievement-toast-desc" class="achievement-toast-desc"></span>
+    </span>
+  </button>
+
   <div id="home-global-stats" class="home-global-stats hidden">
     <div class="home-global-stat">
       <span class="home-global-stat-icon">

@@ -67,6 +67,8 @@ let stopRoomsPoll = null;
 // this is what lets the browser find its way back to it. Stored per-room
 // (not just "the" token) so multiple rooms across tabs/history don't clash.
 let reconnectAttempted = false;
+let reconnectFailures = 0;
+let reconnectTimer = null;
 export function markReconnectAttempted() { reconnectAttempted = true; }
 
 // Set the moment the user clicks Resign — the client already knows this seat
@@ -232,7 +234,8 @@ export async function loadHomeGlobalStats() {
 function resetRoomState(clearRejoin) {
   if (clearRejoin) clearRejoinInfo(currentRoomCodeValue);
   currentRoomCodeValue = null;
-  reconnectAttempted = false;
+  if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+  clearReconnectBackoff();
   hasResigned = false;
   gameFinished = false;
   joinIdentityOverridden = false;
@@ -417,7 +420,15 @@ export async function refreshStatus() {
   try {
     status = await fetchJSON(`/api/status?room=${encodeURIComponent(currentRoomCodeValue)}`);
   } catch (e) {
-    return; // transient network hiccup — next poll (or manual reload) retries
+    // Transient network hiccup — next poll (or manual reload) retries. But no
+    // poll is running while we're trying to get back into a game, so being
+    // offline would end the retries right when they're needed.
+    const state = lastStatusValue && lastStatusValue.state;
+    if (!ws && !hasResigned && (state === 'starting' || state === 'in_progress')
+        && loadRejoinInfo(currentRoomCodeValue)) {
+      scheduleReconnect();
+    }
+    return;
   }
   lastStatusValue = status;
   renderForStatus(status);
@@ -452,12 +463,10 @@ export function renderForStatus(status) {
   }
   // starting / in_progress
   if (!ws) {
-    if (!hasResigned && !reconnectAttempted) {
-      reconnectAttempted = true;
-      if (attemptReconnect()) {
-        stopPolling();
-        return;
-      }
+    if (!hasResigned && loadRejoinInfo(currentRoomCodeValue)) {
+      stopPolling();
+      scheduleReconnect();
+      return;
     }
     stopPolling();
     if (hasResigned) {
@@ -479,6 +488,29 @@ export function renderForStatus(status) {
     show($('lobby-status'));
     $('lobby-status').textContent = 'A game is already in progress. You can watch as a spectator.';
   }
+}
+
+// Keeps trying for as long as this browser holds a rejoin token and the room
+// is still running: one attempt per room visit meant the second drop of a game,
+// or a first retry made while still offline, gave the seat up for good. It can't
+// loop on a dead token, because the server's refusal clears it (see messages.js's
+// IDENTIFY_ERROR). The first attempt is immediate, later ones back off.
+function scheduleReconnect() {
+  if (reconnectTimer) return;
+  const delay = reconnectAttempted ? Math.min(1000 * 2 ** reconnectFailures, 8000) : 0;
+  if (reconnectAttempted) reconnectFailures += 1;
+  reconnectAttempted = true;
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = null;
+    if (!ws && !hasResigned) attemptReconnect();
+  }, delay);
+}
+
+// The seat is back (see messages.js's IDENTIFY_SUCCESS): the next drop, if any,
+// starts over with an immediate attempt.
+export function clearReconnectBackoff() {
+  reconnectAttempted = false;
+  reconnectFailures = 0;
 }
 
 let statusPollTimer = null;
