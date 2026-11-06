@@ -2961,3 +2961,30 @@ def test_the_replay_page_is_served_and_kept_out_of_search_results():
     assert response.status_code == 200
     html = response.get_data(as_text=True)
     assert "Game Replay" in html and "noindex" in html
+
+
+@pytest.mark.parametrize("bad", ['x"y', "o'neil", "<b>", "a&b", "a`b", "tab\tname"])
+def test_new_usernames_cant_contain_characters_that_mean_something_in_html(bad):
+    client = web_server.app.test_client()
+    assert client.post("/api/auth/guest/claim", json={"username": bad}).status_code == 400
+    assert client.post("/api/auth/google/claim_username", json={"username": bad, "id_token": "x"}).status_code == 400
+    assert client.post("/api/auth/username/change", json={"old_username": "a", "new_username": bad}).status_code == 400
+    check = client.get("/api/auth/username/check", query_string={"username": bad}).get_json()
+    assert check["available"] is False and "can't contain" in check["error"]
+
+
+def test_ordinary_usernames_are_still_accepted():
+    client = web_server.app.test_client()
+    for good in ("CrimsonNaruto482", "Mary Jane", "José_99", "a.b-c"):
+        assert client.post("/api/auth/guest/claim", json={"username": good}).status_code == 200
+
+
+def test_a_google_name_with_an_apostrophe_suggests_a_username_that_can_be_claimed(monkeypatch):
+    monkeypatch.setattr(game_history, "taken_usernames", lambda candidates: set())
+    assert web_server._free_username_like("Conan O'Brien") == "Conan OBrien"
+
+
+def test_someone_with_an_older_name_can_still_keep_it():
+    check = web_server.app.test_client().get(
+        "/api/auth/username/check", query_string={"username": "o'neil", "current": "o'neil"}).get_json()
+    assert check["available"] is True

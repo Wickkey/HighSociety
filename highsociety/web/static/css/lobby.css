@@ -2533,8 +2533,9 @@ button.secondary.standalone { margin-top: 0.9rem; display: inline-block; }
 }
 .game-action-btn:hover:not(:disabled) { border-color: var(--accent-light); background: var(--accent-soft); box-shadow: none; transform: none; }
 .game-action-btn:disabled { opacity: 0.45; cursor: not-allowed; }
-.game-action-btn.primary-action { border-color: transparent; background: var(--accent); color: #fff; }
-.game-action-btn.primary-action:hover:not(:disabled) { border-color: transparent; background: var(--accent); filter: brightness(1.08); }
+/* Quiet until asked for: a list of games shouldn't be a column of gold buttons
+   competing with the screen's real main action. */
+.game-action-btn.primary-action:hover:not(:disabled) { border-color: transparent; background: var(--accent); color: #fff; }
 @media (max-width: 560px) {
   .recent-game-row { flex-wrap: wrap; }
   /* Under the result on a phone, so the names keep their width. */

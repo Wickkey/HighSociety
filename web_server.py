@@ -762,6 +762,15 @@ def _identify(ws, game_id: str, first_prompt: str, second_prompt: str):
 
 
 _MAX_USERNAME_LENGTH = 24
+# Not allowed in a new username: characters that mean something in HTML. Names
+# are escaped wherever they're shown, so this is a second line of defence, and
+# accounts that already have one of these keep working.
+_USERNAME_FORBIDDEN_CHARACTERS = "<>\"'&`"
+_USERNAME_CHARACTERS_ERROR = f"Usernames can't contain {' '.join(_USERNAME_FORBIDDEN_CHARACTERS)}"
+
+
+def _username_has_forbidden_characters(username: str) -> bool:
+    return any(c in _USERNAME_FORBIDDEN_CHARACTERS or not c.isprintable() for c in username)
 # A display name arrives over the game socket, not through the sign-up
 # endpoints that check usernames, so it gets its own cap.
 _MAX_DISPLAY_NAME_LENGTH = 40
@@ -857,7 +866,8 @@ def _free_username_like(name: str) -> str:
     Google name doesn't cost them a failed attempt. Still just a suggestion
     (the box stays editable and claim_username re-checks); "" when there's
     no name or nothing free nearby, which leaves the box empty."""
-    base = " ".join(name.split())[:_MAX_USERNAME_LENGTH]
+    allowed = "".join(c for c in name if not _username_has_forbidden_characters(c) or c.isspace())
+    base = " ".join(allowed.split())[:_MAX_USERNAME_LENGTH]
     if not base:
         return ""
     candidates = [base]
@@ -901,6 +911,8 @@ def api_auth_username_check():
         return jsonify({"available": False, "error": f"Usernames are up to {_MAX_USERNAME_LENGTH} characters."})
     if current and username == current:
         return jsonify({"available": True, "username": username})
+    if _username_has_forbidden_characters(username):
+        return jsonify({"available": False, "error": _USERNAME_CHARACTERS_ERROR})
     if _username_available(username):
         return jsonify({"available": True, "username": username})
     return jsonify({"available": False, "username": username, "error": "Already taken.",
@@ -926,6 +938,8 @@ def api_auth_google_claim_username():
     username = (body.get("username") or "").strip()
     if not username or len(username) > _MAX_USERNAME_LENGTH:
         return jsonify({"error": f"Username must be 1-{_MAX_USERNAME_LENGTH} characters"}), 400
+    if _username_has_forbidden_characters(username):
+        return jsonify({"error": _USERNAME_CHARACTERS_ERROR}), 400
     display_name = (body.get("display_name") or "").strip() or username
 
     claims = _verify_google_id_token(token)
@@ -1058,6 +1072,8 @@ def api_auth_guest_claim():
     username = (body.get("username") or "").strip()
     if not username or len(username) > _MAX_USERNAME_LENGTH:
         return jsonify({"error": f"Username must be 1-{_MAX_USERNAME_LENGTH} characters"}), 400
+    if _username_has_forbidden_characters(username):
+        return jsonify({"error": _USERNAME_CHARACTERS_ERROR}), 400
 
     if not game_history.is_configured():
         return jsonify({"username": username})
@@ -1106,6 +1122,8 @@ def api_auth_username_change():
     new_username = (body.get("new_username") or "").strip()
     if not new_username or len(new_username) > _MAX_USERNAME_LENGTH:
         return jsonify({"error": f"Username must be 1-{_MAX_USERNAME_LENGTH} characters"}), 400
+    if _username_has_forbidden_characters(new_username):
+        return jsonify({"error": _USERNAME_CHARACTERS_ERROR}), 400
 
     if not game_history.is_configured():
         return jsonify({"username": new_username})
