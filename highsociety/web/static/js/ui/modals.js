@@ -110,8 +110,8 @@ export async function openGameDetailModal(gameId, { replayable = false, setup = 
   $('game-detail-date').textContent = '';
   gameDetailActions = { gameId, setup };
   $('game-detail-replay').disabled = !replayable;
-  $('game-detail-replay').title = replayable ? '' : 'Replays aren\'t available for older games';
-  $('game-detail-play-again').disabled = !setup;
+  $('game-detail-replay').title = replayable ? '' : 'This game can\'t be replayed.';
+  $('game-detail-play-again').classList.toggle('hidden', !setup);
   show($('game-detail-modal'));
   try {
     // A finished game never changes, so a cached copy is final -- only a

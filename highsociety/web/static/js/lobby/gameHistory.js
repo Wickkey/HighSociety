@@ -62,8 +62,11 @@ function ratingDeltaHtml(game) {
 // they can't visually drift apart the way Account's own bespoke version
 // once did.
 function gamesListHtml(games, myUsername) {
+  // `myUsername` is whose list this is. Play again is only for the viewer's own games.
+  const profile = loadProfile();
+  const isViewersOwn = !!profile && profile.username === myUsername;
   return games.map((g) => `
-    <button type="button" class="recent-game-row" data-game-id="${g.game_id}" data-replayable="${g.replayable ? '1' : ''}" data-setup="${encodeURIComponent(JSON.stringify(gameSetup(g)))}">
+    <button type="button" class="recent-game-row" data-game-id="${g.game_id}" data-replayable="${g.replayable ? '1' : ''}" data-setup="${isViewersOwn ? encodeURIComponent(JSON.stringify(gameSetup(g))) : ''}">
       <span class="recent-game-placement${placementClass(g.placement)}">#${g.placement}</span>
       <span class="recent-game-body">
         <span class="recent-game-opponents">${escapeHtml(opponentsLabel(g, myUsername))}</span>
@@ -91,7 +94,7 @@ function wireRowClicks(container) {
     row.dataset.wired = 'true'; // re-rendering a page whose rows are already wired shouldn't double-bind them
     row.addEventListener('click', () => openGameDetailModal(row.dataset.gameId, {
       replayable: !!row.dataset.replayable,
-      setup: JSON.parse(decodeURIComponent(row.dataset.setup)),
+      setup: row.dataset.setup ? JSON.parse(decodeURIComponent(row.dataset.setup)) : null,
     }));
   });
 }

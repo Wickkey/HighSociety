@@ -189,7 +189,7 @@ export async function showReplayScreen(gameId, from = null) {
   hide($('replay-loading'));
   if (!result) {
     $('replay-unavailable').textContent = failure && failure.status === 409
-      ? 'This game can\'t be replayed. It was played under older rules, or before replays were recorded.'
+      ? 'This game can\'t be replayed.'
       : 'Couldn\'t load this replay. Try again in a moment.';
     show($('replay-unavailable'));
     return;
