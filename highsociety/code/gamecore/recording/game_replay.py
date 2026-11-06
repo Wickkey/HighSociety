@@ -126,9 +126,11 @@ def _make_replay_seat_class():
             """Connected as of liveness check `check`: every recorded change
             for this seat seen at or before that check, applied in order."""
             live = True
+            self.resigned = False
             for change in self._liveness:
                 if change["amount"] <= check:
                     live = change["action"] == "reconnect"
+                    self.resigned = change["action"] == "resign"
             return live
 
         def _next(self, wanted: tuple) -> Optional[dict]:

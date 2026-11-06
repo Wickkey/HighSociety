@@ -341,14 +341,60 @@ class PlayGame():
         return sum(1 for p in self.players if self._is_active(p) and p.current_participation_in_auction)
 
 
+    def _bidders_remaining(self) -> int:
+        """Seats still in the current auction, read fresh every time. A kept
+        running count went wrong as soon as a seat dropped and came back:
+        the auction could end with two live bidders, and the first seat at
+        the table took the card even if out-bid."""
+        return sum(1 for p in self.players if p.current_participation_in_auction)
+
+    def _highest_standing_bid(self) -> int:
+        return max((p.current_bid_value for p in self.players if p.current_participation_in_auction), default=0)
+
     def _get_auction_winner(self) -> int:
         """
-        Returns the id of the auction winner.
+        Returns the id of the auction winner: the connected seat still in the
+        auction or, failing that, a lone disconnected one, whose bid stands
+        (they kept their place until their turn came round). -1 if there's
+        no one to give the card to.
         """
-        for idx, player in enumerate(self.players):
-            if player.current_participation_in_auction and self._is_active(player):
+        remaining = [i for i, p in enumerate(self.players) if p.current_participation_in_auction]
+        for idx in remaining:
+            if self._is_active(self.players[idx]):
                 return idx
-        return -1
+        return remaining[0] if len(remaining) == 1 else -1
+
+    def _await_return(self, player: BasePlayer) -> None:
+        """Gives a disconnected seat whatever is left of its reconnect grace.
+        A seat that can't come back has no wait_for_return, or returns from
+        it at once. Callers re-read who's connected afterward no matter what,
+        so a replay, which never waits, numbers its liveness checks the same
+        way (see _sync_liveness)."""
+        waiter = getattr(player, "wait_for_return", None)
+        if waiter is not None:
+            waiter()
+
+    def _await_return_on_turn(self, player: BasePlayer, status_card: StatusCard, max_bid: int) -> None:
+        """A disconnected seat's turn has come up: shows the table who it's
+        waiting on, gives them their grace, and re-reads who's connected."""
+        self._broadcast_auction_update("turn_start", status_card, player=player.username, max_bid=max_bid)
+        self._await_return(player)
+        self._sync_liveness()
+
+    def _force_out_of_auction(self, player: BasePlayer, status_card: StatusCard, record: AuctionRecord) -> int:
+        """
+        A seat that left without answering a prompt leaves the auction the
+        way a pass does: its bid comes back (a reset alone would have
+        destroyed those cards) and it stays out until the next auction, even
+        if it reconnects. Returns the auction's new highest bid.
+        """
+        player.withdraw_bid()
+        self._log_action(player, "pass", reason="disconnected", record=record)
+        self.host.send_message(f"⚪ {player.username} passed.\n")
+        max_bid = self._highest_standing_bid()
+        self._broadcast_auction_update("pass", status_card, player=player.username, max_bid=max_bid)
+        self._record_auction_history_snapshot()
+        return max_bid
 
 
     def _broadcast_auction_result(self, record: AuctionRecord) -> None:
@@ -501,25 +547,8 @@ class PlayGame():
         move_seq = self._next_move_sequence()
         player._current_move_seq = move_seq
 
-        # Notify everyone else first -- this doesn't touch `player`'s own
-        # move panel, so no reason to hold it back for the pacing wait below.
-        created_at = time.time()
-        for p in self.players:
-            if not p.active or p == player:
-                continue  # already quit/disconnected, or is `player` themselves (handled below)
-            p.send_message(f"{player.username}'s turn. Player is playing..",
-            message_type = "GLOBAL_MOVE_INFO",
-            created_at = created_at)
-        for s in (self.spectators or []):
-            if not s.active:
-                continue
-            s.send_message(f"{player.username}'s turn. Player is playing..", message_type = "GLOBAL_MOVE_INFO",
-            created_at = created_at)
-
-        self._broadcast_auction_update("turn_start", status_card, player=player.username, max_bid=max_bid)
-
-        # Pace *before* anything reaches `player` themselves, rather than
-        # sending them an early "you can act now" prompt and only delaying
+        # Pace *before* anything goes out about this turn, rather than
+        # sending `player` an early "you can act now" prompt and only delaying
         # the deadline computation that follows it (the previous design).
         # That split — one message opening the move panel immediately,
         # a second, separate one carrying the real timer once this wait
@@ -536,6 +565,11 @@ class PlayGame():
         # turn -- but it's never live-and-wrong, only briefly not-yet-live,
         # which is the truth.
         #
+        # The other players' turn_start waits too: their browsers start this
+        # player's countdown when it arrives (gameRenderer.js's opponent
+        # timer), so sending it ahead of this wait put their clock up to
+        # ~3s ahead of the real one, reading 0 while the turn was still live.
+        #
         # consume=False: this call has no broadcast of its own, so it must
         # not stamp _last_toast_broadcast_at — doing so used to make this
         # player's own next real broadcast (their bid/pass) eat an extra,
@@ -543,6 +577,21 @@ class PlayGame():
         # had just fired when none actually had.
         if self.__TURN_DURATION is not None:
             self._pace_toast_event(consume=False)
+
+        created_at = time.time()
+        for p in self.players:
+            if not p.active or p == player:
+                continue  # already quit/disconnected, or is `player` themselves (handled below)
+            p.send_message(f"{player.username}'s turn. Player is playing..",
+            message_type = "GLOBAL_MOVE_INFO",
+            created_at = created_at)
+        for s in (self.spectators or []):
+            if not s.active:
+                continue
+            s.send_message(f"{player.username}'s turn. Player is playing..", message_type = "GLOBAL_MOVE_INFO",
+            created_at = created_at)
+
+        self._broadcast_auction_update("turn_start", status_card, player=player.username, max_bid=max_bid)
 
         # Defensive resync sent straight to this player right before their
         # own turn prompt: guarantees their auction panel (round #, card
@@ -645,103 +694,90 @@ class PlayGame():
             card=summarize_card(status_card),
             starting_money={p.username: p.money_left() for p in self.players},
         )
-        # The previous auction's last snapshot was taken before
-        # reset_auction_attributes(), so without this the first turn of every
-        # auction would see last auction's bids and passes.
+        # A seat already gone when the auction starts sits this one out, even
+        # if it comes back partway through. Before the snapshot below, which
+        # bots read (the previous auction's last snapshot was taken before
+        # reset_auction_attributes(), so without it the first turn of every
+        # auction would see last auction's bids and passes).
+        self._sync_liveness()
+        for p in self.players:
+            if not self._is_active(p):
+                p.withdraw_bid()
         self._record_auction_history_snapshot()
 
-        self._sync_liveness()
-        num_players_in_auction = self._count_active_auction_players()
         current_player_id = starting_player_id
         max_bid = 0
-        # Exactly who's actually included in the count above (active AND
-        # still participating as of right now) — reset_auction_attributes()
-        # unconditionally sets current_participation_in_auction back to True
-        # for *every* player ahead of each new auction, active or not, so
-        # that flag alone can't tell "already inactive before this auction
-        # even started" (already correctly excluded above; must not be
-        # subtracted again) apart from "still counted a moment ago, but just
-        # went inactive mid-loop" (see the skip branch below, which needs
-        # exactly this distinction).
-        counted_player_ids = {i for i, p in enumerate(self.players)
-                               if self._is_active(p) and p.current_participation_in_auction}
 
-        while (num_players_in_auction > 1):
+        while True:
             self._sync_liveness()
+            # A resignation is final, so it leaves the auction at once, and a
+            # resigned top bid doesn't stay up for the others to beat. A plain
+            # disconnect keeps its place until its turn comes round below.
+            for p in self.players:
+                if (p.current_participation_in_auction and not self._is_active(p)
+                        and getattr(p, "resigned", False)):
+                    max_bid = self._force_out_of_auction(p, status_card, record)
+            if self._bidders_remaining() <= 1:
+                break
+
             player = self.players[current_player_id]
 
-            if not self._is_active(player) or player.current_participation_in_auction == False:
-                if not self._is_active(player) and current_player_id in counted_player_ids:
-                    # Went inactive asynchronously since the count above was
-                    # taken (e.g. an out-of-turn resign — see web_server.py's
-                    # on_resign — or a mid-auction disconnect), rather than
-                    # through their own turn's pass/fold/quit branch below.
-                    # Account for their departure now, exactly once (removed
-                    # from counted_player_ids, so a later skip of the same
-                    # player can't re-decrement) — otherwise they'd be
-                    # skipped forever without ever being subtracted, and once
-                    # they're one of only two players left, the real
-                    # remaining bidder would be re-prompted forever with no
-                    # one left to actually out-bid.
-                    counted_player_ids.discard(current_player_id)
-                    num_players_in_auction -= 1
-                    if num_players_in_auction <= 1:
-                        break
+            if not player.current_participation_in_auction:
                 current_player_id = self.get_next_player_id(current_player_id)
                 continue
 
+            if not self._is_active(player):
+                self._await_return_on_turn(player, status_card, max_bid)
+                if not self._is_active(player):
+                    max_bid = self._force_out_of_auction(player, status_card, record)
+                    current_player_id = self.get_next_player_id(current_player_id)
+                    continue
+
+            # Let player take a turn
+            action_result = self._handle_player_turn(player, max_bid, status_card)
+            # Handle result types
+            if action_result in ["pass", "fold"]:
+                think_ms, reason = self._last_turn
+                self._log_action(player, action_result, think_ms=think_ms, reason=reason, record=record)
+                self.host.send_message(f"⚪ {player.username} passed.\n")
+                # Passing/folding refunds whatever this player had
+                # already committed this auction (see
+                # _handle_player_turn's withdraw_bid()) -- without this,
+                # their own client had no way to find out until their
+                # next real turn, since only PLAYER_MOVE ever populated
+                # their money display before. Sent *before*
+                # _broadcast_auction_update, which paces itself for
+                # everyone else's toast narration (see
+                # _pace_toast_event) -- that pacing has nothing to do
+                # with this player's own factual money count, so it
+                # shouldn't delay it too.
+                self._send_player_state(player)
+                self._broadcast_auction_update(action_result, status_card, player=player.username, max_bid=max_bid)
+
+            elif action_result == "quit":
+                self._set_inactive(player)
+                self._log_action(player, "quit", think_ms=self._last_turn[0], record=record)
+                self.host.send_message(f"❌ {player.username} quit the game.\n")
+                self._broadcast_auction_update("quit", status_card, player=player.username, max_bid=max_bid)
+
+            elif isinstance(action_result, int) and action_result > max_bid:
+                max_bid = action_result
+                self._log_action(player, "bid", max_bid,
+                                 cards=[c.value for c in player.current_money_card_bids],
+                                 think_ms=self._last_turn[0], record=record)
+                self.host.send_message(f"💰 {player.username} raised to {max_bid}.\n")
+                # See the pass/fold branch above for why this goes
+                # before the (self-pacing) broadcast, not after.
+                self._send_player_state(player)
+                self._broadcast_auction_update("bid", status_card, player=player.username, max_bid=max_bid,
+                                                cards=[c.value for c in player.current_money_card_bids])
+
             else:
-                # Let player take a turn
-                action_result = self._handle_player_turn(player, max_bid, status_card)
-                # Handle result types
-                if action_result in ["pass", "fold"]:
-                    num_players_in_auction -= 1
-                    think_ms, reason = self._last_turn
-                    self._log_action(player, action_result, think_ms=think_ms, reason=reason, record=record)
-                    self.host.send_message(f"⚪ {player.username} passed.\n")
-                    # Passing/folding refunds whatever this player had
-                    # already committed this auction (see
-                    # _handle_player_turn's withdraw_bid()) -- without this,
-                    # their own client had no way to find out until their
-                    # next real turn, since only PLAYER_MOVE ever populated
-                    # their money display before. Sent *before*
-                    # _broadcast_auction_update, which paces itself for
-                    # everyone else's toast narration (see
-                    # _pace_toast_event) -- that pacing has nothing to do
-                    # with this player's own factual money count, so it
-                    # shouldn't delay it too.
-                    self._send_player_state(player)
-                    self._broadcast_auction_update(action_result, status_card, player=player.username, max_bid=max_bid)
+                # Invalid / repeated bid
+                pass
 
-                elif action_result == "quit":
-                    self._set_inactive(player)
-                    num_players_in_auction -= 1
-                    self._log_action(player, "quit", think_ms=self._last_turn[0], record=record)
-                    self.host.send_message(f"❌ {player.username} quit the game.\n")
-                    self._broadcast_auction_update("quit", status_card, player=player.username, max_bid=max_bid)
-
-                elif isinstance(action_result, int) and action_result > max_bid:
-                    max_bid = action_result
-                    self._log_action(player, "bid", max_bid,
-                                     cards=[c.value for c in player.current_money_card_bids],
-                                     think_ms=self._last_turn[0], record=record)
-                    self.host.send_message(f"💰 {player.username} raised to {max_bid}.\n")
-                    # See the pass/fold branch above for why this goes
-                    # before the (self-pacing) broadcast, not after.
-                    self._send_player_state(player)
-                    self._broadcast_auction_update("bid", status_card, player=player.username, max_bid=max_bid,
-                                                    cards=[c.value for c in player.current_money_card_bids])
-
-                else:
-                    # Invalid / repeated bid
-                    pass
-
-                self._record_auction_history_snapshot()
-
-                if num_players_in_auction <= 1:
-                    break
-
-                current_player_id = self.get_next_player_id(current_player_id)
+            self._record_auction_history_snapshot()
+            current_player_id = self.get_next_player_id(current_player_id)
 
         # --- Determine Winner ---
         winner_id = self._get_auction_winner()
@@ -823,16 +859,24 @@ class PlayGame():
 
             # skip inactive players
             if not self._is_active(player):
-                if current_player_id in counted_player_ids:
-                    # Went inactive asynchronously (e.g. an out-of-turn
-                    # resign — see web_server.py's on_resign — or a
-                    # mid-auction disconnect) rather than through their own
-                    # turn's "quit" branch below. Quitting a disgrace
-                    # auction always means losing it immediately (see that
-                    # branch) regardless of who else is still bidding —
-                    # same rule, just triggered asynchronously. Without
-                    # this they'd just be skipped forever and whoever's
-                    # left would keep being asked to bid against no one.
+                if current_player_id not in counted_player_ids:
+                    current_player_id = self.get_next_player_id(current_player_id)
+                    continue
+                # Went inactive asynchronously (e.g. an out-of-turn resign —
+                # see web_server.py's on_resign — or a mid-auction disconnect)
+                # rather than through their own turn's "quit" branch below.
+                # A dropped connection gets its grace first: this card is too
+                # costly to hand over for a moment's lost signal.
+                self._await_return_on_turn(player, status_card, max_bid)
+                if not self._is_active(player):
+                    # Quitting a disgrace auction always means losing it
+                    # immediately (see that branch) regardless of who else
+                    # is still bidding — same rule, just triggered
+                    # asynchronously. Without this they'd just be skipped
+                    # forever and whoever's left would keep being asked to
+                    # bid against no one. And like that branch, they take
+                    # their money back: leaving it on the table destroyed it.
+                    player.withdraw_bid()
                     counted_player_ids.discard(current_player_id)
                     loser_id = current_player_id
                     self._log_action(player, "quit", reason="disconnected", record=record)
@@ -840,8 +884,6 @@ class PlayGame():
                     self._broadcast_auction_update("quit", status_card, player=player.username, max_bid=max_bid)
                     self._record_auction_history_snapshot()
                     break
-                current_player_id = self.get_next_player_id(current_player_id)
-                continue
 
             # let the player act; _handle_player_turn enforces bid > max_bid
             action = self._handle_player_turn(player, max_bid, status_card)
@@ -964,15 +1006,13 @@ class PlayGame():
         self._sync_liveness()
         player = self.players[player_id]
         if not self._is_active(player):
-            # Gone for good (resigned out of turn — see web_server.py's
-            # on_resign — or disconnected) — nothing left to ask them, and
-            # this gets called again every remaining round for as long as
-            # faux_pas_holder_id stays set (see play_game()'s main loop), so
-            # without this it would keep re-entering choose_painting_to_discard()
-            # and blocking on it forever (it has no timeout). Treat it as
-            # resolved so the game doesn't wait on a player who's never
-            # coming back.
-            return True
+            # Nothing to ask them right now, and this gets called again every
+            # remaining round for as long as faux_pas_holder_id stays set (see
+            # play_game()'s main loop), so never block here. A resignation
+            # settles it for good. A dropped connection doesn't: they can
+            # still come back, and calling that settled let a player keep
+            # every painting by disconnecting at the right moment.
+            return bool(getattr(player, "resigned", False))
         paintings = [card for card in player.status_cards if isinstance(card, Painting)]
 
         if paintings:
@@ -1135,8 +1175,6 @@ class PlayGame():
 
         while (not self.status_card_manager.is_empty()):
             self._round = len(self.auction_rounds) + 1
-            self._sync_liveness()
-            num_players_in_auction = self._count_active_auction_players()
 
             status_card = self.status_card_manager.remove_top_card()
             if status_card.is_green:
@@ -1168,6 +1206,20 @@ class PlayGame():
                         f"🚨 {num_green_cards} green card(s) revealed — the game ends now!",
                         data={"event": "green_card_revealed", "count": num_green_cards, "is_final": True},
                     )
+
+            # Read after the reveal's pacing wait, so nobody who dropped
+            # during it is counted in, then found missing by the auction.
+            self._sync_liveness()
+            num_players_in_auction = self._count_active_auction_players()
+            # About to end the game for lack of players: a moment's lost
+            # signal between auctions shouldn't do that, so give anyone who
+            # can still come back their grace first.
+            if num_players_in_auction < 2 and num_green_cards < self.__green_card_limit:
+                for p in self.players:
+                    if not self._is_active(p):
+                        self._await_return(p)
+                self._sync_liveness()
+                num_players_in_auction = self._count_active_auction_players()
 
             if self._should_end_game(num_players_in_auction, num_green_cards):
                 break

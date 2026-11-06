@@ -426,14 +426,14 @@ class TestFauxPasPenalty:
         assert game.handle_faux_pas_penalty(0) is False
         assert len(player.status_cards) == 1
 
-    def test_returns_true_immediately_for_an_inactive_player_without_blocking(self, make_player):
+    def test_never_prompts_an_inactive_player(self, make_player):
         """
         handle_faux_pas_penalty is re-called every remaining round for as
         long as its target keeps not discarding (see play_game()'s main
-        loop) — a real NetworkPlayer's choose_painting_to_discard() has no
-        timeout, so re-entering it for a player who's gone for good
-        (resigned out of turn, or disconnected) would block forever. Proves
-        the guard short-circuits *before* ever attempting that call.
+        loop), so an absent seat must never reach the blocking prompt. A
+        disconnected seat can still come back, so the discard stays owed
+        (False); a resigned one can't, so it's settled (True). See
+        test_disconnect_rules.py's TestFauxPasCannotBeDodged.
         """
         p = make_player("P")
         p.add_status_card(Painting(value=5))
@@ -444,6 +444,8 @@ class TestFauxPasPenalty:
         p.choose_painting_to_discard = _should_not_be_called
 
         game = make_game([p, make_player("Other")])
+        assert game.handle_faux_pas_penalty(0) is False
+        p.resigned = True
         assert game.handle_faux_pas_penalty(0) is True
 
 
