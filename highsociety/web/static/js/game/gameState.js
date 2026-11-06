@@ -25,7 +25,7 @@ export let game = null;
 // lobby form), fixed for the whole table once the game starts rather than
 // a per-player runtime toggle. `status` is whatever /api/status last said
 // about this room; defaults to "on" if not known yet.
-export function resetGameState(myUsername, status) {
+export function resetGameState(myUsername, status, { keepLogs = false } = {}) {
   game = {
     round: 0,
     card: null,
@@ -121,8 +121,12 @@ export function resetGameState(myUsername, status) {
   // logLine()/appendChatLine() only ever append — without this, a rematch
   // (or any other resetGameState call, e.g. reconnecting into a genuinely
   // new game) left the previous game's whole narration log, and chat,
-  // sitting above whatever the new game starts writing underneath it.
-  ['game-log', 'spec-game-log', 'player-chat-log', 'spec-chat-log'].forEach((id) => { $(id).innerHTML = ''; });
+  // sitting above whatever the new game starts writing underneath it. A
+  // reconnect is the same game carrying on (keepLogs), so a brief drop doesn't
+  // erase what's been said and done so far.
+  if (!keepLogs) {
+    ['game-log', 'spec-game-log', 'player-chat-log', 'spec-chat-log'].forEach((id) => { $(id).innerHTML = ''; });
+  }
   // resetGameState only just rebuilt the in-memory `game` object above --
   // the DOM itself still shows whatever the *previous* game (or, for a
   // spectator/reconnect, whatever this tab happened to render before)

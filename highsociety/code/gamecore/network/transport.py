@@ -57,6 +57,11 @@ class Transport(ABC):
     def close(self) -> None:
         ...
 
+    def retire(self) -> None:
+        """This transport has been replaced by a newer connection (see
+        NetworkPlayer.reattach): wake anything blocked in receive(). Only a
+        transport that can actually be replaced needs to do anything here."""
+
 
 class SocketTransport(Transport):
     """
@@ -313,6 +318,19 @@ class WebSocketTransport(Transport):
     @property
     def is_connected(self) -> bool:
         return self._ws.connected
+
+    def retire(self) -> None:
+        """
+        A phone moving between networks reconnects while its old socket still
+        looks open here (only a missed ping eventually says otherwise). The
+        game thread may be blocked in receive() on this very object, so wake
+        it now rather than up to a whole turn later. The socket itself stays
+        open: closing it would make a second tab on the same seat reconnect,
+        which would retire this tab's connection, and so on forever. It ends
+        when that tab closes or stops answering pings.
+        """
+        self._reader_running = False
+        self._queue.put(None)
 
     def close(self) -> None:
         self._reader_running = False

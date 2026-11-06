@@ -67,7 +67,7 @@ export function attemptReconnect() {
 
   closeSocket(); // same guard as connectPlayerSocket -- never leave a prior connection orphaned
   beginReconnectAttempt();
-  resetGameState(info.username, lastStatus());
+  resetGameState(info.username, lastStatus(), { keepLogs: true });
   if (lastStatus()) seedOpponents(lastStatus(), info.username);
   const socket = new WebSocket(wsUrl(
     `/ws?room=${encodeURIComponent(currentRoomCode())}&rejoin_token=${encodeURIComponent(info.token)}`,

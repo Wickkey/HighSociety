@@ -2009,22 +2009,44 @@ def _run_player_session(player: NetworkPlayer, transport: WebSocketTransport, ro
     tests/network/test_transport.py's note on this exact gotcha), which would
     turn the idle branch into a real busy-spin instead of an idle wait.
     """
-    while player.active and transport.is_connected:
+    # A transport a reconnect has replaced idles here until its socket dies:
+    # returning would close it, and if a second tab owns that socket it would
+    # reconnect and take the seat back, and so on (see WebSocketTransport.retire).
+    while transport.is_connected and (player.active or player.transport is not transport):
         if room.state == "finished":
             msg = transport.receive(timeout=0.5)
             if msg is not None:
                 _handle_post_game_message(player, room, msg)
         else:
             threading.Event().wait(0.5)
-    # Only clear `active` if this transport is still the one attached to the
-    # player. A concurrent reconnect (see NetworkPlayer.reattach) may have
-    # already swapped in a fresh transport and marked them active again by
-    # the time this loop notices the *old* transport died — without this
-    # check, that reconnect gets silently clobbered back to inactive right
-    # after succeeding, which then tears the new connection down too (its
-    # own copy of this same loop reads active=False and exits immediately).
-    if player.transport is transport:
-        player.active = False
+    # Only if this transport is still the one attached to the player: a
+    # concurrent reconnect may have already swapped in a fresh one by the time
+    # this loop notices the *old* transport died (see
+    # NetworkPlayer.connection_lost).
+    if player.connection_lost(transport):
+        _announce_player_left(player, room)
+
+
+def _announce_player_left(player: NetworkPlayer, room: "GameRoom") -> None:
+    """A live connection just ended. During a game, tells the table: nothing
+    did until the engine next reached that seat, so a dropped player looked
+    connected for up to a whole round, and the table sat waiting on them with
+    no explanation. On the finished screen, counts as declining a pending
+    rematch vote: the vote needs every voter's yes, so it would otherwise wait
+    forever on someone who has left."""
+    if room.state in ("starting", "in_progress"):
+        if player.resigned:
+            return  # _handle_out_of_turn_resign already said so
+        formatted = f"🔌 {player.username} disconnected."
+        data = {"event": "player_disconnected", "player": player.username}
+        for p in list(room.players):
+            if isinstance(p, NetworkPlayer) and p is not player and p.active:
+                p.send_message(formatted, message_type="GLOBAL_EVENT", data=data)
+        for s in list(room.spectators):
+            if s.active:
+                s.send_message(formatted, message_type="GLOBAL_EVENT", data=data)
+    elif room.state == "finished":
+        _handle_rematch_vote(player, room, {"accept": False})
 
 
 def _broadcast_spectator_count(room: "GameRoom") -> None:
@@ -2089,6 +2111,10 @@ def _send_opponent_roster(player: "NetworkPlayer | NetworkSpectator", room: "Gam
                 "active": other.active,
                 "status_cards": [summarize_card(c) for c in other.status_cards],
                 "elo": room.seat_ratings.get(other.username),
+                # Where they stand in the current auction, so a reconnecting
+                # client doesn't show everyone back in with no bids.
+                "in_auction": other.current_participation_in_auction,
+                "current_bid": other.current_bid_value,
             },
         )
 

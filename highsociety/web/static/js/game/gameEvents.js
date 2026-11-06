@@ -101,6 +101,8 @@ export function applyGameMessage(msg, isSpectator) {
           o.active = d.active;
           o.statusCards = d.status_cards;
           if (d.elo != null) o.elo = d.elo;
+          if (d.in_auction === false) o.outOfAuction = true;
+          if (d.current_bid) o.lastBid = d.current_bid;
           renderOpponents(isSpectator);
         }
       } else if (d && d.event === 'player_resigned') {
@@ -113,6 +115,14 @@ export function applyGameMessage(msg, isSpectator) {
           o.active = false;
           renderOpponents(isSpectator);
           enqueueEvent(isSpectator, `${d.player} resigned`, 'quit');
+        }
+      } else if (d && d.event === 'player_disconnected') {
+        // Their seat is still theirs -- player_reconnected below undoes this.
+        if (d.player !== game.myUsername) {
+          const o = ensureOpponent(d.player);
+          o.active = false;
+          renderOpponents(isSpectator);
+          enqueueEvent(isSpectator, `${nameOf(d.player)} lost connection`, 'quit');
         }
       } else if (d && d.event === 'player_reconnected') {
         // Counterpart to player_resigned above -- a dropped connection
@@ -501,6 +511,13 @@ function applyPlayerState(msg) {
   const d = msg.data;
   game.myPoints = d.points;
   game.myStatusCards = d.status_cards;
+  // Normally the 'bid' event keeps this right, but a reconnect starts from 0
+  // and has no other way to learn what's already on the table: the bid panel
+  // would read "0 -> X" and under-state every raise.
+  if (Array.isArray(d.current_bid)) {
+    game.myAuctionBid = d.current_bid.reduce((sum, value) => sum + value, 0);
+    updateBidStatus();
+  }
   renderMyPanel();
   // The server sends this at game start and after every action that
   // changes this player's money (their own bid/pass/fold, or a disgrace
@@ -549,11 +566,11 @@ function applyPlayerMove(msg) {
           + 'Tap the painting you\'d rather lose, then press Discard.', 'disgrace');
       }
     }
-    // Discard prompts never carry a per-move timer (see
-    // NetworkPlayer.choose_painting_to_discard — it waits indefinitely), so
-    // clear out any leftover countdown from this player's last bidding turn
-    // rather than leaving a stale/wrong number showing.
-    clearMoveTimer();
+    // In a timed room the server has just sent this prompt's own
+    // PLAYER_MOVE_TIMER (see NetworkPlayer.choose_painting_to_discard), and
+    // clearing unconditionally wiped it: no countdown for up to 5s, until the
+    // next resync. Only an untimed room has a leftover to clear.
+    if (!game.turnTimeLimit) clearMoveTimer();
   } else {
     // Deliberately NOT clearing #move-error here: this same branch is what
     // renders the very next bid prompt immediately after a rejected bid (see
