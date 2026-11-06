@@ -5,7 +5,7 @@ import { $, show, showScreen } from './utils/dom.js';
 import {
   resolveConfirmDialog, openProfileModal, closeProfileModal, closeGameDetailModal, onGameDetailTableClick,
 } from './ui/modals.js';
-import { onSpecChatSend, onPlayerChatSend } from './ui/chat.js';
+import { onSpecChatSend, onPlayerChatSend, initChat } from './ui/chat.js';
 import {
   onContinueAsGuest, onShuffleUsername, onLoginUsernameContinue, onLoginBack, showChooseStep, initGoogleSignIn,
   proceedPastLogin,
@@ -32,6 +32,7 @@ import {
 } from './lobby/gameHistory.js';
 import {
   showLeaderboardScreen, onLeaderboardPrevClick, onLeaderboardNextClick, onLeaderboardTableClick,
+  onLeaderboardTabClick,
 } from './lobby/leaderboard.js';
 import {
   getPlayerProfileReturnTo, onPlayerProfileHistoryPrevClick, onPlayerProfileHistoryNextClick,
@@ -43,7 +44,7 @@ import {
   onHowToPlayTabClick, onHowToPlayTabKeydown, onHowToPlayGotoClick, playHowToPlayVideo,
 } from './lobby/howToPlay.js';
 import {
-  onRequestRematchClick, onCancelRematchForm, onSendRematchRequest, onAcceptRematch, onDeclineRematch,
+  onRequestRematchClick, onRematchBotTierClick, onCancelRematchForm, onSendRematchRequest, onAcceptRematch, onDeclineRematch,
   onStandingsTableClick,
 } from './lobby/rematch.js';
 import { onPlaceBid, onPass, onResign, onDiscardPainting, onQuickReactionClick } from './game/gameActions.js';
@@ -178,6 +179,9 @@ function wireStaticHandlers() {
   $('btn-leaderboard-prev').addEventListener('click', onLeaderboardPrevClick);
   $('btn-leaderboard-next').addEventListener('click', onLeaderboardNextClick);
   $('leaderboard-body').addEventListener('click', onLeaderboardTableClick);
+  $('bot-leaderboard-body').addEventListener('click', onLeaderboardTableClick);
+  $('leaderboard-tab-people').addEventListener('click', () => onLeaderboardTabClick('people'));
+  $('leaderboard-tab-bots').addEventListener('click', () => onLeaderboardTabClick('bots'));
   $('achievements-grid').addEventListener('click', onAchievementTileClick);
   $('achievements-grid').addEventListener('keydown', onAchievementTileKeydown);
   $('game-detail-body').addEventListener('click', onGameDetailTableClick);
@@ -238,6 +242,7 @@ function wireStaticHandlers() {
   $('btn-pass').addEventListener('click', onPass);
   $('btn-resign').addEventListener('click', onResign);
   $('btn-discard-painting').addEventListener('click', onDiscardPainting);
+  initChat();
   $('btn-spec-chat-send').addEventListener('click', onSpecChatSend);
   $('spec-chat-input').addEventListener('keydown', (e) => { if (e.key === 'Enter') onSpecChatSend(); });
   $('spec-chat-target-toggle').addEventListener('change', (e) => {
@@ -256,6 +261,7 @@ function wireStaticHandlers() {
   $('btn-request-rematch').addEventListener('click', onRequestRematchClick);
   $('btn-cancel-rematch-form').addEventListener('click', onCancelRematchForm);
   $('btn-send-rematch-request').addEventListener('click', onSendRematchRequest);
+  $('rematch-bot-tiers').addEventListener('click', onRematchBotTierClick);
   $('btn-accept-rematch').addEventListener('click', onAcceptRematch);
   $('btn-decline-rematch').addEventListener('click', onDeclineRematch);
 

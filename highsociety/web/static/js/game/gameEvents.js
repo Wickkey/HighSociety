@@ -14,7 +14,7 @@ import {
   enqueueEvent, showFinalGreenOverlay, showCountdownOverlay, hideCountdownOverlay, logLine,
   enqueueTutorialCoach,
 } from '../ui/notifications.js';
-import { appendChatLine } from '../ui/chat.js';
+import { receiveChatMessage } from '../ui/chat.js';
 import { refreshStatus } from '../lobby/lobby.js';
 import { revealSpectateLiveLayout } from '../lobby/playerList.js';
 import { setSessionStatus } from '../auth/profile.js';
@@ -237,7 +237,7 @@ export function applyGameMessage(msg, isSpectator) {
       }
       break;
     case 'CHAT':
-      appendChatLine(isSpectator ? 'spec-chat-log' : 'player-chat-log', msg.prompt);
+      receiveChatMessage(isSpectator ? 'spec-chat-log' : 'player-chat-log', msg);
       break;
     case 'REACTION':
       if (msg.from_user && msg.data && msg.data.emoji) {

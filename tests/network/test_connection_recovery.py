@@ -300,3 +300,31 @@ def test_a_reconnecting_client_learns_where_everyone_stands_in_the_auction():
                 if m.get("data", {}).get("username") == "bob")
     assert sync["in_auction"] is True
     assert sync["current_bid"] == 6
+
+
+def test_a_rematch_is_a_new_game_with_nothing_left_over_from_the_last(monkeypatch):
+    """The finished screen tells games apart by game_id. With the same id, a
+    rematch's finish looked like the game already revealed, so the rating
+    change on screen stayed the previous game's."""
+    room, (alice, _bob) = make_room("finished", "alice", "bob")
+    monkeypatch.setattr(room, "run_game", lambda: None)
+    first_id = room.game_id
+    room.elo_changes = {"alice": {"old_rating": 1000, "new_rating": 1016, "rating_change": 16}}
+    room.game = object()
+    room.rematch = {"requested_by": "alice", "bot_mix": [], "votes": {"alice": True, "bob": True}}
+
+    web_server._maybe_start_rematch(room)
+
+    assert room.state == "starting"
+    assert room.game_id != first_id
+    assert alice.game_id == room.game_id  # or the player would reject their own answers
+    assert room.elo_changes is None
+    assert room.game is None
+
+
+def test_the_bot_board_endpoint_returns_every_bot():
+    response = web_server.app.test_client().get("/api/leaderboard/bots")
+    assert response.status_code == 200
+    bots = response.get_json()["bots"]
+    assert {b["name"] for b in bots} >= {"Ziggy Bot", "Magnus Carlsen Bot"}
+    assert {"username", "name", "difficulty", "elo", "games_played", "games_won"} <= set(bots[0])

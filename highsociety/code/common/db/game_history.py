@@ -1668,8 +1668,8 @@ def get_leaderboard(limit: int = 20, offset: int = 0) -> dict:
     is a real ranking) and explicitly excluding the 3 reserved bot
     identities (see the `bots` table): bots are real rated participants
     now (see record_finished_game's own docstring) so their elo genuinely
-    moves, but it must never be shown to players. {"rows": [], "has_more":
-    False} on any failure or no database.
+    moves, but they're ranked on their own board (see get_bot_leaderboard).
+    {"rows": [], "has_more": False} on any failure or no database.
 
     The leaderboard is the exact same data for every single visitor --
     unlike everything else in this module, there's no per-user identity
@@ -1697,6 +1697,67 @@ def get_leaderboard(limit: int = 20, offset: int = 0) -> dict:
     with _leaderboard_cache_lock:
         _leaderboard_cache[cache_key] = (now, result)
     return result
+
+
+def get_bot_leaderboard() -> list[dict]:
+    """
+    Every bot in the roster, highest Elo first -- [{"username", "name",
+    "difficulty", "elo", "games_played", "games_won"}, ...]. Built from the
+    roster rather than the database so a bot nobody has played yet still
+    appears, at its starting rating, and so the legacy per-difficulty accounts
+    (which hold old games, not a bot anyone can meet) don't. With no database
+    or a failed query, every bot simply shows its starting rating.
+
+    Shares the human board's cache, so it's cleared by the same writes.
+    """
+    now = time.monotonic()
+    with _leaderboard_cache_lock:
+        cached = _leaderboard_cache.get("bots")
+    if cached is not None and now - cached[0] < _LEADERBOARD_CACHE_TTL_SECONDS:
+        return cached[1]
+
+    fetched = _fetch_bot_ratings()
+    rows = []
+    for bot in bot_roster.BOT_ROSTER:
+        username = bot_roster.roster_username(bot)
+        elo, games_played, games_won = (fetched or {}).get(
+            username, (bot_roster.starting_elo(bot.difficulty), 0, 0))
+        rows.append({"username": username, "name": bot.name, "difficulty": bot.difficulty,
+                     "elo": elo, "games_played": games_played, "games_won": games_won})
+    rows.sort(key=lambda r: (-r["elo"], r["name"]))
+
+    if fetched is not None:  # a failure shouldn't be remembered as the real ratings
+        with _leaderboard_cache_lock:
+            _leaderboard_cache["bots"] = (now, rows)
+    return rows
+
+
+def _fetch_bot_ratings() -> Optional[dict]:
+    """username -> (elo, games_played, games_won) for every bot account, or
+    None with no database or on any failure."""
+    if not is_configured():
+        return None
+    ensure_schema()
+    if not _schema_ready:
+        return None
+    conn = None
+    try:
+        conn = _connect()
+        with conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT p.username, p.elo, p.games_played, p.games_won
+                FROM players p
+                WHERE p.id IN (SELECT player_id FROM bots)
+                """
+            )
+            return {u: (e, gp, gw) for u, e, gp, gw in cur.fetchall()}
+    except Exception as e:  # noqa: BLE001
+        LoggingManager.warning(f"game_history._fetch_bot_ratings failed: {e}")
+        return None
+    finally:
+        if conn is not None:
+            _release_connection(conn)
 
 
 def _invalidate_leaderboard_cache(rewarm: bool = False) -> None:

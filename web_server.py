@@ -1339,6 +1339,13 @@ def api_leaderboard():
     return jsonify({"leaderboard": result["rows"], "has_more": result["has_more"]})
 
 
+@app.route("/api/leaderboard/bots")
+def api_bot_leaderboard():
+    """Every roster bot ranked by Elo, played or not -- see
+    get_bot_leaderboard. Short and fixed in size, so not paginated."""
+    return jsonify({"bots": game_history.get_bot_leaderboard()})
+
+
 @app.route("/api/profile/<username>/rating_history")
 def api_rating_history(username):
     """This player's Elo over time, for the leaderboard screen's
@@ -1918,6 +1925,16 @@ def _maybe_start_rematch(room: "GameRoom") -> None:
         # every rematch to it too.
         room.seed = random.randint(0, 2 ** 31 - 1)
         room.manual_seed = False  # always auto-rolled on rematch, see comment above
+        # A rematch is a new game, so it gets its own id. The finished screen
+        # tells games apart by this: with the old id it took the rematch for
+        # the game it had already revealed and left that game's rating change
+        # on screen. Its result and state are cleared here, not when the game
+        # thread gets going, so nothing can read the last game's as this one's.
+        room.game_id = generate_game_id()
+        room.elo_changes = None
+        room.game = None
+        for p in eligible:
+            p.game_id = room.game_id
         bots = create_bot_players(
             bot_mix, think_time=room.bot_think_time,
             taken_usernames={p.username for p in eligible},

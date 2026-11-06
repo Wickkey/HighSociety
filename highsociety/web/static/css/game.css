@@ -13,7 +13,9 @@
 
 .table-layout {
   display: grid;
-  grid-template-columns: 2fr 1fr;
+  /* minmax(0, ...): a plain fr track can't shrink below its content, so the
+     event toast's long unbroken line stretched the page while it was up. */
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
   gap: 1.1rem;
   align-items: start;
 }
@@ -23,7 +25,7 @@
      log and chat, out of sight while choosing a bid -- both columns
      dissolve into one list, and the log and chat move to the end. Row
      gap 0: each panel already brings its own margin-bottom. */
-  .table-layout { grid-template-columns: 1fr; row-gap: 0; }
+  .table-layout { grid-template-columns: minmax(0, 1fr); row-gap: 0; }
   .table-layout > .center-col, .table-layout > .side-col { display: contents; }
   /* Who's bidding what comes straight after the card being auctioned --
      it's what a bid decision is made from, so it can't sit below your
@@ -181,6 +183,22 @@
   overflow: hidden;
   text-overflow: ellipsis;
   transition: opacity 0.15s ease, transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+@media (max-width: 560px) {
+  /* A result like "Magnus Carlsen Bot bought Painting (10) for 25" doesn't fit
+     one line on a phone, and the price is what got cut off. Two lines, in a
+     slot that's always two lines tall, so nothing moves when a toast appears. */
+  .event-toast {
+    height: 3.1rem;
+    min-height: 0;
+    white-space: normal;
+    text-align: center;
+    font-size: 0.85rem;
+    line-height: 1.15;
+    border-radius: 1rem;
+    padding: 0.3rem 0.9rem;
+    max-width: 100%;
+  }
 }
 .event-toast.show { opacity: 1; transform: scale(1); }
 .event-toast.tone-bid { background: var(--chip-money); }
@@ -950,6 +968,8 @@ button.link-button:hover { color: var(--accent); }
 
 #spec-chat-input, #player-chat-input {
   flex: 1;
+  min-width: 0;
+  font-size: 16px; /* anything smaller makes iOS zoom the page on focus */
   padding: 0.5rem 0.65rem;
   border-radius: var(--radius-sm);
   border: 1px solid var(--panel-border);
@@ -1109,3 +1129,122 @@ button.link-button:hover { color: var(--accent); }
   line-height: 1.5;
   color: var(--text);
 }
+
+/* ---------------- chat ---------------- */
+.chat-header { display: flex; align-items: baseline; justify-content: space-between; gap: 0.6rem; }
+.chat-header h3 { margin-bottom: 0.5rem; }
+.chat-header-hint { font-size: 0.75rem; color: var(--muted); }
+.chat-log-wrap { position: relative; }
+.chat-log {
+  height: 200px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.7rem;
+  background: var(--panel-bg-log);
+  border-radius: var(--radius-sm);
+  box-shadow: inset 0 1px 4px rgba(0, 0, 0, 0.06);
+  font-size: 0.88rem;
+  line-height: 1.35;
+}
+.chat-log:empty::before {
+  content: attr(data-empty);
+  margin: auto;
+  padding: 0 1rem;
+  text-align: center;
+  color: var(--muted);
+  font-size: 0.83rem;
+}
+.chat-msg { display: flex; flex-direction: column; align-items: flex-start; max-width: 85%; margin-top: 0.45rem; }
+.chat-msg:first-child { margin-top: 0; }
+.chat-msg.same-sender { margin-top: 0; }
+.chat-msg.mine { align-self: flex-end; align-items: flex-end; }
+.chat-sender { margin: 0 0 0.1rem 0.55rem; font-size: 0.72rem; font-weight: 700; }
+.chat-tag { font-weight: 500; color: var(--muted); }
+.chat-bubble {
+  padding: 0.32rem 0.65rem;
+  border-radius: 0.9rem;
+  background: var(--panel-bg);
+  color: var(--text);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.chat-msg.mine .chat-bubble { background: var(--chip-money); color: #fff; }
+.chat-note { align-self: center; margin: 0.4rem 0 0; font-size: 0.75rem; color: var(--muted); text-align: center; }
+.chat-new-pill {
+  position: absolute;
+  left: 50%;
+  bottom: 0.5rem;
+  transform: translateX(-50%);
+  width: auto;
+  margin: 0;
+  padding: 0.25rem 0.8rem;
+  border: none;
+  border-radius: 999px;
+  background: var(--text);
+  color: var(--panel-bg);
+  font-size: 0.75rem;
+  font-weight: 700;
+  box-shadow: var(--shadow-sm);
+  cursor: pointer;
+}
+/* Chat sits at the very end of the page on a phone, out of sight during play,
+   so unread messages get a button that takes you there. */
+.chat-jump {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 40;
+  width: auto;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.5rem 0.8rem;
+  border: none;
+  border-radius: 999px;
+  background: var(--chip-money);
+  color: #fff;
+  font-weight: 700;
+  box-shadow: var(--shadow);
+  cursor: pointer;
+}
+.chat-jump.hidden { display: none; }
+@media (min-width: 801px) { .chat-jump { display: none; } }
+@media (prefers-reduced-motion: no-preference) {
+  .chat-msg { animation: chat-msg-in 0.14s ease-out; }
+  @keyframes chat-msg-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+}
+
+/* ---------------- rematch: choosing opponents ---------------- */
+.rematch-bot-form { display: flex; flex-direction: column; gap: 0.7rem; }
+.rematch-bot-head { display: flex; align-items: baseline; justify-content: space-between; gap: 0.6rem; }
+.rematch-bot-head h3 { margin: 0; }
+.rematch-seat-count { font-size: 0.82rem; font-weight: 600; color: var(--muted); white-space: nowrap; }
+.rematch-seat-count.full { color: var(--chip-money); }
+.rematch-seat-pips { display: flex; gap: 0.3rem; }
+.rematch-seat-pip { flex: 1; height: 5px; border-radius: 999px; background: var(--panel-border); transition: background 0.15s ease; }
+.rematch-seat-pip.filled { background: var(--chip-money); }
+.rematch-bot-tiers { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.6rem; }
+.rematch-tier {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-sm);
+  background: var(--panel-bg-alt);
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.rematch-tier.chosen { border-color: var(--accent-light); background: var(--accent-soft); }
+.rematch-tier-text { display: flex; flex-direction: column; min-width: 0; }
+.rematch-tier-name { font-weight: 700; font-size: 0.92rem; }
+.rematch-tier-desc { font-size: 0.75rem; color: var(--muted); line-height: 1.25; }
+.rematch-bot-form .button-row { margin-top: 0.1rem; flex-wrap: nowrap; }
+.rematch-bot-form .button-row button { margin: 0; }
+.rematch-bot-form .button-row .primary { flex: 1 1 auto; min-width: 0; }
+@media (max-width: 560px) { .rematch-bot-tiers { grid-template-columns: minmax(0, 1fr); } }

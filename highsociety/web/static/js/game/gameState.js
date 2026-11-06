@@ -16,6 +16,7 @@ import {
 } from './gameRenderer.js';
 import { setHasResigned, setGameFinished } from '../lobby/lobby.js';
 import { resetSelectedDiscard } from './gameActions.js';
+import { resetChat } from '../ui/chat.js';
 
 export let game = null;
 
@@ -126,6 +127,7 @@ export function resetGameState(myUsername, status, { keepLogs = false } = {}) {
   // erase what's been said and done so far.
   if (!keepLogs) {
     ['game-log', 'spec-game-log', 'player-chat-log', 'spec-chat-log'].forEach((id) => { $(id).innerHTML = ''; });
+    resetChat();
   }
   // resetGameState only just rebuilt the in-memory `game` object above --
   // the DOM itself still shows whatever the *previous* game (or, for a

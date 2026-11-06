@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from highsociety.code.common import elo
+from highsociety.code.common import bot_roster, elo
 from highsociety.code.common.db import game_history
 from fake_db import queries as _queries, rows as _rows, save_connection as _save_connection
 
@@ -2165,3 +2165,49 @@ def test_backfill_records_the_version_only_after_a_successful_rebuild(database_u
             patch.object(game_history, "recompute_achievements", return_value=5):
         assert game_history.backfill_achievements_if_catalog_changed() == 5
     assert _queries(cursor, "INSERT INTO app_state")
+
+
+def test_bot_leaderboard_lists_the_whole_roster_ranked_and_leaves_out_legacy_accounts(database_url):
+    game_history._schema_ready = True
+    conn, cursor = _fake_connection()
+    cursor.fetchall = MagicMock(return_value=[
+        ("__bot_ziggy__", 1500, 40, 25),
+        ("__bot_easy__", 900, 500, 10),  # a legacy account: holds old games, not a bot you can meet
+    ])
+    with patch.object(game_history, "_connect", return_value=conn):
+        rows = game_history.get_bot_leaderboard()
+
+    assert len(rows) == len(bot_roster.BOT_ROSTER)
+    assert "__bot_easy__" not in {r["username"] for r in rows}
+    assert rows[0] == {"username": "__bot_ziggy__", "name": "Ziggy Bot", "difficulty": "easy",
+                       "elo": 1500, "games_played": 40, "games_won": 25}
+    assert [r["elo"] for r in rows] == sorted((r["elo"] for r in rows), reverse=True)
+    # Nobody's played these yet, so they show where they'd start.
+    batman = next(r for r in rows if r["name"] == "Batman Bot")
+    assert (batman["elo"], batman["games_played"]) == (bot_roster.starting_elo("insane"), 0)
+
+
+def test_bot_leaderboard_works_without_a_database(no_database_url):
+    rows = game_history.get_bot_leaderboard()
+    assert len(rows) == len(bot_roster.BOT_ROSTER)
+    assert all(r["games_played"] == 0 for r in rows)
+
+
+def test_bot_leaderboard_is_cached_and_cleared_by_a_rating_change(database_url):
+    game_history._schema_ready = True
+    conn, cursor = _fake_connection()
+    cursor.fetchall = MagicMock(return_value=[])
+    with patch.object(game_history, "_connect", return_value=conn):
+        game_history.get_bot_leaderboard()
+        game_history.get_bot_leaderboard()
+        assert cursor.execute.call_count == 1
+        game_history._invalidate_leaderboard_cache()
+        game_history.get_bot_leaderboard()
+    assert cursor.execute.call_count == 2
+
+
+def test_bot_leaderboard_failure_is_not_cached_as_the_real_ratings(database_url):
+    game_history._schema_ready = True
+    with patch.object(game_history, "_connect", side_effect=RuntimeError("unreachable")):
+        assert len(game_history.get_bot_leaderboard()) == len(bot_roster.BOT_ROSTER)
+    assert "bots" not in game_history._leaderboard_cache

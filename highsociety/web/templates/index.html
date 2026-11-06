@@ -738,6 +738,11 @@
       <div class="card panel account-panel leaderboard-panel">
         <button type="button" class="screen-back" id="btn-leaderboard-back">← Back</button>
         <h2>Leaderboard</h2>
+        <div class="leaderboard-tabs" role="tablist" aria-label="Leaderboard">
+          <button type="button" id="leaderboard-tab-people" class="leaderboard-tab active" role="tab" aria-selected="true" aria-controls="leaderboard-people">People</button>
+          <button type="button" id="leaderboard-tab-bots" class="leaderboard-tab" role="tab" aria-selected="false" aria-controls="leaderboard-bots">Bots</button>
+        </div>
+        <div id="leaderboard-people" role="tabpanel" aria-labelledby="leaderboard-tab-people">
         <p class="muted">Top-rated players (Google-linked accounts).</p>
         <!-- The rating-history chart used to live here (see leaderboard.js's
              renderSparkline/loadMyRatingChart, still there for reuse
@@ -757,6 +762,17 @@
           <button type="button" id="btn-leaderboard-prev" class="secondary" disabled>← Prev</button>
           <span id="leaderboard-page-label" class="muted"></span>
           <button type="button" id="btn-leaderboard-next" class="secondary" disabled>Next →</button>
+        </div>
+        </div>
+        <div id="leaderboard-bots" class="hidden" role="tabpanel" aria-labelledby="leaderboard-tab-bots">
+          <p class="muted">Every bot you can meet at the table, and how it's rated.</p>
+          <table class="leaderboard-table">
+            <thead>
+              <tr><th>#</th><th>Bot</th><th>Elo</th><th>Games</th><th>Wins</th></tr>
+            </thead>
+            <tbody id="bot-leaderboard-body"></tbody>
+          </table>
+          <p id="bot-leaderboard-error" class="muted hidden">Couldn't load the bots just now. Try again in a moment.</p>
         </div>
       </div>
     </section>
@@ -1643,8 +1659,14 @@
           </details>
 
           <div class="card panel chat-panel">
-            <h3>Chat</h3>
-            <div id="player-chat-log" class="log"></div>
+            <div class="chat-header">
+              <h3>Chat</h3>
+              <span class="chat-header-hint">Everyone at the table</span>
+            </div>
+            <div class="chat-log-wrap">
+              <div id="player-chat-log" class="chat-log" role="log" aria-live="polite" aria-label="Chat messages" data-empty="No messages yet. Say hello, or send a reaction."></div>
+              <button type="button" class="chat-new-pill hidden" data-chat-pill="player-chat-log">New messages ↓</button>
+            </div>
             <div id="quick-reactions" class="quick-reactions">
               <button type="button" class="quick-reaction-btn" data-emoji="🗣️" title="Send a reaction">🗣️</button>
               <button type="button" class="quick-reaction-btn" data-emoji="😂" title="Send a reaction">😂</button>
@@ -1653,7 +1675,7 @@
               <button type="button" class="quick-reaction-btn" data-emoji="🤔" title="Send a reaction">🤔</button>
             </div>
             <div class="button-row">
-              <input type="text" id="player-chat-input" placeholder="Say something…" maxlength="300">
+              <input type="text" id="player-chat-input" placeholder="Say something…" maxlength="300" enterkeyhint="send" autocomplete="off" aria-label="Chat message">
               <button id="btn-player-chat-send" class="secondary">Send</button>
             </div>
           </div>
@@ -1755,14 +1777,19 @@
           </details>
 
           <div class="card panel chat-panel">
-            <h3>Chat</h3>
-            <div id="spec-chat-log" class="log"></div>
+            <div class="chat-header">
+              <h3>Chat</h3>
+            </div>
+            <div class="chat-log-wrap">
+              <div id="spec-chat-log" class="chat-log" role="log" aria-live="polite" aria-label="Chat messages" data-empty="No messages yet."></div>
+              <button type="button" class="chat-new-pill hidden" data-chat-pill="spec-chat-log">New messages ↓</button>
+            </div>
             <label class="reveal-toggle chat-target-toggle">
               <input type="checkbox" id="spec-chat-target-toggle">
               Spectators only (hide from players)
             </label>
             <div class="button-row">
-              <input type="text" id="spec-chat-input" placeholder="Message everyone…" maxlength="300">
+              <input type="text" id="spec-chat-input" placeholder="Message everyone…" maxlength="300" enterkeyhint="send" autocomplete="off" aria-label="Chat message">
               <button id="btn-spec-chat-send" class="secondary">Send</button>
             </div>
           </div>
@@ -1828,17 +1855,13 @@
 
         <div id="rematch-panel" class="rematch-panel hidden">
           <button id="btn-request-rematch" class="primary">Request Rematch</button>
-          <div id="rematch-bot-form" class="hidden">
-            <fieldset class="bot-mix">
-              <legend>Bot seats for the rematch</legend>
-              <div class="bot-row">
-                <label>Easy <input type="number" id="rematch-bot-easy" min="0" max="4" value="0"></label>
-                <label>Medium <input type="number" id="rematch-bot-medium" min="0" max="4" value="0"></label>
-                <label>Hard <input type="number" id="rematch-bot-hard" min="0" max="4" value="0"></label>
-                <label>Insane <input type="number" id="rematch-bot-insane" min="0" max="4" value="0"></label>
-              </div>
-              <p id="rematch-bot-hint" class="hint"></p>
-            </fieldset>
+          <div id="rematch-bot-form" class="rematch-bot-form hidden">
+            <div class="rematch-bot-head">
+              <h3>Choose your opponents</h3>
+              <span id="rematch-seat-count" class="rematch-seat-count" aria-live="polite"></span>
+            </div>
+            <div id="rematch-seat-pips" class="rematch-seat-pips" aria-hidden="true"></div>
+            <div id="rematch-bot-tiers" class="rematch-bot-tiers"></div>
             <div class="button-row">
               <button id="btn-send-rematch-request" class="primary">Send Rematch Request</button>
               <button id="btn-cancel-rematch-form" class="secondary">Cancel</button>
@@ -1884,6 +1907,10 @@
        lobby.js's loadHomeGlobalStats); no database configured (local
        dev) just leaves this out entirely rather than showing a
        hardcoded 0. -->
+  <button type="button" id="chat-jump" class="chat-jump hidden" aria-label="Unread chat messages. Go to chat.">
+    <span aria-hidden="true">💬</span><span id="chat-jump-count" class="chat-jump-count"></span>
+  </button>
+
   <div id="home-global-stats" class="home-global-stats hidden">
     <div class="home-global-stat">
       <span class="home-global-stat-icon">
