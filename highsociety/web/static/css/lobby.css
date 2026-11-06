@@ -2512,3 +2512,74 @@ button.secondary.standalone { margin-top: 0.9rem; display: inline-block; }
 .achievements-count strong { color: var(--text); }
 .achievements-progress-track { height: 8px; border-radius: 999px; background: var(--panel-bg-log); overflow: hidden; }
 #achievements-progress-fill { display: block; height: 100%; width: 0; border-radius: inherit; background: var(--accent); transition: width 0.3s ease; }
+
+/* Game history rows: Replay and Play again sit beside the result. A row is a
+   div, not a button, because it holds buttons of its own. */
+.recent-game-row:focus-visible { outline: 2px solid var(--accent-light); outline-offset: 2px; }
+.recent-game-actions { display: flex; flex: none; align-items: center; gap: 0.35rem; margin-left: auto; cursor: default; }
+.game-action-btn {
+  width: auto;
+  margin: 0;
+  padding: 0.3rem 0.65rem;
+  border: 1px solid var(--panel-border);
+  border-radius: 999px;
+  background: var(--panel-bg);
+  box-shadow: none;
+  color: var(--text);
+  font-size: 0.78rem;
+  font-weight: 700;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.game-action-btn:hover:not(:disabled) { border-color: var(--accent-light); background: var(--accent-soft); box-shadow: none; transform: none; }
+.game-action-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.game-action-btn.primary-action { border-color: transparent; background: var(--accent); color: #fff; }
+.game-action-btn.primary-action:hover:not(:disabled) { border-color: transparent; background: var(--accent); filter: brightness(1.08); }
+@media (max-width: 560px) {
+  .recent-game-row { flex-wrap: wrap; }
+  /* Under the result on a phone, so the names keep their width. */
+  .recent-game-actions { order: 5; width: 100%; margin-left: 0; }
+  .recent-game-actions .game-action-btn { flex: 1; padding: 0.45rem 0.65rem; }
+  .recent-game-row .recent-game-chevron { margin-left: auto; }
+}
+
+/* Replay screen. */
+.replay-panel { max-width: 760px; margin-left: auto; margin-right: auto; }
+.replay-title-row { display: flex; align-items: baseline; justify-content: space-between; gap: 0.6rem; }
+.replay-loading { min-height: 320px; }
+.replay-stage { position: relative; display: flex; flex-direction: column; align-items: center; text-align: center; padding: 0.5rem 0 0.9rem; border-bottom: 1px solid var(--panel-border); }
+.replay-round { align-self: flex-start; color: var(--muted); font-size: 0.78rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
+/* Two lines tall whatever it says, so nothing below jumps from step to step. */
+.replay-event { display: flex; align-items: center; justify-content: center; min-height: 2.8rem; margin: 0.2rem 0; color: var(--accent-strong); font-weight: 700; overflow-wrap: anywhere; }
+.replay-event[data-kind="game_over"] { font-size: 1.1rem; }
+.replay-stage .auction-card-type { min-height: 1rem; }
+.replay-stage .auction-card-slot { min-height: 140px; }
+.replay-seats { display: flex; flex-direction: column; gap: 0.5rem; margin: 0.9rem 0; }
+.replay-seat { padding: 0.55rem 0.7rem; border: 1px solid var(--panel-border); border-radius: var(--radius-sm); background: var(--panel-bg-soft); transition: background 0.15s ease, border-color 0.15s ease; }
+.replay-seat.acting { border-color: var(--accent); background: var(--accent-soft); }
+.replay-seat.out { opacity: 0.6; }
+.replay-seat-head { display: flex; align-items: center; gap: 0.5rem; min-width: 0; }
+.replay-seat-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.replay-seat-tag { flex: none; padding: 0.05rem 0.45rem; border-radius: 999px; background: var(--panel-bg-log); color: var(--muted); font-size: 0.7rem; font-weight: 700; }
+.replay-seat-tag.winner { background: var(--accent); color: #fff; }
+.replay-seat-points { flex: none; margin-left: auto; color: var(--muted); font-size: 0.82rem; }
+.replay-seat-cards { display: flex; flex-wrap: wrap; gap: 0.3rem; margin-top: 0.4rem; }
+.replay-seat-cards:empty { display: none; }
+.replay-seat-money { display: flex; flex-wrap: wrap; gap: 0.25rem; margin-top: 0.4rem; }
+.replay-chip { min-width: 1.6rem; padding: 0.1rem 0.3rem; border-radius: 6px; background: var(--panel-bg); color: var(--text); font-size: 0.76rem; font-weight: 700; text-align: center; }
+.replay-chip.bid { background: var(--chip-money); color: #fff; }
+/* Stays in reach while a long table scrolls. */
+.replay-controls { position: sticky; bottom: 0.6rem; z-index: 5; padding: 0.55rem 0.7rem; border: 1px solid var(--panel-border); border-radius: var(--radius-sm); background: var(--panel-bg); box-shadow: var(--shadow-sm); }
+#replay-slider { display: block; width: 100%; margin: 0 0 0.35rem; padding: 0; accent-color: var(--accent); cursor: pointer; }
+.replay-buttons { display: flex; align-items: center; gap: 0.3rem; }
+.replay-btn { width: 42px; height: 38px; margin: 0; padding: 0; border: 1px solid var(--panel-border); border-radius: 10px; background: var(--panel-bg-soft); box-shadow: none; color: var(--text); font-size: 0.95rem; line-height: 1; cursor: pointer; }
+.replay-btn:hover:not(:disabled) { background: var(--accent-soft); box-shadow: none; transform: none; }
+.replay-btn:disabled { opacity: 0.4; cursor: default; }
+.replay-btn-play { background: var(--accent); border-color: transparent; color: #fff; }
+.replay-btn-play:hover:not(:disabled) { background: var(--accent); filter: brightness(1.08); }
+.replay-position { margin-left: auto; font-size: 0.8rem; white-space: nowrap; }
+@media (max-width: 600px) {
+  .replay-controls { bottom: calc(62px + env(safe-area-inset-bottom)); }
+  .replay-btn { flex: 1; width: auto; min-width: 0; }
+  .replay-position { flex: none; margin-left: 0.25rem; }
+}

@@ -1446,8 +1446,11 @@ def get_global_stats() -> Optional[dict]:
 def get_recent_games(username: str, limit: int = 20, offset: int = 0) -> dict:
     """
     This player's most recent games, newest first -- {"games": [{"game_id",
-    "finished_at", "placement", "is_winner", "rating_change", "opponents":
-    [{"name", "is_bot", "is_winner"}, ...]}, ...], "has_more": bool}.
+    "finished_at", "placement", "replayable", "seats", "is_winner",
+    "rating_change", "opponents": [{"name", "is_bot", "is_winner",
+    "difficulty"}, ...]}, ...], "has_more": bool}. `replayable`: the game has
+    the seed a replay needs. `seats` and each bot's `difficulty` are what Play
+    again starts from.
     `opponents` includes every seat at the table (not just non-`username`
     ones) since the caller (the "My Games" list, and the home screen's
     Recent Games widget) wants to show who was actually at the table, this
@@ -1482,7 +1485,7 @@ def get_recent_games(username: str, limit: int = 20, offset: int = 0) -> dict:
             player_id = row[0]
             cur.execute(
                 """
-                SELECT g.id, g.finished_at, gr.placement
+                SELECT g.id, g.finished_at, gr.placement, g.seed IS NOT NULL, g.seats
                 FROM game_results gr
                 JOIN games g ON g.id = gr.game_id
                 WHERE gr.user_id = %s
@@ -1494,7 +1497,8 @@ def get_recent_games(username: str, limit: int = 20, offset: int = 0) -> dict:
             rows = cur.fetchall()
             has_more = len(rows) > limit
             rows = rows[:limit]
-            games = [{"game_id": r[0], "finished_at": r[1].isoformat(), "placement": r[2]} for r in rows]
+            games = [{"game_id": r[0], "finished_at": r[1].isoformat(), "placement": r[2],
+                      "replayable": bool(r[3]), "seats": r[4]} for r in rows]
             if not games:
                 return {"games": [], "has_more": False}
             game_ids = [g["game_id"] for g in games]
@@ -1503,17 +1507,18 @@ def get_recent_games(username: str, limit: int = 20, offset: int = 0) -> dict:
             cur.execute(
                 """
                 SELECT pg.game_id, COALESCE(p.username, pg.bot_name) AS name,
-                       p.id IS NULL AS is_bot, pg.is_winner
+                       p.id IS NULL AS is_bot, pg.is_winner, b.difficulty
                 FROM player_games pg
                 LEFT JOIN players p ON p.id = pg.player_id AND p.id NOT IN (SELECT player_id FROM bots)
+                LEFT JOIN bots b ON b.player_id = pg.player_id
                 WHERE pg.game_id = ANY(%s)
                 """,
                 (game_ids,),
             )
             opponents_by_game = {}
-            for game_id, name, is_bot, is_winner in cur.fetchall():
+            for game_id, name, is_bot, is_winner, difficulty in cur.fetchall():
                 opponents_by_game.setdefault(game_id, []).append(
-                    {"name": name, "is_bot": is_bot, "is_winner": is_winner})
+                    {"name": name, "is_bot": is_bot, "is_winner": is_winner, "difficulty": difficulty})
             for g in games:
                 g["opponents"] = opponents_by_game.get(g["game_id"], [])
             # This player's own outcome + Elo delta for each game, for the
@@ -2418,7 +2423,9 @@ def record_finished_game(*, room_code: str, seats: int, bot_mix: list,
     Each participant: {"is_bot": bool, "username": str | None, "name": str,
                         "points": int, "money_left": int, "is_winner": bool,
                         "eliminated": bool, "difficulty": str | None,
-                        "game_username": str}
+                        "game_username": str, "left": bool}
+    `left` (optional, default False): this seat resigned, or dropped and never
+    came back. It places last and is rated as elo.compute_elo_deltas describes.
     `game_username` is always the real per-game username, bot or human
     (unlike `username`, which stays None for a bot) -- used only inside
     this function to attribute `auction_rounds` events/recipients (which
@@ -2508,8 +2515,11 @@ def record_finished_game(*, room_code: str, seats: int, bot_mix: list,
             # (including multiple simultaneous winners) are broken by
             # participants' original order -- a documented simplification,
             # since the game itself doesn't produce a single strict
-            # ranking on a genuine tie.
+            # ranking on a genuine tie. Someone who left the game ranks
+            # behind even an eliminated player, whatever they'd scored.
             def _placement_tier(participant: dict) -> int:
+                if participant.get("left"):
+                    return 3
                 if participant["is_winner"]:
                     return 0
                 if participant["eliminated"]:
@@ -2648,6 +2658,7 @@ def record_finished_game(*, room_code: str, seats: int, bot_mix: list,
                     # never did).
                     rated_standings.append({
                         "username": rating_key, "placement": placement_by_index[index], "rating": elo_before,
+                        "left": bool(p.get("left")),
                     })
                     rated_player_ids[rating_key] = player_id
                     elo_before_by_player_id[player_id] = elo_before
@@ -2744,7 +2755,8 @@ def record_finished_game(*, room_code: str, seats: int, bot_mix: list,
             # swing a single seat would have earned alone.
             deltas_by_player_id: dict[int, list[int]] = {}
             rating_keys_by_player_id: dict[int, list[str]] = {}
-            for rating_key, delta in elo.compute_elo_deltas(rated_standings).items():
+            seats_remaining = sum(1 for p in participants if not p.get("left"))
+            for rating_key, delta in elo.compute_elo_deltas(rated_standings, seats_remaining=seats_remaining).items():
                 player_id = rated_player_ids[rating_key]
                 deltas_by_player_id.setdefault(player_id, []).append(delta)
                 rating_keys_by_player_id.setdefault(player_id, []).append(rating_key)
@@ -3025,6 +3037,17 @@ def assemble_game_record(seed: Optional[int], seat_rows: list, round_rows: list,
                for seq, rnd, seat, action_type, amount, cards, think_ms, reason, ts in action_rows]
     return {"version": GAME_RECORD_VERSION, "seed": seed, "settlement": "ForfeitSettlement",
             "seats": seats, "actions": actions, "rounds": rounds, "standings": standings}
+
+
+def fetch_game_record(game_id: int) -> Optional[dict]:
+    """One stored game's record (see fetch_game_records), or None if there's no
+    such game, no database, or the read failed."""
+    try:
+        records = fetch_game_records(ids=[game_id])
+    except Exception as e:  # noqa: BLE001
+        LoggingManager.warning(f"game_history.fetch_game_record failed: {e}")
+        return None
+    return records[0][1] if records else None
 
 
 def fetch_game_records(ids: Optional[list] = None, sample: Optional[int] = None) -> list:

@@ -10,6 +10,7 @@ from highsociety.code.ai.greedy_bot import GreedyBot
 from highsociety.code.gamecore.game_manager.auction_history import AuctionHistory
 from highsociety.code.gamecore.game_manager.gameplay import PlayGame
 from highsociety.code.gamecore.recording.game_replay import (
+    replay_steps,
     GAME_RECORD_VERSION,
     ReplayMismatch,
     ReplayUnsupported,
@@ -231,3 +232,50 @@ def test_a_timed_out_turn_is_recorded_as_a_timeout_and_replays_as_the_pass_it_be
     timeouts = [a for a in record["actions"] if a["reason"] == "timeout"]
     assert len(timeouts) == 1 and timeouts[0]["action"] == "pass"
     replay_record(record)
+
+
+def test_replay_steps_show_the_table_at_every_moment():
+    game = _play(_bots(), seed=3)
+    replay = replay_steps(_record(game))
+    steps = replay["steps"]
+
+    assert steps[0]["kind"] == "auction_start"
+    assert steps[-1]["kind"] == "game_over"
+    assert [s["seat"] for s in replay["seats"]] == list(range(len(game.players)))
+    # One step per recorded action, one opening and one result per auction, one ending.
+    played = [s for s in steps if s["kind"] not in ("auction_start", "auction_result", "game_over")]
+    assert len(played) == len(game.action_log)
+    assert sum(s["kind"] == "auction_start" for s in steps) == len(game.auction_rounds)
+    assert sum(s["kind"] == "auction_result" for s in steps) == len(game.auction_rounds)
+
+    final = {s["seat"]: s for s in replay["standings"]}
+    for seat, table in enumerate(steps[-1]["players"]):
+        assert table["points"] == final[seat]["points"]
+        assert sum(table["money"]) == final[seat]["money_left"]
+
+
+def test_replay_steps_track_a_bid_and_its_cards():
+    replay = replay_steps(_record(_play(_bots(), seed=3)))
+    bid = next(s for s in replay["steps"] if s["kind"] == "bid")
+    bidder = bid["players"][bid["seat"]]
+    assert sum(bidder["bid"]) == bid["amount"] == bid["top_bid"]
+
+
+def test_replay_steps_refuse_a_game_that_no_longer_plays_out_the_same():
+    record = _record(_play(_bots(), seed=3))
+    record["seed"] += 1
+    with pytest.raises(ReplayMismatch):
+        replay_steps(record)
+
+
+def test_replaying_leaves_time_sleep_alone(monkeypatch):
+    """Replays run in the web server beside live games, whose pacing depends on
+    time.sleep, so a replay must neither patch it nor wait on it."""
+    record = _record(_play(_bots(), seed=3))
+    original = time.sleep
+    seen = []
+    monkeypatch.setattr(time, "sleep", lambda s: seen.append(s))
+    patched = time.sleep
+    replay_steps(record)
+    assert time.sleep is patched is not original
+    assert seen == []

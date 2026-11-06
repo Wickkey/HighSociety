@@ -2893,3 +2893,71 @@ def test_link_refuses_an_account_tied_to_another_google_account(linkable):
     resp = _link({"id_token": "valid", "username": "guest-1", "login_token": "tok"})
     assert resp.status_code == 409
     assert "recompute" not in linkable
+
+
+def _a_finished_game_record():
+    from highsociety.code.ai.greedy_bot import GreedyBot
+    from highsociety.code.gamecore.game_manager.auction_history import AuctionHistory
+    from highsociety.code.gamecore.game_manager.gameplay import PlayGame
+    from highsociety.code.gamecore.recording.game_replay import game_record
+
+    bots = [GreedyBot(name, name) for name in ("Ann", "Ben", "Cal")]
+    game = PlayGame(players=bots, spectators=[], mode="network", seed=5, turn_duration=None,
+                    auction_history=AuctionHistory(), pace_events=False)
+    game.play_game()
+    return game_record(game)
+
+
+@pytest.fixture
+def clear_replay_cache():
+    web_server._replay_cache.clear()
+    yield
+    web_server._replay_cache.clear()
+
+
+def _replay_client(monkeypatch, record, detail=True):
+    monkeypatch.setattr(game_history, "get_game_detail",
+                        lambda game_id: {"finished_at": "2026-11-01T00:00:00+00:00"} if detail else None)
+    fetches = []
+    monkeypatch.setattr(game_history, "fetch_game_record", lambda game_id: fetches.append(game_id) or record)
+    return web_server.app.test_client(), fetches
+
+
+def test_replay_api_returns_every_step_and_only_builds_it_once(monkeypatch, clear_replay_cache):
+    client, fetches = _replay_client(monkeypatch, _a_finished_game_record())
+    first = client.get("/api/games/replay/7")
+    assert first.status_code == 200
+    body = first.get_json()
+    assert body["game_id"] == 7
+    assert [s["name"] for s in body["seats"]] and body["steps"][-1]["kind"] == "game_over"
+    assert client.get("/api/games/replay/7").get_json() == body
+    assert fetches == [7]
+
+
+def test_replay_api_says_when_a_game_cant_be_replayed(monkeypatch, clear_replay_cache):
+    record = _a_finished_game_record()
+    record["seed"] = None
+    client, _ = _replay_client(monkeypatch, record)
+    response = client.get("/api/games/replay/8")
+    assert response.status_code == 409
+    assert "steps" not in response.get_json()
+
+
+def test_replay_api_says_when_rules_changed_since_the_game(monkeypatch, clear_replay_cache):
+    record = _a_finished_game_record()
+    record["seed"] += 1
+    client, _ = _replay_client(monkeypatch, record)
+    assert client.get("/api/games/replay/9").status_code == 409
+
+
+def test_replay_api_for_an_unknown_game_is_a_404_and_isnt_remembered(monkeypatch, clear_replay_cache):
+    client, _ = _replay_client(monkeypatch, None, detail=False)
+    assert client.get("/api/games/replay/10").status_code == 404
+    assert 10 not in web_server._replay_cache
+
+
+def test_the_replay_page_is_served_and_kept_out_of_search_results():
+    response = web_server.app.test_client().get("/replay/12")
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    assert "Game Replay" in html and "noindex" in html

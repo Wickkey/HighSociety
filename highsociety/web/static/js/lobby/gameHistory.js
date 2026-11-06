@@ -10,7 +10,8 @@
 import { $, hide, show, showScreen, setScreenPath } from '../utils/dom.js';
 import { escapeHtml } from '../utils/formatting.js';
 import { loadProfile } from '../auth/profile.js';
-import { fetchJSON } from './lobby.js';
+import { fetchJSON, playAgain } from './lobby.js';
+import { showReplayScreen } from './replay.js';
 import { openGameDetailModal } from '../ui/modals.js';
 // Circular with account.js (which imports fetchGamesPage from here) --
 // safe by this project's own established convention (see lobby.js/
@@ -63,22 +64,54 @@ function ratingDeltaHtml(game) {
 // once did.
 function gamesListHtml(games, myUsername) {
   return games.map((g) => `
-    <button type="button" class="recent-game-row" data-game-id="${g.game_id}">
+    <div class="recent-game-row" role="button" tabindex="0" data-game-id="${g.game_id}">
       <span class="recent-game-placement${placementClass(g.placement)}">#${g.placement}</span>
       <span class="recent-game-body">
         <span class="recent-game-opponents">${escapeHtml(opponentsLabel(g, myUsername))}</span>
         <span class="recent-game-date">${new Date(g.finished_at).toLocaleDateString('en-US', DATE_FORMAT)}</span>
       </span>
       ${ratingDeltaHtml(g)}
+      <span class="recent-game-actions">
+        <button type="button" class="game-action-btn" data-action="replay"${g.replayable ? '' : ' disabled title="Replays aren\'t available for older games"'}>Replay</button>
+        <button type="button" class="game-action-btn primary-action" data-action="again" data-setup="${encodeURIComponent(JSON.stringify(gameSetup(g)))}">Play again</button>
+      </span>
       <svg class="recent-game-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18l6-6-6-6"/></svg>
-    </button>
+    </div>
   `).join('');
+}
+
+// What Play again fills the host form with: the same table size and bots. A bot
+// with no recorded difficulty (an older game) counts as medium, the form's default.
+function gameSetup(game) {
+  const bots = {};
+  game.opponents.filter((o) => o.is_bot).forEach((o) => {
+    const tier = o.difficulty || 'medium';
+    bots[tier] = (bots[tier] || 0) + 1;
+  });
+  return { seats: game.seats || game.opponents.length, bots };
 }
 
 function wireRowClicks(container) {
   container.querySelectorAll('.recent-game-row:not([data-wired])').forEach((row) => {
     row.dataset.wired = 'true'; // re-rendering a page whose rows are already wired shouldn't double-bind them
-    row.addEventListener('click', () => openGameDetailModal(row.dataset.gameId));
+    row.addEventListener('click', (e) => {
+      const action = e.target.closest('[data-action]');
+      if (!action) {
+        if (!e.target.closest('.recent-game-actions')) openGameDetailModal(row.dataset.gameId);
+        return;
+      }
+      if (action.dataset.action === 'replay') {
+        showReplayScreen(row.dataset.gameId, document.querySelector('.screen:not(.hidden)')?.id || null);
+      } else {
+        playAgain(JSON.parse(decodeURIComponent(action.dataset.setup)));
+      }
+    });
+    row.addEventListener('keydown', (e) => {
+      if (e.target === row && (e.key === 'Enter' || e.key === ' ')) {
+        e.preventDefault();
+        openGameDetailModal(row.dataset.gameId);
+      }
+    });
   });
 }
 

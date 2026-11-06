@@ -5,6 +5,7 @@ import { $, show, showScreen } from './utils/dom.js';
 import {
   resolveConfirmDialog, openProfileModal, closeProfileModal, closeGameDetailModal, onGameDetailTableClick,
 } from './ui/modals.js';
+import { initReplay, getReplayReturnTo } from './lobby/replay.js';
 import { onSpecChatSend, onPlayerChatSend, initChat } from './ui/chat.js';
 import {
   onContinueAsGuest, onShuffleUsername, onLoginUsernameContinue, onLoginBack, showChooseStep, initGoogleSignIn,
@@ -217,6 +218,13 @@ function wireStaticHandlers() {
     if (returnTo === 'screen-account') { showAccountScreen(); return; }
     // 'screen-host-setup' (Home) and anything unrecognized both land on
     // the tile picker -- Home has no extra state of its own to restore.
+    showScreen('screen-host-setup'); showHomeTiles(); startRoomsPolling();
+  }));
+  initReplay();
+  $('btn-replay-back').addEventListener('click', () => navigateFromSidebar(() => {
+    const from = getReplayReturnTo();
+    if (from === 'screen-game-history') { showGameHistoryScreen(getGameHistoryReturnTo()); return; }
+    if (from === 'screen-account') { showAccountScreen(); return; }
     showScreen('screen-host-setup'); showHomeTiles(); startRoomsPolling();
   }));
   $('btn-player-profile-history-prev').addEventListener('click', onPlayerProfileHistoryPrevClick);

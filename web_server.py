@@ -16,6 +16,7 @@ existing Transport interface. See README.md's "Architecture: adding a new
 frontend" section, which called this out as the intended extension point.
 """
 import argparse
+import collections
 import datetime
 import hashlib
 import json
@@ -53,6 +54,7 @@ from highsociety.code.gamecore.game_manager.gameplay import PlayGame
 from highsociety.code.gamecore.network.transport import WebSocketTransport
 from highsociety.code.gamecore.player.networkplayer import NetworkPlayer
 from highsociety.code.gamecore.player.networkspectator import NetworkSpectator
+from highsociety.code.gamecore.recording import game_replay
 
 WEB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "highsociety", "web")
 
@@ -510,6 +512,9 @@ def _record_game_history(room: "GameRoom", game: PlayGame, started_at: datetime.
             "money_left": standing["money_left"],
             "is_winner": standing["username"] in winner_usernames,
             "eliminated": standing["eliminated"],
+            # Still out at the final tally: they resigned, or dropped and
+            # used up their chance to return.
+            "left": not standing["active"],
             # Only MCTSBot instances (the web lobby's easy/medium/hard
             # choices) have this — see game_history.py's bots table, which
             # uses it to attribute this seat to the right shared
@@ -1387,6 +1392,47 @@ def api_game_detail(game_id):
     return jsonify(detail)
 
 
+# A finished game never changes, and a deploy (the only thing that can change
+# how it replays) restarts this process, so a built replay is good until then.
+_REPLAY_CACHE_SIZE = 32
+_replay_cache: "collections.OrderedDict[int, tuple]" = collections.OrderedDict()
+_replay_cache_lock = threading.Lock()
+
+
+def _build_replay(game_id: int) -> tuple:
+    """(JSON body, HTTP status) for one game's replay."""
+    detail = game_history.get_game_detail(game_id)
+    record = game_history.fetch_game_record(game_id) if detail is not None else None
+    if record is None:
+        return {"error": "No such game."}, 404
+    try:
+        replay = game_replay.replay_steps(record)
+    except (game_replay.ReplayUnsupported, game_replay.ReplayMismatch) as e:
+        LoggingManager.info(f"Game {game_id} can't be replayed: {e}")
+        return {"error": "This game can't be replayed."}, 409
+    return {"game_id": game_id, "finished_at": detail["finished_at"], **replay}, 200
+
+
+@app.route("/api/games/replay/<int:game_id>")
+def api_game_replay(game_id):
+    """Every step of a finished game for the replay screen. Hands are included:
+    the game is over, and no finished game's results are private (see
+    get_game_detail's docstring)."""
+    with _replay_cache_lock:
+        cached = _replay_cache.get(game_id)
+        if cached is not None:
+            _replay_cache.move_to_end(game_id)
+    if cached is None:
+        cached = _build_replay(game_id)
+        if cached[1] != 404:  # a 404 can be a database hiccup, so it isn't remembered
+            with _replay_cache_lock:
+                _replay_cache[game_id] = cached
+                while len(_replay_cache) > _REPLAY_CACHE_SIZE:
+                    _replay_cache.popitem(last=False)
+    body, status = cached
+    return jsonify(body), status
+
+
 @app.route("/api/leaderboard")
 def api_leaderboard():
     """Players ranked by Elo, paginated (?limit/?offset -- default 20 per
@@ -1435,7 +1481,8 @@ def api_rating_history(username):
 @app.route("/achievements")
 @app.route("/my-games")
 @app.route("/players/<username>")
-def index(username=None):
+@app.route("/replay/<int:game_id>")
+def index(username=None, game_id=None):
     # Two different routes share this same `username` param, for two
     # different reasons -- neither actually reads it here:
     # - /account/<username> is purely cosmetic/shareable -- the account
@@ -1450,7 +1497,7 @@ def index(username=None):
     # Both are otherwise the same client-decides-what-to-show model every
     # other route on this one shared shell template already uses.
     path = request.path
-    if path.startswith(("/account/", "/players/")):
+    if path.startswith(("/account/", "/players/", "/replay/")):
         path = path[:path.index("/", 1)]
     title, description = _PAGE_META.get(path, _PAGE_META["/"])
     return render_template(
@@ -1487,8 +1534,9 @@ _PAGE_META = {
     "/achievements": ("Achievements – High Society", _HOME_DESCRIPTION),
     "/my-games": ("My Games – High Society", _HOME_DESCRIPTION),
     "/players": ("Player Profile – High Society", _HOME_DESCRIPTION),
+    "/replay": ("Game Replay – High Society", _HOME_DESCRIPTION),
 }
-_PRIVATE_PATHS = {"/account", "/achievements", "/my-games", "/players"}
+_PRIVATE_PATHS = {"/account", "/achievements", "/my-games", "/players", "/replay"}
 _SITEMAP_PATHS = ["/", "/rules", "/play", "/host", "/join", "/leaderboard", "/privacy"]
 
 
