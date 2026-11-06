@@ -729,17 +729,6 @@
           </div>
         </div>
 
-        <!-- Hidden only for a bot, decided from the username before anything
-             loads (see showPlayerProfileScreen), so it never pops in late. -->
-        <div id="player-profile-achievements-section" class="card panel account-panel">
-          <div class="profile-achievements-head">
-            <h3>Achievements</h3>
-            <span id="player-profile-achievements-count" class="muted"></span>
-          </div>
-          <div id="player-profile-achievements" class="achievements-grid profile-achievements-grid"></div>
-          <p id="player-profile-achievements-empty" class="muted hidden">No achievements yet.</p>
-        </div>
-
         <!-- Never hidden as a whole any more (see .account-stats-chart-row's
              own comment above on the same principle). -->
         <div id="player-profile-history-section" class="card panel account-panel">
@@ -753,11 +742,24 @@
           </h3>
           <div id="player-profile-history-list" class="recent-games-list tile-loading-spinner"></div>
           <p id="player-profile-history-empty" class="muted hidden">No games recorded yet.</p>
+          <button type="button" id="btn-player-profile-history-more" class="see-more-btn hidden">See more games</button>
           <div id="player-profile-history-pagination" class="leaderboard-pagination hidden">
             <button type="button" id="btn-player-profile-history-prev" class="secondary" disabled>← Prev</button>
             <span id="player-profile-history-page-label" class="muted"></span>
             <button type="button" id="btn-player-profile-history-next" class="secondary" disabled>Next →</button>
           </div>
+        </div>
+
+        <!-- Hidden only for a bot, decided from the username before anything
+             loads (see showPlayerProfileScreen), so it never pops in late. -->
+        <div id="player-profile-achievements-section" class="card panel account-panel">
+          <div class="profile-achievements-head">
+            <h3>Achievements</h3>
+            <span id="player-profile-achievements-count" class="muted"></span>
+          </div>
+          <div id="player-profile-achievements" class="profile-achievements-strip"></div>
+          <p id="player-profile-achievements-empty" class="muted hidden">No achievements yet.</p>
+          <button type="button" id="btn-player-profile-achievements-toggle" class="see-more-btn hidden" aria-expanded="false"></button>
         </div>
       </div>
     </section>
@@ -802,6 +804,11 @@
             <tbody id="bot-leaderboard-body"></tbody>
           </table>
           <p id="bot-leaderboard-error" class="muted hidden">Couldn't load the bots just now. Try again in a moment.</p>
+          <div id="bot-leaderboard-pagination" class="leaderboard-pagination hidden">
+            <button type="button" id="btn-bot-leaderboard-prev" class="secondary" disabled>← Prev</button>
+            <span id="bot-leaderboard-page-label" class="muted"></span>
+            <button type="button" id="btn-bot-leaderboard-next" class="secondary" disabled>Next →</button>
+          </div>
         </div>
       </div>
     </section>
@@ -828,6 +835,10 @@
       <div class="card panel account-panel">
         <button type="button" class="screen-back" id="btn-achievements-back">← Back</button>
         <h2>Achievements</h2>
+        <div class="achievements-progress">
+          <span id="achievements-count" class="achievements-count">&nbsp;</span>
+          <div class="achievements-progress-track" aria-hidden="true"><span id="achievements-progress-fill"></span></div>
+        </div>
         <div id="account-achievements-guest-note" class="connect-google hidden">
           <p class="muted">Connect Google to unlock the achievements your games have already earned.</p>
           <div id="achievements-connect-google" class="connect-google-button" data-google-button></div>
@@ -1624,6 +1635,8 @@
             </div>
             <div class="auction-stage">
               <div id="event-toast" class="event-toast"></div>
+              <div id="player-table-talk-others" class="table-talk others" aria-live="polite"></div>
+              <div id="player-table-talk-mine" class="table-talk mine"></div>
               <div id="auction-card-type" class="auction-card-type"></div>
               <div id="auction-card" class="auction-card-slot"></div>
               <div id="final-green-overlay" class="final-green-overlay">
@@ -1686,28 +1699,6 @@
             <summary>Game log (advanced) <span id="seed-display" class="muted"></span></summary>
             <div id="game-log" class="log"></div>
           </details>
-
-          <div class="card panel chat-panel">
-            <div class="chat-header">
-              <h3>Chat</h3>
-              <span class="chat-header-hint">Everyone at the table</span>
-            </div>
-            <div class="chat-log-wrap">
-              <div id="player-chat-log" class="chat-log" role="log" aria-live="polite" aria-label="Chat messages" data-empty="No messages yet. Say hello, or send a reaction."></div>
-              <button type="button" class="chat-new-pill hidden" data-chat-pill="player-chat-log">New messages ↓</button>
-            </div>
-            <div id="quick-reactions" class="quick-reactions">
-              <button type="button" class="quick-reaction-btn" data-emoji="🗣️" title="Send a reaction">🗣️</button>
-              <button type="button" class="quick-reaction-btn" data-emoji="😂" title="Send a reaction">😂</button>
-              <button type="button" class="quick-reaction-btn" data-emoji="💀" title="Send a reaction">💀</button>
-              <button type="button" class="quick-reaction-btn" data-emoji="🔥" title="Send a reaction">🔥</button>
-              <button type="button" class="quick-reaction-btn" data-emoji="🤔" title="Send a reaction">🤔</button>
-            </div>
-            <div class="button-row">
-              <input type="text" id="player-chat-input" placeholder="Say something…" maxlength="300" enterkeyhint="send" autocomplete="off" aria-label="Chat message">
-              <button id="btn-player-chat-send" class="secondary">Send</button>
-            </div>
-          </div>
         </div>
 
         <div class="side-col">
@@ -1729,6 +1720,41 @@
               </span>
             </div>
             <div id="opponents-list"></div>
+          </div>
+        </div>
+      </div>
+      <!-- Chat lives in this slim bar rather than a card in the page: always in
+           reach, and the page keeps room for it (.table-layout's bottom padding)
+           so it never permanently covers anything. Messages also appear briefly
+           beside the auction card (.table-talk). The full log opens on demand. -->
+      <div class="chat-dock">
+        <div class="chat-dock-inner">
+          <div id="player-chat-panel" class="chat-panel hidden" role="region" aria-label="Chat log">
+            <div class="chat-header">
+              <h3>Chat</h3>
+              <button type="button" class="chat-close" data-chat-toggle="player-chat-log" aria-label="Close chat log">×</button>
+            </div>
+            <div class="chat-log-wrap">
+              <div id="player-chat-log" class="chat-log" role="log" aria-label="Chat messages" data-empty="No messages yet. Say hello!"></div>
+              <button type="button" class="chat-new-pill hidden" data-chat-pill="player-chat-log">New messages ↓</button>
+            </div>
+          </div>
+          <div class="chat-bar">
+            <button type="button" id="btn-player-chat-log" class="chat-bar-btn" data-chat-toggle="player-chat-log" aria-expanded="false" aria-controls="player-chat-panel" aria-label="Open chat log" title="Chat log">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a8 8 0 0 1-8 8H4l2.2-3.1A8 8 0 1 1 21 12z"/></svg><span class="chat-unread hidden" data-chat-unread></span>
+            </button>
+            <div class="reaction-picker">
+              <button type="button" id="btn-reaction-picker" class="chat-bar-btn" aria-expanded="false" aria-controls="quick-reactions" aria-label="Send a reaction" title="Send a reaction"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M8.5 14.5a4.5 4.5 0 0 0 7 0"/><path d="M9 9.5h.01M15 9.5h.01"/></svg></button>
+              <div id="quick-reactions" class="quick-reactions">
+                <button type="button" class="quick-reaction-btn" data-emoji="🗣️" title="Send a reaction">🗣️</button>
+                <button type="button" class="quick-reaction-btn" data-emoji="😂" title="Send a reaction">😂</button>
+                <button type="button" class="quick-reaction-btn" data-emoji="💀" title="Send a reaction">💀</button>
+                <button type="button" class="quick-reaction-btn" data-emoji="🔥" title="Send a reaction">🔥</button>
+                <button type="button" class="quick-reaction-btn" data-emoji="🤔" title="Send a reaction">🤔</button>
+              </div>
+            </div>
+            <input type="text" id="player-chat-input" placeholder="Say something…" maxlength="300" enterkeyhint="send" autocomplete="off" aria-label="Chat message">
+            <button id="btn-player-chat-send" class="chat-send">Send</button>
           </div>
         </div>
       </div>
@@ -1779,6 +1805,8 @@
             </div>
             <div class="auction-stage">
               <div id="spec-event-toast" class="event-toast"></div>
+              <div id="spec-table-talk-others" class="table-talk others" aria-live="polite"></div>
+              <div id="spec-table-talk-mine" class="table-talk mine"></div>
               <div id="spec-auction-card-type" class="auction-card-type"></div>
               <div id="spec-auction-card" class="auction-card-slot"></div>
               <div id="spec-final-green-overlay" class="final-green-overlay">
@@ -1804,24 +1832,6 @@
             <summary>Game log <span id="spec-seed-display" class="muted"></span></summary>
             <div id="spec-game-log" class="log"></div>
           </details>
-
-          <div class="card panel chat-panel">
-            <div class="chat-header">
-              <h3>Chat</h3>
-            </div>
-            <div class="chat-log-wrap">
-              <div id="spec-chat-log" class="chat-log" role="log" aria-live="polite" aria-label="Chat messages" data-empty="No messages yet."></div>
-              <button type="button" class="chat-new-pill hidden" data-chat-pill="spec-chat-log">New messages ↓</button>
-            </div>
-            <label class="reveal-toggle chat-target-toggle">
-              <input type="checkbox" id="spec-chat-target-toggle">
-              Spectators only (hide from players)
-            </label>
-            <div class="button-row">
-              <input type="text" id="spec-chat-input" placeholder="Message everyone…" maxlength="300" enterkeyhint="send" autocomplete="off" aria-label="Chat message">
-              <button id="btn-spec-chat-send" class="secondary">Send</button>
-            </div>
-          </div>
         </div>
 
         <div class="side-col">
@@ -1834,6 +1844,35 @@
             <div class="panel-footer">
               <button id="btn-stop-watching" class="secondary">Stop Watching</button>
             </div>
+          </div>
+        </div>
+      </div>
+      <!-- Chat lives in this slim bar rather than a card in the page: always in
+           reach, and the page keeps room for it (.table-layout's bottom padding)
+           so it never permanently covers anything. Messages also appear briefly
+           beside the auction card (.table-talk). The full log opens on demand. -->
+      <div class="chat-dock">
+        <div class="chat-dock-inner">
+          <div id="spec-chat-panel" class="chat-panel hidden" role="region" aria-label="Chat log">
+            <div class="chat-header">
+              <h3>Chat</h3>
+              <button type="button" class="chat-close" data-chat-toggle="spec-chat-log" aria-label="Close chat log">×</button>
+            </div>
+            <div class="chat-log-wrap">
+              <div id="spec-chat-log" class="chat-log" role="log" aria-label="Chat messages" data-empty="No messages yet."></div>
+              <button type="button" class="chat-new-pill hidden" data-chat-pill="spec-chat-log">New messages ↓</button>
+            </div>
+            <label class="reveal-toggle chat-target-toggle">
+              <input type="checkbox" id="spec-chat-target-toggle">
+              Spectators only (hide from players)
+            </label>
+          </div>
+          <div class="chat-bar">
+            <button type="button" id="btn-spec-chat-log" class="chat-bar-btn" data-chat-toggle="spec-chat-log" aria-expanded="false" aria-controls="spec-chat-panel" aria-label="Open chat log" title="Chat log">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a8 8 0 0 1-8 8H4l2.2-3.1A8 8 0 1 1 21 12z"/></svg><span class="chat-unread hidden" data-chat-unread></span>
+            </button>
+            <input type="text" id="spec-chat-input" placeholder="Message everyone…" maxlength="300" enterkeyhint="send" autocomplete="off" aria-label="Chat message">
+            <button id="btn-spec-chat-send" class="chat-send">Send</button>
           </div>
         </div>
       </div>
@@ -1943,10 +1982,6 @@
       <strong id="achievement-toast-name"></strong>
       <span id="achievement-toast-desc" class="achievement-toast-desc"></span>
     </span>
-  </button>
-
-  <button type="button" id="chat-jump" class="chat-jump hidden" aria-label="Unread chat messages. Go to chat.">
-    <span aria-hidden="true">💬</span><span id="chat-jump-count" class="chat-jump-count"></span>
   </button>
 
   <div id="home-global-stats" class="home-global-stats hidden">

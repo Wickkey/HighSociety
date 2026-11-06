@@ -114,6 +114,24 @@ def close_leftover_websocket_clients(monkeypatch):
         original_init(self, *args, **kwargs)
 
     monkeypatch.setattr(simple_websocket.Client, "__init__", tracking_init)
+
+    # simple_websocket 1.1.0's Client.handshake stops at the first protocol
+    # event, so a message arriving in the same network read as the "connection
+    # accepted" response stays unprocessed until more data comes in. The server
+    # is then waiting on the client while the client's receive() times out, which
+    # failed a random web-server test every few runs. Browsers aren't affected;
+    # only these tests use this client.
+    original_handshake = simple_websocket.Client.handshake
+
+    def draining_handshake(self):
+        original_handshake(self)
+        self._handle_events()
+        # A close in that same read must not fail the connect itself: the test
+        # still needs to read whatever was sent before it. The reader thread
+        # sees the closed socket next and marks this disconnected.
+        self.connected = True
+
+    monkeypatch.setattr(simple_websocket.Client, "handshake", draining_handshake)
     yield
     for client in opened:
         if getattr(client, "connected", False):  # unset if connecting failed

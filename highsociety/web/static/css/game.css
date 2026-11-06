@@ -34,7 +34,7 @@
   .table-layout .opponents-panel { order: 1; }
   .table-layout .move-panel { order: 2; }
   .table-layout #my-panel { order: 3; }
-  .table-layout .log-details, .table-layout .chat-panel { order: 4; }
+  .table-layout .log-details { order: 4; }
 }
 
 .side-col .panel { --panel-tint: var(--panel-bg-alt); }
@@ -47,7 +47,10 @@
      moment the round label and the info-button column aren't the same
      width (they never are: "AUCTION #3" vs. a single ⓘ icon). */
   display: grid;
-  grid-template-columns: 1fr auto 1fr;
+  /* The sides keep room for their own content; a long unbroken name in the
+     middle wraps, rather than pushing the info button and the whole page off
+     the side of a small phone. */
+  grid-template-columns: minmax(min-content, 1fr) minmax(0, auto) minmax(min-content, 1fr);
   align-items: center;
   column-gap: 0.5rem;
   margin-bottom: 1rem;
@@ -422,7 +425,7 @@
   white-space: nowrap;
 }
 .reveal-toggle input { width: auto; margin: 0; }
-.chat-target-toggle { display: flex; margin: 0.6rem 0 0; }
+.chat-target-toggle { display: flex; margin: 0.5rem 0 0; font-size: 0.8rem; }
 
 /* Read-only status badge — reveal-cards is a host-time setting fixed for
    the whole table (see host-reveal-cards in the host form's "Table
@@ -468,47 +471,6 @@
 .log div { border-bottom: 1px dashed var(--panel-border); padding: 0.15rem 0; }
 .log div:last-child { border-bottom: none; }
 
-/* ---------------- quick reactions ---------------- */
-/* Fixed 5-emoji row, sent instantly on click (see onQuickReactionClick) --
-   no text entry or confirm step, since the whole point is a one-tap
-   reaction while a bidding war is still live. */
-.quick-reactions {
-  display: flex;
-  gap: 0.4rem;
-  margin: 0.6rem 0;
-}
-.quick-reaction-btn {
-  flex: 1;
-  background: var(--panel-bg-log);
-  border: 1px solid var(--panel-border);
-  border-radius: var(--radius-sm);
-  font-size: 1.3rem;
-  line-height: 1;
-  padding: 0.4rem 0;
-  cursor: pointer;
-  transition: transform 0.1s ease, border-color 0.15s ease, background 0.15s ease;
-}
-.quick-reaction-btn:hover { border-color: var(--accent-light); background: var(--accent-soft); }
-.quick-reaction-btn:active { transform: scale(0.9); }
-
-/* Rendered inside whichever tile the reaction came from (#my-panel or a
-   .opponent-row -- both already position:relative) -- see
-   showReactionBubble. Floats up and fades rather than staying put, so
-   several in a row don't just stack and overlap. */
-.reaction-bubble {
-  position: absolute;
-  top: 4px;
-  right: 8px;
-  font-size: 1.7rem;
-  line-height: 1;
-  opacity: 0;
-  transform: scale(0.4);
-  transition: opacity 0.2s ease, transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
-  pointer-events: none;
-  z-index: 5;
-  filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.25));
-}
-.reaction-bubble.show { opacity: 1; transform: scale(1); }
 #my-panel { position: relative; }
 
 /* ---------------- opponents ---------------- */
@@ -1131,12 +1093,25 @@ button.link-button:hover { color: var(--accent); }
 }
 
 /* ---------------- chat ---------------- */
-.chat-header { display: flex; align-items: baseline; justify-content: space-between; gap: 0.6rem; }
-.chat-header h3 { margin-bottom: 0.5rem; }
-.chat-header-hint { font-size: 0.75rem; color: var(--muted); }
+.chat-header { display: flex; align-items: center; justify-content: space-between; gap: 0.6rem; margin-bottom: 0.4rem; }
+.chat-header h3 { margin: 0; }
+.chat-close {
+  width: 30px;
+  height: 30px;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  box-shadow: none;
+  color: var(--muted);
+  font-size: 1.3rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.chat-close:hover { color: var(--text); background: none; transform: none; box-shadow: none; }
 .chat-log-wrap { position: relative; }
 .chat-log {
-  height: 200px;
+  height: min(300px, 38vh);
   overflow-y: auto;
   overscroll-behavior: contain;
   display: flex;
@@ -1191,29 +1166,230 @@ button.link-button:hover { color: var(--accent); }
   box-shadow: var(--shadow-sm);
   cursor: pointer;
 }
-/* Chat sits at the very end of the page on a phone, out of sight during play,
-   so unread messages get a button that takes you there. */
-.chat-jump {
+
+/* The chat bar. Fixed to the bottom of the table, with room kept for it at the
+   end of the page, so nothing is ever stuck underneath it. */
+:root { --chat-bar-space: 76px; --bottom-tabs-height: calc(58px + env(safe-area-inset-bottom)); }
+.table-layout { padding-bottom: var(--chat-bar-space); }
+.chat-dock {
   position: fixed;
-  right: 16px;
-  bottom: 16px;
-  z-index: 40;
-  width: auto;
-  margin: 0;
+  left: 0;
+  right: 0;
+  bottom: var(--keyboard-offset, 0px);
+  z-index: 30;
+  display: flex;
+  justify-content: flex-end;
+  /* Lines up with the table's right edge, clear of the fixed GitHub button. */
+  padding: 0 max(92px, calc((100vw - 1080px) / 2)) calc(0.6rem + env(safe-area-inset-bottom)) 16px;
+  pointer-events: none;
+}
+#spectate-live-layout.hidden ~ .chat-dock { display: none; }
+.chat-dock-inner {
+  position: relative;
+  width: min(100%, 470px);
+  pointer-events: auto;
+}
+.chat-bar {
   display: flex;
   align-items: center;
-  gap: 0.35rem;
-  padding: 0.5rem 0.8rem;
+  gap: 0.3rem;
+  padding: 0.35rem;
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: 999px;
+  box-shadow: var(--shadow);
+}
+.chat-bar #player-chat-input, .chat-bar #spec-chat-input {
+  flex: 1;
+  width: auto;
+  height: 38px;
+  margin: 0;
+  padding: 0 0.75rem;
+  border-radius: 999px;
+  background: var(--panel-bg-log);
+}
+.chat-bar input::placeholder { text-overflow: ellipsis; }
+.chat-bar input.peeking::placeholder { color: var(--text); opacity: 1; font-size: 0.85rem; font-weight: 600; }
+.chat-bar-btn {
+  position: relative;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  margin: 0;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  box-shadow: none;
+  color: var(--text);
+  cursor: pointer;
+}
+.chat-bar-btn svg { width: 22px; height: 22px; }
+.chat-bar-btn:hover, .chat-bar-btn[aria-expanded="true"] { background: var(--accent-soft); transform: none; box-shadow: none; }
+.chat-unread {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--danger);
+  color: #fff;
+  font-size: 0.68rem;
+  font-weight: 700;
+  line-height: 18px;
+  text-align: center;
+}
+.chat-unread.hidden { display: none; }
+.chat-send {
+  flex: none;
+  width: auto;
+  height: 38px;
+  margin: 0;
+  padding: 0 0.9rem;
   border: none;
   border-radius: 999px;
   background: var(--chip-money);
   color: #fff;
+  font-size: 0.85rem;
   font-weight: 700;
-  box-shadow: var(--shadow);
+  box-shadow: none;
   cursor: pointer;
 }
-.chat-jump.hidden { display: none; }
-@media (min-width: 801px) { .chat-jump { display: none; } }
+/* The log opens above the bar, on request. On a wide screen it's as wide as the
+   side column, so it stays clear of the money cards and can stay open. */
+.chat-panel {
+  position: absolute;
+  right: 0;
+  width: min(100%, 354px);
+  bottom: calc(100% + 0.5rem);
+  padding: 0.75rem;
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+.chat-panel.hidden { display: none; }
+
+/* Reactions: in the bar on a wide screen, behind the smiley on a phone. */
+.reaction-picker { display: flex; align-items: center; flex: none; }
+#btn-reaction-picker { display: none; }
+.quick-reactions { display: flex; }
+.quick-reaction-btn {
+  width: 30px;
+  height: 38px;
+  margin: 0;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  box-shadow: none;
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+  transition: transform 0.1s ease;
+}
+.quick-reaction-btn:hover { background: var(--accent-soft); box-shadow: none; }
+.quick-reaction-btn:active { transform: scale(0.88); }
+
+@media (max-width: 800px) {
+  .chat-dock { padding-right: 16px; }
+}
+@media (max-width: 600px) {
+  /* The GitHub link is a footer here; keep it above the bar at the page's end. */
+  body:has(#screen-game:not(.hidden)) .github-link,
+  body:has(#screen-spectate:not(.hidden)) .github-link { margin-bottom: var(--chat-bar-space); }
+  .chat-dock { padding-left: 10px; padding-right: 10px; }
+  .chat-dock-inner { width: 100%; }
+  .chat-panel { width: 100%; }
+  #btn-reaction-picker { display: flex; }
+  .reaction-picker { position: relative; }
+  .quick-reactions {
+    display: none;
+    position: absolute;
+    left: 0;
+    bottom: calc(100% + 0.6rem);
+    gap: 0.15rem;
+    padding: 0.3rem;
+    background: var(--panel-bg);
+    border: 1px solid var(--panel-border);
+    border-radius: 999px;
+    box-shadow: var(--shadow);
+  }
+  .quick-reactions.open { display: flex; }
+  .quick-reaction-btn { width: 44px; height: 44px; font-size: 1.4rem; border-radius: 50%; }
+  .chat-log { height: 42vh; height: 42dvh; }
+  /* Spectators keep the bottom tabs, so the bar sits above them, until a
+     keyboard covers the tabs anyway. */
+  #screen-spectate .chat-dock { bottom: max(var(--keyboard-offset, 0px), var(--bottom-tabs-height)); }
+}
+
+/* Bubbles beside the auction card. These lanes sit level with the card, below
+   the event toast and card name, in space that's empty on every screen size.
+   They ignore the pointer, so nothing under them is ever blocked. */
+.table-talk {
+  position: absolute;
+  top: 4.4rem;
+  bottom: 0;
+  width: calc(50% - 66px);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0.3rem;
+  overflow: hidden;
+  padding: 2px;
+  pointer-events: none;
+  z-index: 5;
+}
+.table-talk:empty { padding: 0; }
+.table-talk.others { left: 0; align-items: flex-start; text-align: left; }
+.table-talk.mine { right: 0; align-items: flex-end; text-align: left; }
+.table-bubble {
+  max-width: min(100%, 220px);
+  padding: 0.3rem 0.6rem;
+  border: 1px solid var(--panel-border);
+  border-radius: 0.8rem;
+  background: #fff;
+  color: var(--text);
+  font-size: 0.82rem;
+  line-height: 1.25;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.14);
+  overflow-wrap: anywhere;
+  opacity: 0;
+  transform: scale(0.85) translateY(4px);
+  transition: opacity 0.2s ease, transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.table-bubble.show { opacity: 1; transform: none; }
+.table-talk.others .table-bubble { border-bottom-left-radius: 0.2rem; }
+.table-talk.mine .table-bubble { border-bottom-right-radius: 0.2rem; background: var(--chip-money); border-color: transparent; color: #fff; }
+.table-bubble-name {
+  display: block;
+  overflow: hidden;
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: var(--muted);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.table-bubble-text {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+}
+.table-bubble.big .table-bubble-text { font-size: 1.5rem; line-height: 1.15; }
+@media (max-width: 560px) {
+  .table-talk { top: 5.6rem; width: calc(50% - 58px); }
+  .table-bubble { padding: 0.25rem 0.45rem; font-size: 0.74rem; }
+  .table-bubble-text { -webkit-line-clamp: 4; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .table-bubble { transform: none; transition: opacity 0.2s ease; }
+}
 @media (prefers-reduced-motion: no-preference) {
   .chat-msg { animation: chat-msg-in 0.14s ease-out; }
   @keyframes chat-msg-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
@@ -1294,3 +1470,13 @@ button.link-button:hover { color: var(--accent); }
 .achievement-toast-text { display: flex; flex-direction: column; min-width: 0; line-height: 1.25; }
 .achievement-toast-label { font-size: 0.7rem; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--accent-strong); }
 .achievement-toast-desc { font-size: 0.8rem; color: var(--muted); }
+.auction-header .turn-label { min-width: 0; overflow-wrap: anywhere; }
+@media (max-width: 560px) {
+  /* Two lines tall whoever's turn it is, so the card and everything below it
+     don't shift each time the label goes from "Your turn" to a long name. */
+  .auction-header { grid-template-rows: 2.5rem; }
+  .auction-header .turn-label { max-height: 2.5rem; overflow: hidden; line-height: 1.25rem; }
+}
+@media (max-width: 360px) {
+  .auction-header .turn-label { font-size: 0.8rem; }
+}

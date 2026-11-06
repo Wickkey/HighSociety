@@ -2461,3 +2461,54 @@ button.secondary.standalone { margin-top: 0.9rem; display: inline-block; }
 .profile-achievements-head { display: flex; align-items: baseline; justify-content: space-between; gap: 0.6rem; }
 .profile-achievements-grid { min-height: 60px; margin-top: 0.6rem; }
 .profile-achievements-grid:empty:not(.tile-loading-spinner) { min-height: 0; margin: 0; }
+
+/* One tidy block of icons until someone asks for the full tiles. */
+.profile-achievements-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  max-height: 88px;
+  min-height: 40px;
+  margin-top: 0.6rem;
+  overflow: hidden;
+}
+.profile-achievements-strip:empty:not(.tile-loading-spinner) { min-height: 0; margin: 0; }
+.achievement-chip {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--panel-border);
+  border-radius: 10px;
+  background: var(--panel-bg-alt);
+  box-shadow: none;
+  color: var(--accent-strong);
+  cursor: pointer;
+}
+.achievement-chip svg { width: 22px; height: 22px; }
+.achievement-chip:hover { background: var(--accent-soft); box-shadow: none; transform: none; }
+.see-more-btn {
+  display: block;
+  width: auto;
+  margin: 0.7rem auto 0;
+  padding: 0.35rem 0.8rem;
+  border: none;
+  background: none;
+  box-shadow: none;
+  color: var(--accent-strong);
+  font-size: 0.88rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+.see-more-btn:hover { background: var(--accent-soft); box-shadow: none; transform: none; }
+.see-more-btn.hidden { display: none; }
+
+/* Achievements tab: progress, in a slot that's there before anything loads. */
+.achievements-progress { margin: 0 0 1rem; }
+.achievements-count { display: block; margin-bottom: 0.35rem; color: var(--muted); font-size: 0.95rem; }
+.achievements-count strong { color: var(--text); }
+.achievements-progress-track { height: 8px; border-radius: 999px; background: var(--panel-bg-log); overflow: hidden; }
+#achievements-progress-fill { display: block; height: 100%; width: 0; border-radius: inherit; background: var(--accent); transition: width 0.3s ease; }

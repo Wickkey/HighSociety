@@ -149,6 +149,14 @@ const LOCK_ICON_SVG = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor
 // same lock glyph) rather than a separately-colored "reveal" surface --
 // per explicit feedback, a different color scheme on the back read as
 // off-palette rather than "the same tile, turned around".
+// The small form on someone's public profile: just the icon, named on hover
+// and for screen readers. Tapping one expands to the full tiles.
+export function renderAchievementChip(a) {
+  return `<button type="button" class="achievement-chip" title="${escapeHtml(a.name)}" aria-label="${escapeHtml(a.name)}: ${escapeHtml(a.description)}">`
+    + `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${a.icon}</svg>`
+    + `</button>`;
+}
+
 export function renderAchievementTile(a, unlocked) {
   const lockBadge = unlocked ? '' : `<span class="achievement-lock">${LOCK_ICON_SVG}</span>`;
   const backLock = unlocked ? '' : `<span class="achievement-tile-back-lock">${LOCK_ICON_SVG}</span>`;
@@ -370,7 +378,18 @@ export function fetchAchievements(username) {
     fetchJSON(`/api/achievements?username=${encodeURIComponent(username)}`).then((r) => r.achievements || []));
 }
 
-function renderAchievementsIfChanged(grid, unlocked) {
+// `countKnown` false: signed in, but nothing's loaded yet, so don't claim 0.
+function renderAchievementsCount(unlocked, countKnown) {
+  const total = ACHIEVEMENTS.length;
+  const earned = ACHIEVEMENTS.filter((a) => unlocked.has(a.id)).length;
+  $('achievements-count').innerHTML = countKnown
+    ? `<strong>${earned}</strong> of ${total} unlocked`
+    : `– of ${total} unlocked`;
+  $('achievements-progress-fill').style.width = `${countKnown ? (earned / total) * 100 : 0}%`;
+}
+
+function renderAchievementsIfChanged(grid, unlocked, countKnown = true) {
+  renderAchievementsCount(unlocked, countKnown);
   const html = ACHIEVEMENTS.map((a) => renderAchievementTile(a, unlocked.has(a.id))).join('');
   if (grid.dataset.renderedHtml === html) return; // identical to what's already shown -- skip the repaint
   grid.innerHTML = html;
@@ -399,7 +418,7 @@ async function loadAchievements() {
   // Cached: instant repaint from the last known-good state -- no
   // locked-then-unlocked flash. Never seen on this browser: the locked
   // skeleton stands in as "loading".
-  renderAchievementsIfChanged(grid, new Set(cached || []));
+  renderAchievementsIfChanged(grid, new Set(cached || []), !!cached);
   const fresh = await freshPromise;
   if (fresh) renderAchievementsIfChanged(grid, new Set(fresh));
   // null: transient network error -- leave whatever's already rendered

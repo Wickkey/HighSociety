@@ -16,7 +16,7 @@ import {
 } from './gameRenderer.js';
 import { setHasResigned, setGameFinished } from '../lobby/lobby.js';
 import { resetSelectedDiscard } from './gameActions.js';
-import { resetChat } from '../ui/chat.js';
+import { resetChat, closeChatLogForYourTurn } from '../ui/chat.js';
 
 export let game = null;
 
@@ -271,6 +271,7 @@ export function openMyPrompt(moveSeq) {
     return false;
   }
   game.myPrompt = { moveSeq, answered: false };
+  closeChatLogForYourTurn();
   // Defense-in-depth alongside networkplayer.py's own move_seq validation
   // (see its _belongs_to_this_move): a genuinely new decision must never
   // start from money chips or a discard choice left selected-but-unsent

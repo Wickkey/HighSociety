@@ -32,11 +32,11 @@ import {
   showGameHistoryScreen, onGameHistoryPrevClick, onGameHistoryNextClick, getGameHistoryReturnTo,
 } from './lobby/gameHistory.js';
 import {
-  showLeaderboardScreen, onLeaderboardPrevClick, onLeaderboardNextClick, onLeaderboardTableClick,
+  showLeaderboardScreen, onLeaderboardPrevClick, onBotLeaderboardPrevClick, onBotLeaderboardNextClick, onLeaderboardNextClick, onLeaderboardTableClick,
   onLeaderboardTabClick,
 } from './lobby/leaderboard.js';
 import {
-  getPlayerProfileReturnTo, onPlayerProfileHistoryPrevClick, onPlayerProfileHistoryNextClick,
+  getPlayerProfileReturnTo, onPlayerProfileHistoryPrevClick, onPlayerProfileHistoryMoreClick, onPlayerProfileAchievementsToggle, onPlayerProfileHistoryNextClick,
   onPlayerProfileEloChartRangeClick,
 } from './lobby/playerProfile.js';
 import { onPlayClick, onFindMatch, onMatchmakingCancel, onMatchmakingAddBots, onMatchmakingSeatButtonClick } from './lobby/matchmaking.js';
@@ -179,6 +179,8 @@ function wireStaticHandlers() {
   $('sidebar-leaderboard').addEventListener('click', () => navigateFromSidebar(showLeaderboardScreen));
   $('btn-leaderboard-prev').addEventListener('click', onLeaderboardPrevClick);
   $('btn-leaderboard-next').addEventListener('click', onLeaderboardNextClick);
+  $('btn-bot-leaderboard-prev').addEventListener('click', onBotLeaderboardPrevClick);
+  $('btn-bot-leaderboard-next').addEventListener('click', onBotLeaderboardNextClick);
   $('leaderboard-body').addEventListener('click', onLeaderboardTableClick);
   $('bot-leaderboard-body').addEventListener('click', onLeaderboardTableClick);
   $('leaderboard-tab-people').addEventListener('click', () => onLeaderboardTabClick('people'));
@@ -186,6 +188,11 @@ function wireStaticHandlers() {
   $('achievements-grid').addEventListener('click', onAchievementTileClick);
   $('player-profile-achievements').addEventListener('click', onAchievementTileClick);
   $('player-profile-achievements').addEventListener('keydown', onAchievementTileKeydown);
+  $('btn-player-profile-achievements-toggle').addEventListener('click', onPlayerProfileAchievementsToggle);
+  $('player-profile-achievements').addEventListener('click', (e) => {
+    if (e.target.closest('.achievement-chip')) onPlayerProfileAchievementsToggle();
+  });
+  $('btn-player-profile-history-more').addEventListener('click', onPlayerProfileHistoryMoreClick);
   $('btn-account-edit-bio').addEventListener('click', onAccountEditBioClick);
   $('account-bio-input').addEventListener('input', onAccountBioInput);
   $('btn-account-bio-save').addEventListener('click', onAccountBioSave);
@@ -253,9 +260,6 @@ function wireStaticHandlers() {
   $('achievement-toast').addEventListener('click', onAchievementToastClick);
   $('btn-spec-chat-send').addEventListener('click', onSpecChatSend);
   $('spec-chat-input').addEventListener('keydown', (e) => { if (e.key === 'Enter') onSpecChatSend(); });
-  $('spec-chat-target-toggle').addEventListener('change', (e) => {
-    $('spec-chat-input').placeholder = e.target.checked ? 'Message spectators only…' : 'Message everyone…';
-  });
   $('btn-player-chat-send').addEventListener('click', onPlayerChatSend);
   $('player-chat-input').addEventListener('keydown', (e) => { if (e.key === 'Enter') onPlayerChatSend(); });
   document.querySelectorAll('.quick-reaction-btn').forEach((btn) => {

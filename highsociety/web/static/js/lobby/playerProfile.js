@@ -11,7 +11,7 @@ import { fetchGamesPage, renderIfChanged } from './gameHistory.js';
 import { createEloChartController } from '../ui/eloChart.js';
 // Circular with account.js only in the established, safe way: used inside
 // a function body, never at module evaluation.
-import { profileStats, fetchAchievements, renderAchievementTile, ACHIEVEMENTS } from '../account/account.js';
+import { profileStats, fetchAchievements, renderAchievementTile, renderAchievementChip, ACHIEVEMENTS } from '../account/account.js';
 import { setAvatar } from '../ui/avatar.js';
 
 // Same shared chart Account's own screen uses (see ui/eloChart.js), a
@@ -27,6 +27,14 @@ const eloChartController = createEloChartController({
 export function onPlayerProfileEloChartRangeClick(e) { eloChartController.onRangeClick(e); }
 
 const PAGE_SIZE = 10; // matches gameHistory.js's own fixed page size -- fetchGamesPage bakes this in already
+
+// A profile opens short: a few games, then a strip of achievement icons. Each
+// expands on request, and collapses again for the next profile opened.
+const GAMES_PREVIEW = 5;
+let historyExpanded = false;
+let historyPage = null; // the last page painted, so See more needs no refetch
+let achievementsExpanded = false;
+let earnedAchievements = [];
 
 const dateLabel = (iso) => new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 
@@ -51,6 +59,9 @@ export function getPlayerProfileReturnTo() {
 export function showPlayerProfileScreen(username, returnTo = 'leaderboard') {
   profileUsername = username;
   profileOffset = 0;
+  historyExpanded = false;
+  historyPage = null;
+  achievementsExpanded = false;
   profileReturnTo = returnTo;
   showScreen('screen-player-profile');
   setScreenPath(`/players/${encodeURIComponent(username)}`);
@@ -67,6 +78,8 @@ export function showPlayerProfileScreen(username, returnTo = 'leaderboard') {
   $('player-profile-history-list').innerHTML = '';
   delete $('player-profile-history-list').dataset.renderedHtml; // a stale renderIfChanged memo from a *different* profile must never suppress this one's first real paint
   hide($('player-profile-history-empty'));
+  hide($('player-profile-history-pagination'));
+  hide($('btn-player-profile-history-more'));
 
   // Decided here, from the name alone, so the section never pops in or out
   // after loading. Bots don't earn achievements.
@@ -88,20 +101,41 @@ export function showPlayerProfileScreen(username, returnTo = 'leaderboard') {
   loadPlayerProfileHistoryPage();
 }
 
+function paintPlayerProfileAchievements() {
+  const grid = $('player-profile-achievements');
+  const toggle = $('btn-player-profile-achievements-toggle');
+  const expanded = achievementsExpanded;
+  grid.classList.remove('tile-loading-spinner');
+  grid.classList.toggle('achievements-grid', expanded);
+  grid.classList.toggle('profile-achievements-grid', expanded);
+  grid.classList.toggle('profile-achievements-strip', !expanded);
+  grid.innerHTML = earnedAchievements
+    .map((a) => (expanded ? renderAchievementTile(a, true) : renderAchievementChip(a)))
+    .join('');
+  toggle.textContent = expanded ? 'Show less' : 'Show all';
+  toggle.setAttribute('aria-expanded', String(expanded));
+  toggle.classList.toggle('hidden', earnedAchievements.length === 0);
+  $('player-profile-achievements-count').textContent = `${earnedAchievements.length} of ${ACHIEVEMENTS.length}`;
+  $('player-profile-achievements-empty').classList.toggle('hidden', earnedAchievements.length > 0);
+}
+
+export function onPlayerProfileAchievementsToggle() {
+  achievementsExpanded = !achievementsExpanded;
+  paintPlayerProfileAchievements();
+}
+
 async function loadPlayerProfileAchievements(username) {
   const grid = $('player-profile-achievements');
-  const count = $('player-profile-achievements-count');
-  count.textContent = '';
+  $('player-profile-achievements-count').textContent = '';
   grid.innerHTML = '';
-  grid.classList.add('tile-loading-spinner');
+  grid.classList.remove('achievements-grid', 'profile-achievements-grid');
+  grid.classList.add('profile-achievements-strip', 'tile-loading-spinner');
+  hide($('btn-player-profile-achievements-toggle'));
   hide($('player-profile-achievements-empty'));
   const paint = (ids) => {
     const earned = new Set(ids);
-    const tiles = ACHIEVEMENTS.filter((a) => earned.has(a.id));
-    grid.classList.remove('tile-loading-spinner');
-    grid.innerHTML = tiles.map((a) => renderAchievementTile(a, true)).join('');
-    count.textContent = `${tiles.length} of ${ACHIEVEMENTS.length}`;
-    $('player-profile-achievements-empty').classList.toggle('hidden', tiles.length > 0);
+    earnedAchievements = ACHIEVEMENTS.filter((a) => earned.has(a.id));
+    paintPlayerProfileAchievements();
   };
   const { cached, freshPromise } = fetchAchievements(username);
   if (cached) paint(cached);
@@ -194,19 +228,35 @@ function paintPlayerProfileHistoryPage(page, username, offset) {
   const list = $('player-profile-history-list');
   const empty = $('player-profile-history-empty');
   const pagination = $('player-profile-history-pagination');
+  const more = $('btn-player-profile-history-more');
+  historyPage = { page, username, offset };
   list.classList.remove('tile-loading-spinner');
   if (page.games.length === 0 && offset === 0) {
     list.innerHTML = '';
+    delete list.dataset.renderedHtml;
     show(empty);
     hide(pagination);
+    hide(more);
     return;
   }
   hide(empty);
+  if (!historyExpanded) {
+    renderIfChanged(list, page.games.slice(0, GAMES_PREVIEW), username);
+    more.classList.toggle('hidden', page.games.length <= GAMES_PREVIEW && !page.has_more);
+    hide(pagination);
+    return;
+  }
+  hide(more);
   renderIfChanged(list, page.games, username);
   $('btn-player-profile-history-prev').disabled = offset === 0;
   $('btn-player-profile-history-next').disabled = !page.has_more;
   $('player-profile-history-page-label').textContent = `${offset + 1}–${offset + page.games.length}`;
   show(pagination);
+}
+
+export function onPlayerProfileHistoryMoreClick() {
+  historyExpanded = true;
+  if (historyPage) paintPlayerProfileHistoryPage(historyPage.page, historyPage.username, historyPage.offset);
 }
 
 export function onPlayerProfileHistoryPrevClick() {
