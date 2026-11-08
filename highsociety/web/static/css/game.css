@@ -1533,7 +1533,7 @@ button.link-button:hover { color: var(--accent); }
 
   /* Opponents as tiles: name and points on top, their paintings and current
      bid underneath. */
-  #screen-game .opponents-panel { padding: 0.4rem; }
+  #screen-game .opponents-panel { padding: 0.65rem 0.4rem 0.4rem; }
   #screen-game .opponents-panel .panel-header-row { display: none; }
   /* Two or three opponents share one row; four take two rows of two. */
   #opponents-list { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 0.35rem; }
@@ -1564,6 +1564,15 @@ button.link-button:hover { color: var(--accent); }
   :is(#opponents-list, #spec-players-list) .opponent-row { position: relative; }
   :is(#opponents-list, #spec-players-list) .bid-badge { position: absolute; right: 0.4rem; bottom: 0.35rem; font-size: 0.7rem; padding: 0.05rem 0.4rem; }
   :is(#opponents-list, #spec-players-list) .opponent-row:has(.bid-badge:not(:empty)) .chip-row { padding-right: 3.4rem; }
+  /* Whose-turn countdown: a badge on the tile's top edge, so it never
+     shifts the name or points when it comes and goes. */
+  :is(#opponents-list, #spec-players-list) .opp-timer {
+    position: absolute; top: -0.62rem; right: 0.35rem; z-index: 2;
+    gap: 0.15rem; padding: 0.02rem 0.35rem; font-size: 0.64rem; line-height: 1.3;
+    color: #fff; background: var(--accent); box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18);
+  }
+  :is(#opponents-list, #spec-players-list) .opp-timer.urgent { background: var(--danger); }
+  :is(#opponents-list, #spec-players-list) .opp-timer svg { width: 9px; height: 9px; }
   :is(#opponents-list, #spec-players-list) .bid-badge:empty { display: none; }
   :is(#opponents-list, #spec-players-list) .opponent-header-right { grid-area: meta; margin: 0; gap: 0.25rem; font-size: 0.72rem; flex-wrap: nowrap; justify-content: flex-end; }
   :is(#opponents-list, #spec-players-list) .pts-word { display: none; }
@@ -1590,7 +1599,7 @@ button.link-button:hover { color: var(--accent); }
      a strip of its own. */
   #screen-game .auction-panel { position: relative; padding-bottom: 0.55rem; flex: 1 0 auto; display: flex; flex-direction: column; }
   #screen-game .auction-header { margin-bottom: 0.2rem; padding-bottom: 0.35rem; }
-  #screen-game .auction-stage { position: static; flex: 1 1 auto; justify-content: center; min-height: 90px; container-type: size; }
+  #screen-game .auction-stage { position: static; flex: 1 1 auto; justify-content: center; min-height: 64px; container-type: size; }
   #screen-game .event-toast {
     position: absolute; top: 0.3rem; left: 0.5rem; right: 0.5rem; height: 2.3rem;
     margin: 0; max-width: none; font-size: 0.8rem;
@@ -1599,10 +1608,10 @@ button.link-button:hover { color: var(--accent); }
   #screen-game .table-talk { display: none; }
   #screen-game .auction-card-slot { min-height: 0; margin: 0.3rem 0 0.1rem; }
   #screen-game .auction-card-slot .status-card.big {
-    height: clamp(72px, calc(100cqh - 1.9rem), 150px);
+    height: clamp(52px, calc(100cqh - 1.9rem), 150px);
     width: auto;
     aspect-ratio: 58 / 80;
-    font-size: clamp(1rem, 11cqh, 1.7rem);
+    font-size: clamp(0.9rem, 11cqh, 1.7rem);
   }
   #screen-game .bid-block { margin-top: 0; display: flex; align-items: baseline; justify-content: center; gap: 0.45rem; }
   #screen-game .bid-label { display: inline; margin: 0; font-size: 0.66rem; }
@@ -1630,8 +1639,22 @@ button.link-button:hover { color: var(--accent); }
   #screen-game .move-panel { padding: 0.5rem 0.6rem; }
   #screen-game #bid-controls h3, #screen-game #discard-controls h3 { font-size: 0.85rem; margin: 0 0 0.3rem; }
   #screen-game #bid-controls h3 { display: none; }
-  #screen-game .move-timer { position: absolute; top: 0.45rem; right: 0.55rem; margin: 0; padding: 0.15rem 0.5rem; font-size: 0.75rem; z-index: 2; }
-  #screen-game .move-panel.has-timer .bid-status { padding-right: 4.8rem; }
+  /* Your clock: the same badge as the opponents', on this panel's top edge,
+     so it never takes a line's room. */
+  #screen-game .move-panel { overflow: visible; }
+  #screen-game .move-timer {
+    position: absolute; top: -0.62rem; right: 0.6rem; margin: 0; z-index: 4;
+    gap: 0.15rem; padding: 0.02rem 0.45rem; font-size: 0.7rem; line-height: 1.3;
+    color: #fff; background: var(--accent); border: none; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18);
+  }
+  #screen-game .move-timer.urgent { background: var(--danger); }
+  /* A bid that's too low says so over the "your bid so far" line, which says
+     the same thing, rather than pushing the buttons under the chat bar. */
+  #screen-game #move-error {
+    position: absolute; top: 0.45rem; left: 0.6rem; right: 0.6rem; z-index: 3; margin: 0;
+    padding: 0.3rem 0.55rem; border-radius: var(--radius-sm); font-size: 0.76rem; line-height: 1.25;
+    background: #f6e1de; color: var(--danger); box-shadow: 0 2px 6px rgba(0, 0, 0, 0.12);
+  }
   #screen-game .bid-status { font-size: 0.8rem; padding: 0.3rem 0.55rem; margin-bottom: 0; }
   /* "Waiting for other players…" takes that line's place instead of
      sitting on top of your money cards. */
@@ -1651,7 +1674,6 @@ button.link-button:hover { color: var(--accent); }
     border: 1px solid transparent; border-radius: 12px;
   }
   #screen-game #bid-controls .button-row button.secondary { border-color: var(--panel-border); }
-  #screen-game #move-error { margin: 0.3rem 0 0; font-size: 0.8rem; }
 
   /* The log: a sheet over the table, opened from the auction header. */
   .log-sheet-btn { display: inline-flex; align-items: center; justify-content: center; background: var(--panel-bg-soft); color: var(--text); }
@@ -1744,7 +1766,7 @@ button.link-button:hover { color: var(--accent); }
   #spectate-live-layout:not(.hidden) { flex: 1 0 auto; display: flex; flex-direction: column; align-items: stretch; }
 
   #spectate-live-layout .panel { padding: 0.55rem 0.7rem; margin-bottom: 0.45rem; border-radius: var(--radius-sm); }
-  #spectate-live-layout .side-col .panel { order: 0; padding: 0.4rem; }
+  #spectate-live-layout .side-col .panel { order: 0; padding: 0.65rem 0.4rem 0.4rem; }
   #spectate-live-layout .auction-panel { order: 1; }
   #spectate-live-layout .spec-bid-summary { order: 2; }
   #spectate-live-layout .log-details { order: 3; }
@@ -1752,7 +1774,7 @@ button.link-button:hover { color: var(--accent); }
   /* Players: three tiles a row (2×2 for four). */
   #spectate-live-layout .side-col .panel-header-row,
   #spectate-live-layout .side-col .panel-footer { display: none; }
-  #spec-players-list { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.35rem; }
+  #spec-players-list { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.8rem 0.35rem; }
   #spec-players-list:has(> .opponent-row:nth-child(4)):not(:has(> .opponent-row:nth-child(5))) { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 
   /* The auction, as on the player's table. */
