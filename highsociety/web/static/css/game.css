@@ -1509,6 +1509,15 @@ button.link-button:hover { color: var(--accent); }
   body:has(#screen-game:not(.hidden)) .profile-chip { padding: 0.35rem 0.6rem; }
   body:has(#screen-game:not(.hidden)) #app { padding-left: 0.6rem; padding-right: 0.6rem; padding-bottom: 0; }
 
+  /* The table fills exactly the visible screen (dvh follows Safari's
+     toolbar), and the auction takes whatever height is left, so a taller
+     phone gets a bigger card rather than empty space at the bottom. */
+  body:has(#screen-game:not(.hidden)) .app-shell,
+  body:has(#screen-game:not(.hidden)) .app-main-col { min-height: 100dvh; }
+  body:has(#screen-game:not(.hidden)) #app { flex: 1 0 auto; display: flex; flex-direction: column; }
+  #screen-game:not(.hidden) { flex: 1 0 auto; display: flex; flex-direction: column; position: relative; }
+  #screen-game .table-layout { flex: 1 0 auto; display: flex; flex-direction: column; align-items: stretch; }
+
   #screen-game .panel { padding: 0.55rem 0.7rem; margin-bottom: 0.45rem; border-radius: var(--radius-sm); }
   #screen-game .table-layout .opponents-panel { order: 0; }
   #screen-game .table-layout .auction-panel { order: 1; }
@@ -1528,11 +1537,11 @@ button.link-button:hover { color: var(--accent); }
   #screen-game .opponents-panel .panel-header-row { display: none; }
   /* Two or three opponents share one row; four take two rows of two. */
   #opponents-list { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 0.35rem; }
-  #opponents-list:has(> .opponent-row:nth-child(4)) { grid-auto-flow: row; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+
   #opponents-list .opponent-row {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
-    grid-template-areas: "who meta" "cards bid";
+    grid-template-areas: "who meta" "cards cards";
     align-items: center;
     column-gap: 0.3rem;
     row-gap: 0.2rem;
@@ -1551,30 +1560,53 @@ button.link-button:hover { color: var(--accent); }
      opens the profile: the markers would only cost the name its room. */
   #opponents-list .opponent-profile-link::after,
   #opponents-list .opponent-row.current-turn .name::after { content: none; }
-  #opponents-list .bid-badge { grid-area: bid; align-self: end; justify-self: end; font-size: 0.7rem; padding: 0.05rem 0.4rem; }
+  /* In the tile's bottom corner, so it never takes room from the name. */
+  #opponents-list .opponent-row { position: relative; }
+  #opponents-list .bid-badge { position: absolute; right: 0.4rem; bottom: 0.35rem; font-size: 0.7rem; padding: 0.05rem 0.4rem; }
+  #opponents-list .opponent-row:has(.bid-badge:not(:empty)) .chip-row { padding-right: 3.4rem; }
   #opponents-list .bid-badge:empty { display: none; }
   #opponents-list .opponent-header-right { grid-area: meta; margin: 0; gap: 0.25rem; font-size: 0.72rem; flex-wrap: nowrap; justify-content: flex-end; }
   #opponents-list .pts-word { display: none; }
   #opponents-list .pts-num::after { content: " pts"; }
   #opponents-list .chip-row { grid-area: cards; min-height: 0; }
   #opponents-list .chip-row .status-card, #opponents-list .chip-row .card-back { width: 20px; height: 26px; font-size: 0.55rem; border-radius: 4px; }
+  /* Four opponents (a 5-player game) still share one row: narrower tiles,
+     so the name gets a line to itself and points and bid go underneath. */
+  #opponents-list:has(> .opponent-row:nth-child(4)) { gap: 0.3rem; }
+  #opponents-list:has(> .opponent-row:nth-child(4)) .opponent-row {
+    grid-template-areas: "who who" "meta bid" "cards cards";
+    row-gap: 0.1rem;
+    min-height: 4.1rem;
+    padding: 0.3rem 0.35rem;
+  }
+  #opponents-list:has(> .opponent-row:nth-child(4)) .opponent-header .name { font-size: 0.76rem; }
+  #opponents-list:has(> .opponent-row:nth-child(4)) .opponent-header-right { justify-content: flex-start; }
+  #opponents-list:has(> .opponent-row:nth-child(4)) .bid-badge { position: static; grid-area: bid; justify-self: end; }
+  #opponents-list:has(> .opponent-row:nth-child(4)) .bid-word { display: none; }
+  #opponents-list:has(> .opponent-row:nth-child(4)) .opponent-row .chip-row { padding-right: 0; }
 
   /* The auction: the card a little smaller, the bid on one line under it,
      and news of each bid shown over the header for a moment rather than in
      a strip of its own. */
-  #screen-game .auction-panel { position: relative; padding-bottom: 0.45rem; }
+  #screen-game .auction-panel { position: relative; padding-bottom: 0.55rem; flex: 1 0 auto; display: flex; flex-direction: column; }
   #screen-game .auction-header { margin-bottom: 0.2rem; padding-bottom: 0.35rem; }
-  #screen-game .auction-stage { position: static; }
+  #screen-game .auction-stage { position: static; flex: 1 1 auto; justify-content: center; min-height: 90px; container-type: size; }
   #screen-game .event-toast {
     position: absolute; top: 0.3rem; left: 0.5rem; right: 0.5rem; height: 2.3rem;
     margin: 0; max-width: none; font-size: 0.8rem;
   }
-  #screen-game .table-talk { top: 2.6rem; bottom: 2.4rem; width: calc(50% - 46px); }
-  #screen-game .auction-card-slot { min-height: 82px; margin: 0.2rem 0; }
-  #screen-game .auction-card-slot .status-card.big { width: 58px; height: 80px; font-size: 1rem; }
+  /* Chat comes out of the speaker's tile instead (see .phone-talk). */
+  #screen-game .table-talk { display: none; }
+  #screen-game .auction-card-slot { min-height: 0; margin: 0.3rem 0 0.1rem; }
+  #screen-game .auction-card-slot .status-card.big {
+    height: clamp(72px, calc(100cqh - 1.9rem), 150px);
+    width: auto;
+    aspect-ratio: 58 / 80;
+    font-size: clamp(1rem, 11cqh, 1.7rem);
+  }
   #screen-game .bid-block { margin-top: 0; display: flex; align-items: baseline; justify-content: center; gap: 0.45rem; }
   #screen-game .bid-label { display: inline; margin: 0; font-size: 0.66rem; }
-  #screen-game .bid-value { font-size: 1.55rem; line-height: 1.1; }
+  #screen-game .bid-value { font-size: 1.7rem; line-height: 1.1; }
 
   /* You: name and points on one line, Resign at the end, your paintings below. */
   #my-panel {
@@ -1590,6 +1622,7 @@ button.link-button:hover { color: var(--accent); }
   #my-panel .my-points-row { grid-column: 2; grid-row: 1; font-size: 0.85rem; white-space: nowrap; }
   #my-panel #my-status-cards { grid-column: 1; grid-row: 1; }
   #my-panel #my-status-cards:empty { display: none; }
+  #my-panel #my-status-cards .status-card { width: 22px; height: 30px; font-size: 0.58rem; border-radius: 5px; }
   #my-panel .panel-footer { grid-column: 3; grid-row: 1; margin: 0; }
   #my-panel #btn-resign { width: auto; margin: 0; padding: 0.3rem 0.7rem; font-size: 0.78rem; }
 
@@ -1607,13 +1640,17 @@ button.link-button:hover { color: var(--accent); }
   #screen-game #my-paintings { gap: 0.3rem; margin-top: 0.4rem; }
   /* Every money card in one row, sharing the width. */
   #screen-game #my-money-cards { flex-wrap: nowrap; gap: 0.25rem; margin-top: 0.4rem; }
-  #screen-game #my-money-cards .chip { flex: 1 1 0; min-width: 0; padding: 0.55rem 0; font-size: 0.9rem; text-align: center; }
-  /* The new total beside the buttons, not on a row of its own. */
-  #screen-game #bid-controls { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 0.5rem; align-items: center; }
-  #screen-game #bid-controls > * { grid-column: 1 / -1; }
-  #screen-game #bid-controls > .bid-readout { grid-column: 1; margin-top: 0.45rem; font-size: 0.78rem; line-height: 1.25; }
-  #screen-game #bid-controls > .button-row { grid-column: 2; margin-top: 0.45rem; flex-wrap: nowrap; gap: 0.4rem; }
-  #screen-game #bid-controls .button-row button { width: auto; padding: 0.6rem 0.95rem; }
+  #screen-game #my-money-cards .chip { flex: 1 1 0; min-width: 0; padding: 0.7rem 0; font-size: 0.95rem; text-align: center; }
+  /* The new total centred on its own quiet line, then Place Bid and Pass as
+     two equal halves: same size, same text, same height. */
+  #screen-game #bid-controls > .bid-readout { margin-top: 0.5rem; font-size: 0.8rem; color: var(--muted); text-align: center; }
+  #screen-game #bid-controls > .bid-readout strong { color: var(--text); }
+  #screen-game #bid-controls > .button-row { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; margin-top: 0.45rem; }
+  #screen-game #bid-controls .button-row button {
+    width: 100%; margin: 0; padding: 0.7rem 0; font-size: 0.92rem; line-height: 1.2;
+    border: 1px solid transparent; border-radius: 12px;
+  }
+  #screen-game #bid-controls .button-row button.secondary { border-color: var(--panel-border); }
   #screen-game #move-error { margin: 0.3rem 0 0; font-size: 0.8rem; }
 
   /* The log: a sheet over the table, opened from the auction header. */
@@ -1639,13 +1676,45 @@ button.link-button:hover { color: var(--accent); }
   #screen-game #my-money-cards { flex-wrap: wrap; }
   #screen-game #my-money-cards .chip { flex: 0 0 calc((100% - 1.25rem) / 6); }
 }
-/* Short phones (iPhone SE): a little tighter still. */
-@media (max-width: 600px) and (max-height: 620px) {
-  body:has(#screen-game:not(.hidden)) .topbar { padding-top: 0.25rem; padding-bottom: 0.25rem; }
-  #screen-game .panel { margin-bottom: 0.3rem; padding-top: 0.4rem; padding-bottom: 0.4rem; }
-  #screen-game .bid-status { padding-top: 0.2rem; padding-bottom: 0.2rem; }
-  #screen-game #my-money-cards .chip { padding-top: 0.45rem; padding-bottom: 0.45rem; }
-  #screen-game .auction-card-slot { min-height: 64px; }
-  #screen-game .auction-card-slot .status-card.big { width: 46px; height: 62px; font-size: 0.85rem; }
-  #screen-game .auction-card-type { font-size: 0.62rem; }
+
+/* Phones: chat as speech bubbles from the speaker's opponent tile, over the
+   top of the auction (see chat.js's showSpeechBubble). Only on the phone
+   table: wider screens keep the bubbles beside the card. */
+.phone-talk { display: none; }
+@media (max-width: 600px) {
+  #screen-game .phone-talk { display: block; position: absolute; inset: 0; pointer-events: none; z-index: 20; overflow: hidden; }
+  .speech-bubble {
+    position: absolute;
+    max-width: min(72%, 270px);
+    padding: 0.45rem 0.7rem;
+    border-radius: 14px;
+    background: #fff;
+    color: var(--text);
+    border: 1px solid var(--panel-border);
+    box-shadow: 0 6px 18px rgba(6, 20, 14, 0.22);
+    font-size: 0.86rem;
+    line-height: 1.3;
+    overflow-wrap: anywhere;
+    opacity: 0;
+    transform: translateY(-4px) scale(0.96);
+    transform-origin: var(--tail-x, 50%) 0;
+    transition: opacity 0.18s ease, transform 0.22s cubic-bezier(0.34, 1.56, 0.64, 1);
+  }
+  .speech-bubble.show { opacity: 1; transform: none; }
+  /* The tail, pointing up at whoever's talking. */
+  .speech-bubble::before {
+    content: "";
+    position: absolute;
+    top: -6px;
+    left: calc(var(--tail-x, 50%) - 6px);
+    width: 11px;
+    height: 11px;
+    background: inherit;
+    border-left: 1px solid var(--panel-border);
+    border-top: 1px solid var(--panel-border);
+    transform: rotate(45deg);
+  }
+  .speech-bubble-name { display: block; font-size: 0.7rem; font-weight: 700; color: var(--muted); }
+  .speech-bubble-text { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
+  .speech-bubble.big { padding: 0.25rem 0.55rem; font-size: 1.6rem; line-height: 1.1; }
 }
