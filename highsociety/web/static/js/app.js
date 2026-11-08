@@ -290,6 +290,15 @@ function wireStaticHandlers() {
     e.preventDefault();
     showChallengeScreen(link.dataset.challengeKey);
   });
+  // Phones: the game log is a sheet over the table (see game.css). Closing the
+  // log itself closes the sheet too.
+  const setLogSheet = (open) => {
+    $('screen-game').classList.toggle('log-sheet-open', open);
+    $('btn-game-log-sheet').setAttribute('aria-expanded', String(open));
+    if (open) $('game-log-details').open = true;
+  };
+  $('btn-game-log-sheet').addEventListener('click', () => setLogSheet(!$('screen-game').classList.contains('log-sheet-open')));
+  $('game-log-details').addEventListener('toggle', () => { if (!$('game-log-details').open) setLogSheet(false); });
   $('btn-player-profile-history-prev').addEventListener('click', onPlayerProfileHistoryPrevClick);
   $('btn-player-profile-history-next').addEventListener('click', onPlayerProfileHistoryNextClick);
   $('game-detail-close').addEventListener('click', closeGameDetailModal);

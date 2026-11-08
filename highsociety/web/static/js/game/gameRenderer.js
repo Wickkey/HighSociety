@@ -363,7 +363,13 @@ export function renderOpponents(isSpectator) {
     const eloEl = row.querySelector('.opp-elo');
     eloEl.textContent = o.elo != null ? o.elo : '';
     eloEl.title = o.elo != null ? 'Elo rating' : '';
-    row.querySelector('.pts').textContent = ptsLabel;
+    // The word is its own span so a phone can show "9 pts" in a small tile.
+    const ptsEl = row.querySelector('.pts');
+    if (game.revealCards) {
+      ptsEl.innerHTML = `<span class="pts-word">Points: </span><span class="pts-num">${computePoints(o.statusCards)}</span>`;
+    } else {
+      ptsEl.textContent = ptsLabel;
+    }
     renderSpentTag(row.querySelector('.spent-tag'), username);
 
     // Live countdown for whichever opponent's turn it currently is —
