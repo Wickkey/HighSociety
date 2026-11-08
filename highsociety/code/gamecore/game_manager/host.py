@@ -23,6 +23,9 @@ class NetworkHost:
     def __init__(self, players: list[NetworkPlayer], spectators: list[NetworkSpectator]):
         self.players = players
         self.spectators = spectators
+        # listener(message_type, data) after every broadcast: things that react
+        # to the game as it goes without being part of it (bot table talk).
+        self.listeners = []
 
     def send_message(self, message: str, message_type: str = "GLOBAL_EVENT", data: dict = None):
         created_at = time.time()
@@ -34,4 +37,7 @@ class NetworkHost:
             for spectator in self.spectators:
                 if spectator.active:
                     spectator.send_message(message, message_type=message_type, created_at=created_at, data=data)
+
+        for listener in self.listeners:
+            listener(message_type, data)
         

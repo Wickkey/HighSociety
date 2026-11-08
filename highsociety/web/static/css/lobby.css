@@ -2585,3 +2585,41 @@ body.visitor-browsing .visitor-cta {
 body.visitor-browsing .app-sidebar,
 body.visitor-browsing #profile-chip-wrap { display: none; }
 body.visitor-browsing { padding-bottom: 0; }
+
+/* ---- Challenge links (/challenge/<bot>, see lobby/challenge.js) ---------- */
+.challenge-panel { max-width: 560px; margin: 0 auto; text-align: left; }
+.challenge-hero { text-align: center; margin: 0.4rem 0 1.1rem; }
+.challenge-avatar {
+  width: 132px; height: 132px; border-radius: 50%; font-size: 3rem;
+  margin: 0 auto 0.9rem; box-shadow: 0 0 0 4px var(--accent-light), var(--shadow-sm);
+}
+.challenge-kicker {
+  margin: 0; color: var(--accent-strong); font-size: 0.8rem; font-weight: 700;
+  letter-spacing: 0.12em; text-transform: uppercase;
+}
+.challenge-name { margin: 0.15rem 0 0.4rem; font-size: clamp(1.6rem, 6vw, 2.2rem); line-height: 1.15; overflow-wrap: anywhere; }
+.challenge-bio { margin: 0 auto; max-width: 30rem; font-style: italic; color: var(--text); }
+/* Reserved even while loading, so nothing below moves when it arrives. */
+.challenge-stats { min-height: 1.5rem; margin: 0.55rem 0 0; font-size: 0.9rem; position: relative; }
+.challenge-rules { font-size: 0.88rem; text-align: center; margin: 0 0 1rem; }
+.challenge-actions { display: flex; gap: 0.6rem; }
+.challenge-actions button { margin: 0; }
+.challenge-actions .primary { flex: 2; }
+.challenge-actions .secondary { flex: 1; }
+.challenge-others-wrap { margin-top: 1.4rem; padding-top: 1rem; border-top: 1px solid var(--panel-border); }
+.challenge-others-label {
+  margin: 0 0 0.55rem; color: var(--muted); font-size: 0.75rem; font-weight: 700;
+  letter-spacing: 0.08em; text-transform: uppercase;
+}
+.challenge-others { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.challenge-other {
+  display: inline-flex; align-items: center; gap: 0.45rem; padding: 0.3rem 0.75rem 0.3rem 0.3rem;
+  border: 1px solid var(--panel-border); border-radius: 999px; color: var(--text);
+  text-decoration: none; font-size: 0.88rem; font-weight: 600; background: var(--panel-bg-alt);
+}
+.challenge-other:hover { border-color: var(--accent-light); background: var(--accent-soft); }
+.challenge-other-avatar { width: 28px; height: 28px; border-radius: 50%; font-size: 0.8rem; }
+
+/* An Insane bot's profile: play its challenge, or share it. */
+.profile-challenge { display: flex; gap: 0.6rem; margin: 0.2rem 0 1.2rem; }
+.profile-challenge button { width: auto; margin: 0; flex: 0 1 auto; }

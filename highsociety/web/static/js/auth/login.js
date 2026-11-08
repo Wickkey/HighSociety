@@ -13,6 +13,7 @@ import { showLeaderboardScreen } from '../lobby/leaderboard.js';
 import { showGameHistoryScreen } from '../lobby/gameHistory.js';
 import { showPlayerProfileScreen } from '../lobby/playerProfile.js';
 import { onPlayClick } from '../lobby/matchmaking.js';
+import { challengeKeyFromPath, showChallengeScreen } from '../lobby/challenge.js';
 
 // Maps a direct/refreshed visit to one of the 8 static screen URLs
 // (web_server.py's routes) back to the in-app navigation that would have
@@ -84,6 +85,11 @@ export function proceedPastLogin() {
   if (location.pathname.startsWith('/players/')) {
     const username = decodeURIComponent(location.pathname.slice('/players/'.length));
     showPlayerProfileScreen(username, 'leaderboard');
+    return;
+  }
+  const challengeKey = challengeKeyFromPath();
+  if (challengeKey) {
+    showChallengeScreen(challengeKey);
     return;
   }
   const replayPath = location.pathname.match(/^\/review\/(\d+)$/);

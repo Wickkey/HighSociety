@@ -71,6 +71,7 @@ export const SIDEBAR_ACTIVE_CLEARING_SCREENS = new Set([
   // at some specific player's profile", so nothing should stay lit.
   'screen-player-profile',
   'screen-replay',
+  'screen-challenge',
 ]);
 
 const TOAST_DURATION_MS = 1500; // long enough to actually read before it clears

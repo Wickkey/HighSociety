@@ -21,6 +21,8 @@ import { renderOpponents } from '../game/gameRenderer.js';
 import { loadProfile, setSessionStatus } from '../auth/profile.js';
 import { prefetchAccountStats, ACHIEVEMENTS } from '../account/account.js';
 import { showAchievementToasts } from '../ui/notifications.js';
+import { setAvatar } from '../ui/avatar.js';
+import { challengeForSeatName, shareChallenge } from './challenge.js';
 
 // Rematch panel state on the finished screen: null while no vote is
 // underway, else {requestedBy, botMix, votes} mirroring web_server.py's
@@ -107,6 +109,8 @@ export function renderFinished(status) {
   rematchDefaultBotMix = status.rematch_default_bot_mix || [];
   renderRematchPanel();
   trackReviewButton(status);
+  renderClosingLine(status);
+  renderShareButton(status, winners);
 
   // Guarded by game_id, not just game.myUsername -- renderFinished itself
   // can legitimately run more than once for the exact same finished game
@@ -126,6 +130,42 @@ export function renderFinished(status) {
     revealedGameId = status.game_id;
     revealEloChange(status);
   }
+}
+
+// A bot's last word on the game, when one had something to say.
+function renderClosingLine(status) {
+  const line = status.closing_line;
+  const figure = $('finished-closing-line');
+  if (!line || !line.text) { hide(figure); return; }
+  const seat = (status.joined || []).find((p) => p.username === line.username);
+  setAvatar($('finished-closing-avatar'), line.name, seat ? seat.avatar_url : null);
+  $('finished-closing-text').textContent = `“${line.text}”`;
+  $('finished-closing-name').textContent = `${line.name}`;
+  show(figure);
+}
+
+// What the finished screen's Share sends: a challenge to beat an Insane bot
+// from this table, worded by how it went for you. null hides the button.
+let finishedShare = null;
+
+function renderShareButton(status, winners) {
+  const insane = (status.joined || [])
+    .filter((p) => p.is_bot)
+    .map((p) => ({ seat: p, challenge: challengeForSeatName(p.name) }))
+    .filter((x) => x.challenge);
+  finishedShare = null;
+  if (insane.length) {
+    const me = game && game.myUsername;
+    const botWinner = insane.find((x) => winners.has(x.seat.username));
+    if (me && winners.has(me)) finishedShare = { challenge: insane[0].challenge, outcome: 'won' };
+    else if (me && botWinner) finishedShare = { challenge: botWinner.challenge, outcome: 'lost' };
+    else finishedShare = { challenge: (botWinner || insane[0]).challenge, outcome: null };
+  }
+  $('btn-finished-share').classList.toggle('hidden', !finishedShare);
+}
+
+export function onFinishedShare() {
+  if (finishedShare) shareChallenge(finishedShare.challenge, finishedShare.outcome);
 }
 
 // The game_id revealEloChange has already been started for -- see

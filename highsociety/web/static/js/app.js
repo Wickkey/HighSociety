@@ -38,8 +38,11 @@ import {
 } from './lobby/leaderboard.js';
 import {
   getPlayerProfileReturnTo, reopenPlayerProfile, onPlayerProfileHistoryPrevClick, onPlayerProfileHistoryMoreClick, onPlayerProfileAchievementsToggle, onPlayerProfileHistoryNextClick,
-  onPlayerProfileEloChartRangeClick,
+  onPlayerProfileEloChartRangeClick, onProfileChallenge, onProfileShareChallenge,
 } from './lobby/playerProfile.js';
+import {
+  showChallengeScreen, challengeKeyFromPath, onAcceptChallenge, onShareShownChallenge,
+} from './lobby/challenge.js';
 import { onPlayClick, onFindMatch, onMatchmakingCancel, onMatchmakingAddBots, onMatchmakingSeatButtonClick } from './lobby/matchmaking.js';
 import { showRulesDemo, onRulesDemoToggleClick, onRulesDemoPrevClick, onRulesDemoNextClick } from './lobby/rulesDemo.js';
 import {
@@ -47,7 +50,7 @@ import {
 } from './lobby/howToPlay.js';
 import {
   onRequestRematchClick, onRematchBotTierClick, onCancelRematchForm, onSendRematchRequest, onAcceptRematch, onDeclineRematch,
-  onStandingsTableClick,
+  onStandingsTableClick, onFinishedShare,
 } from './lobby/rematch.js';
 import { onPlaceBid, onPass, onResign, onDiscardPainting, onQuickReactionClick } from './game/gameActions.js';
 import { onTutorialCoachNextClick, onAchievementToastClick } from './ui/notifications.js';
@@ -75,10 +78,11 @@ const VISITOR_PAGES = {
   '/rules': () => { showScreen('screen-host-setup'); showHomeTile('rules', { openOn: 'read' }); },
   '/leaderboard': showLeaderboardScreen,
 };
-const VISITOR_EXITS = '.home-back, #btn-leaderboard-back, #home-link, #btn-play-tutorial, .name-link';
+const VISITOR_EXITS = '.home-back, #btn-leaderboard-back, #home-link, #btn-play-tutorial, .name-link, #btn-challenge-back';
 
 function showVisitorPage() {
-  const page = VISITOR_PAGES[location.pathname];
+  const challengeKey = challengeKeyFromPath();
+  const page = challengeKey ? () => showChallengeScreen(challengeKey) : VISITOR_PAGES[location.pathname];
   if (!page) return false;
   document.body.classList.add('visitor-browsing');
   const leave = (e) => {
@@ -270,6 +274,21 @@ function wireStaticHandlers() {
       show($('finished-review-error'));
     });
     button.disabled = false;
+  });
+  $('btn-finished-share').addEventListener('click', onFinishedShare);
+  $('btn-player-profile-challenge').addEventListener('click', onProfileChallenge);
+  $('btn-player-profile-share').addEventListener('click', onProfileShareChallenge);
+  $('btn-challenge-accept').addEventListener('click', onAcceptChallenge);
+  $('btn-challenge-share').addEventListener('click', onShareShownChallenge);
+  $('btn-challenge-back').addEventListener('click', () => navigateFromSidebar(() => {
+    showScreen('screen-host-setup'); showHomeTiles(); startRoomsPolling();
+  }));
+  // Signed in, another challenge opens in place; a visitor's link just loads it.
+  $('challenge-others').addEventListener('click', (e) => {
+    const link = e.target.closest('[data-challenge-key]');
+    if (!link || !loadProfile()) return;
+    e.preventDefault();
+    showChallengeScreen(link.dataset.challengeKey);
   });
   $('btn-player-profile-history-prev').addEventListener('click', onPlayerProfileHistoryPrevClick);
   $('btn-player-profile-history-next').addEventListener('click', onPlayerProfileHistoryNextClick);

@@ -1,7 +1,7 @@
 import random
 from typing import Optional, Sequence
 
-from highsociety.code.common.bot_roster import BOT_ROSTER, DIFFICULTIES, names_for_difficulty
+from highsociety.code.common.bot_roster import BOT_ROSTER, DIFFICULTIES, find_by_name, names_for_difficulty
 
 # Playful names for bot players, deliberately not type-based ("Greedy1",
 # "Capped2") — a bot should read like just another name at the table, not a
@@ -12,7 +12,8 @@ BOT_NAME_POOL = [b.name[: -len(" Bot")] for b in BOT_ROSTER]
 
 
 def assign_bot_names(count: int, taken: set = None,
-                     difficulties: Optional[Sequence[Optional[str]]] = None) -> list[str]:
+                     difficulties: Optional[Sequence[Optional[str]]] = None,
+                     pinned: Optional[Sequence[str]] = None) -> list[str]:
     """
     Returns `count` distinct " Bot"-suffixed names (e.g. "Niel Bot"), so a
     bot reads as clearly a bot at a glance without resorting to a type-based
@@ -31,6 +32,11 @@ def assign_bot_names(count: int, taken: set = None,
     roster identity (see game_history.record_finished_game), so the name is
     just a label for them.
 
+    pinned: roster names ("Thanos Bot") that must be seated if they can be:
+    each takes the first slot of its own difficulty (a challenge game, see
+    web_server.py, always seats the bot it names). One that has no such slot,
+    or is already taken, is skipped.
+
     Falls back to BotN for any slot its pool can't fill. Every difficulty
     has at least 5 names and a table seats at most 4 bots, so this never
     actually happens — it's just a safety net against ever crashing on it.
@@ -46,10 +52,20 @@ def assign_bot_names(count: int, taken: set = None,
         return names
 
     names: list[Optional[str]] = [None] * count
+    for name in pinned or ():
+        bot = find_by_name(name)
+        if bot is None or bot.name.lower() in taken:
+            continue
+        slot = next((i for i in range(count) if names[i] is None and slots[i] == bot.difficulty), None)
+        if slot is not None:
+            names[slot] = bot.name
+            taken.add(bot.name.lower())
     # Difficulty slots first: they can only use their own tier's names, so a
     # free-for-all slot must not grab one of those first.
     order = sorted(range(count), key=lambda i: slots[i] not in DIFFICULTIES)
     for i in order:
+        if names[i] is not None:
+            continue
         difficulty = slots[i]
         pool = names_for_difficulty(difficulty) if difficulty in DIFFICULTIES else [b.name for b in BOT_ROSTER]
         candidates = _available(pool)

@@ -3027,3 +3027,78 @@ def test_someone_with_an_older_name_can_still_keep_it():
     check = web_server.app.test_client().get(
         "/api/auth/username/check", query_string={"username": "o'neil", "current": "o'neil"}).get_json()
     assert check["available"] is True
+
+
+# -- challenge links and bot table talk ---------------------------------------
+def test_challenge_page_has_its_own_title_and_preview(monkeypatch):
+    monkeypatch.setattr(web_server, "PUBLIC_BASE_URL", "https://example.com")
+    client = web_server.app.test_client()
+    resp = client.get("/challenge/thalapathy")
+    html = resp.get_data(as_text=True)
+    assert resp.status_code == 200
+    assert "<title>Can you defeat Thalapathy Bot? – High Society</title>" in html
+    assert 'content="https://example.com/static/og/challenge-thalapathy.png"' in html
+    assert '<link rel="canonical" href="https://example.com/challenge/thalapathy">' in html
+    assert "window.CHALLENGES" in html
+    assert client.get("/challenge/ziggy").status_code == 404  # an Easy bot has no challenge
+    assert client.get("/challenge/nobody").status_code == 404
+
+
+def test_every_challenge_has_a_preview_image_and_is_in_the_sitemap():
+    sitemap = web_server.app.test_client().get("/sitemap.xml").get_data(as_text=True)
+    for key in web_server._CHALLENGE_BOTS:
+        assert f"/challenge/{key}<" in sitemap
+        assert os.path.isfile(os.path.join(web_server.app.static_folder, "og", f"challenge-{key}.png")), key
+
+
+def test_create_challenge_game_seats_the_named_bot():
+    web_server._rooms.clear()
+    client = web_server.app.test_client()
+    for _ in range(5):  # the other Insane seat is random; the named one never is
+        status = client.post("/api/create_game", json={"challenge": "rocky", "host_username": "alice"}).get_json()
+        names = [p["name"] for p in status["joined"]]
+        assert "Rocky Bot" in names and len(names) == 2
+        room = web_server._rooms[status["room_code"]]
+        assert room.seats == 3 and room.bot_mix == ["insane", "insane"] and room.visibility == "private"
+    assert client.post("/api/create_game", json={"challenge": "ziggy", "host_username": "alice"}).status_code == 404
+    assert client.post("/api/create_game", json={"challenge": "rocky"}).status_code == 403
+    web_server._rooms.clear()
+
+
+def test_pinned_bot_survives_a_rematch_reseat():
+    from highsociety.code.ai import create_bot_players
+    for _ in range(10):
+        bots = create_bot_players(["insane", "insane"], pinned_names=["Thanos Bot"])
+        assert "Thanos Bot" in [b.name for b in bots]
+    # no slot of its difficulty: ignored, not forced
+    assert "Thanos Bot" not in [b.name for b in create_bot_players(["easy"], pinned_names=["Thanos Bot"])]
+
+
+def test_table_talk_starts_only_with_a_talking_bot():
+    room = web_server.GameRoom("TALK1", seats=3, bot_mix=["insane", "easy"], seed=1, bot_think_time=0,
+                               visibility="private")
+    game = web_server.PlayGame(players=room.players, spectators=[], mode="network", pace_events=False)
+    web_server._start_table_talk(room, game)
+    assert room.table_talk is not None and room.table_talk.observe in game.host.listeners
+
+    quiet = web_server.GameRoom("TALK2", seats=3, bot_mix=["easy", "medium"], seed=1, bot_think_time=0,
+                                visibility="private")
+    game = web_server.PlayGame(players=quiet.players, spectators=[], mode="network", pace_events=False)
+    web_server._start_table_talk(quiet, game)
+    assert quiet.table_talk is None and game.host.listeners == []
+
+
+def test_a_bot_line_reaches_people_as_chat():
+    room = web_server.GameRoom("TALK3", seats=3, bot_mix=["insane"], seed=1, bot_think_time=0, visibility="private")
+    sent = []
+
+    class Listener:
+        active = True
+
+        def send_message(self, msg, message_type, **kw):
+            sent.append((msg, message_type, kw.get("from_user")))
+
+    room.spectators = [Listener()]
+    bot = room.players[0]
+    web_server._send_bot_chat(room, bot.username, "I am inevitable.")
+    assert sent == [(f"💬 {bot.username}: I am inevitable.", "CHAT", bot.username)]

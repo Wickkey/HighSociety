@@ -36,6 +36,7 @@ from flask_sock import Sock
 
 from highsociety.code.ai import BOT_TYPES, create_bot_players, create_tutorial_bots
 from highsociety.code.ai.mcts import decision_service
+from highsociety.code.ai.personality import TableTalk, make_talker
 from highsociety.code.ai.mcts.worker_pool_decision_service import WorkerPoolBotDecisionService
 from highsociety.code.common import achievements, bot_roster, matchmaking
 from highsociety.code.common.db import game_history
@@ -213,6 +214,10 @@ _TURN_TIME_PRESETS = frozenset({15.0, 30.0, 60.0, 90.0, 120.0})
 # tests/ai/test_tutorial_bot.py's TestCuratedTutorialSeed) to verify the new
 # order still covers the same ground.
 _TUTORIAL_SEATS = 3
+# A challenge game (/challenge/<bot>): you, the named Insane bot and one more.
+_CHALLENGE_SEATS = 3
+_CHALLENGE_BOT_THINK_TIME = 1.5
+_CHALLENGE_BOTS = {b.key: b for b in bot_roster.BOT_ROSTER if b.difficulty == "insane"}
 _TUTORIAL_SEED = 765
 _TUTORIAL_BOT_THINK_TIME = 1.2
 
@@ -241,8 +246,11 @@ class GameRoom:
     def __init__(self, room_code: str, seats: int, bot_mix: list[str], seed: Optional[int],
                  bot_think_time: float, visibility: str, turn_time_limit: Optional[float] = None,
                  reveal_cards: bool = True, show_logs: bool = True, host_username: Optional[str] = None,
-                 is_tutorial: bool = False):
+                 is_tutorial: bool = False, pinned_bot_names: Optional[list] = None):
         self.room_code = room_code
+        # Roster names every game here seats, rematches included: a challenge
+        # game's named bot (see _CHALLENGE_BOTS).
+        self.pinned_bot_names = list(pinned_bot_names or [])
         self.game_id = generate_game_id()
         self.seats = seats
         self.bot_mix = bot_mix
@@ -291,7 +299,7 @@ class GameRoom:
         if is_tutorial:
             self.players = create_tutorial_bots(bot_think_time)
         elif bot_mix:
-            self.players = create_bot_players(bot_mix, bot_think_time)
+            self.players = create_bot_players(bot_mix, bot_think_time, pinned_names=self.pinned_bot_names)
         else:
             self.players = []
         self.human_seats = seats - len(self.players)
@@ -329,6 +337,8 @@ class GameRoom:
         self.review_game_id: Optional[int] = None
         # sender -> recent chat/reaction timestamps, see _chat_allowed.
         self.chat_times: dict[str, list[float]] = {}
+        # The current game's bot talk (see _start_table_talk), or None.
+        self.table_talk: Optional[TableTalk] = None
         # seat username -> current Elo, for the seats that are rated (see
         # _refresh_seat_ratings); shown next to each name at the table.
         self.seat_ratings: dict[str, int] = {}
@@ -374,6 +384,7 @@ class GameRoom:
             # to the game that's only just starting now.
             self.elo_changes = None
             self.review_game_id = None
+            self.table_talk = None
             # Setting the game up is inside the same guard as playing it: a
             # failure here used to escape the thread entirely, leaving the
             # room "starting" forever with every player waiting on a game
@@ -385,6 +396,7 @@ class GameRoom:
                                 turn_duration=self.turn_time_limit,
                                 auction_history=self.auction_history)
                 self.game = game
+                _start_table_talk(self, game)
                 # A player who joined before someone else otherwise has no way
                 # to know that other seat exists until some in-auction event
                 # happens to name them by chance (see _send_opponent_roster) —
@@ -456,6 +468,42 @@ class GameRoom:
                 s.close()
 
         threading.Thread(target=_run, daemon=True, name=f"Game-{self.game_id}").start()
+
+
+def _start_table_talk(room: "GameRoom", game: PlayGame) -> None:
+    """Lets the named bots with a personality (ai/personality) talk during
+    this game. Nothing for a tutorial or a table without such a bot."""
+    if room.is_tutorial:
+        return
+    talkers = {}
+    for p in room.players:
+        roster_bot = None if isinstance(p, NetworkPlayer) else bot_roster.find_by_name(p.name)
+        talker = make_talker(roster_bot.key) if roster_bot else None
+        if talker is not None:
+            talkers[p.username] = talker
+    if not talkers:
+        return
+    game_id = room.game_id
+
+    def say(bot_username: str, text: str) -> None:
+        if room.game_id == game_id:
+            _send_bot_chat(room, bot_username, text)
+
+    talk = TableTalk(room.players, talkers, is_human=lambda p: isinstance(p, NetworkPlayer), say=say,
+                     turn_duration=room.turn_time_limit)
+    room.table_talk = talk
+    game.host.listeners.append(talk.observe)
+
+
+def _send_bot_chat(room: "GameRoom", bot_username: str, text: str) -> None:
+    """A bot's line, sent like any player's chat message."""
+    formatted = f"💬 {bot_username}: {text}"
+    for p in list(room.players):
+        if isinstance(p, NetworkPlayer) and p.active:
+            p.send_message(formatted, message_type="CHAT", from_user=bot_username)
+    for s in list(room.spectators):
+        if s.active:
+            s.send_message(formatted, message_type="CHAT", from_user=bot_username)
 
 
 def _seat_profile(player) -> dict:
@@ -605,7 +653,8 @@ def _generate_room_code() -> str:
 def _create_room(seats: int, bot_mix: list[str], seed: Optional[int], bot_think_time: float,
                   visibility: str, turn_time_limit: Optional[float] = None,
                   reveal_cards: bool = True, show_logs: bool = True,
-                  host_username: Optional[str] = None, is_tutorial: bool = False) -> GameRoom:
+                  host_username: Optional[str] = None, is_tutorial: bool = False,
+                  pinned_bot_names: Optional[list] = None) -> GameRoom:
     with _rooms_lock:
         for _ in range(20):
             code = _generate_room_code()
@@ -618,7 +667,8 @@ def _create_room(seats: int, bot_mix: list[str], seed: Optional[int], bot_think_
         room = GameRoom(room_code=code, seats=seats, bot_mix=bot_mix, seed=seed,
                          bot_think_time=bot_think_time, visibility=visibility,
                          turn_time_limit=turn_time_limit, reveal_cards=reveal_cards,
-                         show_logs=show_logs, host_username=host_username, is_tutorial=is_tutorial)
+                         show_logs=show_logs, host_username=host_username, is_tutorial=is_tutorial,
+                         pinned_bot_names=pinned_bot_names)
         _rooms[code] = room
         return room
 
@@ -1529,15 +1579,49 @@ def index(username=None, game_id=None):
     if path.startswith(("/account/", "/players/", "/review/")):
         path = path[:path.index("/", 1)]
     title, description = _PAGE_META.get(path, _PAGE_META["/"])
+    return _render_app_shell(title, description, "/" if path in _SIGN_IN_ONLY_PATHS else path,
+                             noindex=path in _PRIVATE_PATHS)
+
+
+def _render_app_shell(title: str, description: str, canonical_path: str, noindex: bool = False,
+                      og_image: Optional[str] = None):
     return render_template(
         "index.html", ga_measurement_id=GA_MEASUREMENT_ID,
         google_client_id=GOOGLE_CLIENT_ID if GOOGLE_SIGN_IN_ENABLED else None,
         page_title=title, page_description=description,
-        canonical_url=_public_base() + ("/" if path in _SIGN_IN_ONLY_PATHS else path), site_url=_public_base() + "/",
+        canonical_url=_public_base() + canonical_path, site_url=_public_base() + "/",
         # Personal screens: nothing for a search engine to show anyone else.
-        noindex=path in _PRIVATE_PATHS,
+        noindex=noindex,
+        og_image=og_image or "static/og-image.png",
+        challenges=_CHALLENGE_LIST,
         page_titles={p: t for p, (t, _) in _PAGE_META.items()},
     )
+
+
+# The Insane bots a challenge link can name, for the client (window.CHALLENGES).
+_CHALLENGE_LIST = [
+    {"key": b.key, "name": b.name, "bio": b.bio, "username": bot_roster.roster_username(b),
+     "avatar_url": _BOT_AVATARS.get(bot_roster.roster_username(b))}
+    for b in _CHALLENGE_BOTS.values()
+]
+
+
+def _challenge_meta(bot) -> tuple:
+    return (f"Can you defeat {bot.name}? – High Society",
+            f"{bot.name} is one of High Society's Insane bots, a neural network that learned the game "
+            "by playing itself. Take it on in a free auction card game in your browser.")
+
+
+@app.route("/challenge/<bot_key>")
+def challenge_page(bot_key):
+    """A shareable challenge: "Can you defeat Thalapathy Bot?" with that bot's
+    own preview picture. The app shows the challenge screen from the URL."""
+    bot = _CHALLENGE_BOTS.get(bot_key)
+    if bot is None:
+        return not_found(None)
+    title, description = _challenge_meta(bot)
+    return _render_app_shell(title, description, f"/challenge/{bot.key}",
+                             og_image=f"static/og/challenge-{bot.key}.png")
 
 
 _HOME_DESCRIPTION = ("Play High Society online for free: the classic auction card game for 3–5 players. "
@@ -1569,7 +1653,8 @@ _PAGE_META = {
 # sees the home page's content at these addresses: point it there.
 _SIGN_IN_ONLY_PATHS = {"/play", "/host", "/join"}
 _PRIVATE_PATHS = {"/account", "/achievements", "/my-games", "/players", "/review"}
-_SITEMAP_PATHS = ["/", "/rules", "/leaderboard", "/privacy"]
+_SITEMAP_PATHS = ["/", "/rules", "/leaderboard", "/privacy"] + [
+    f"/challenge/{b.key}" for b in bot_roster.BOT_ROSTER if b.difficulty == "insane"]
 
 
 def _public_base() -> str:
@@ -1643,6 +1728,23 @@ def api_create_game():
             turn_time_limit=None, reveal_cards=True, show_logs=True,
             host_username=host_username, is_tutorial=True,
         )
+        return jsonify(_status_payload(room))
+
+    if body.get("challenge") is not None:
+        # A shared challenge link (/challenge/<bot>): you against that Insane
+        # bot and another one. Like the tutorial, the server sets every field.
+        bot = _CHALLENGE_BOTS.get(body.get("challenge"))
+        if bot is None:
+            return jsonify({"error": "There's no challenge with that name."}), 404
+        host_username = body.get("host_username")
+        if not isinstance(host_username, str) or not host_username:
+            return jsonify({"error": _SIGN_IN_AGAIN}), 403
+        if _identity_rejected(host_username, body.get("login_token")):
+            return jsonify({"error": _SIGN_IN_AGAIN}), 403
+        room = _create_room(seats=_CHALLENGE_SEATS, bot_mix=["insane"] * (_CHALLENGE_SEATS - 1), seed=None,
+                            bot_think_time=_CHALLENGE_BOT_THINK_TIME, visibility="private",
+                            turn_time_limit=None, host_username=host_username, pinned_bot_names=[bot.name])
+        _refresh_seat_ratings(room)
         return jsonify(_status_payload(room))
 
     try:
@@ -1743,6 +1845,9 @@ def _status_payload(room: Optional[GameRoom]) -> dict:
         payload["elo_changes"] = room.elo_changes
         payload["new_achievements"] = room.new_achievements
         payload["review_game_id"] = room.review_game_id
+        # A bot's last word on the game, shown on the results screen:
+        # {"username", "name", "text"} or None.
+        payload["closing_line"] = room.table_talk.closing_line if room.table_talk else None
 
         # Everything a finished-screen client needs to render the rematch
         # panel from a plain page load/status poll, not just from the live
@@ -2105,7 +2210,7 @@ def _maybe_start_rematch(room: "GameRoom") -> None:
             p.game_id = room.game_id
         bots = create_bot_players(
             bot_mix, think_time=room.bot_think_time,
-            taken_usernames={p.username for p in eligible},
+            taken_usernames={p.username for p in eligible}, pinned_names=room.pinned_bot_names,
         ) if bot_mix else []
         # Same NetworkPlayer objects as the just-finished game, deliberately
         # not fresh ones (see reset_for_new_game's docstring for why) —
