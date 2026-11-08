@@ -1722,6 +1722,11 @@
               <span id="round-label" class="muted"></span>
               <span id="turn-label" class="turn-label"></span>
               <span class="card-info-wrap">
+                <!-- Phones only: the game log opens as a sheet over the table
+                     instead of sitting below everything (see game.css). -->
+                <button type="button" id="btn-game-log-sheet" class="card-info-btn log-sheet-btn" aria-label="Game log" aria-expanded="false" aria-controls="game-log-details" title="Game log">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01"/></svg>
+                </button>
                 <button type="button" id="card-info-btn" class="card-info-btn hidden" aria-label="How does this card's auction work?" onclick="document.getElementById('card-info-popover').classList.toggle('hidden')">ⓘ</button>
                 <div id="card-info-popover" class="card-info-popover hidden">
                   <div class="card-info-popover-header">
@@ -1794,7 +1799,7 @@
             <div class="move-panel-overlay">Waiting for other players…</div>
           </div>
 
-          <details class="card panel log-details">
+          <details id="game-log-details" class="card panel log-details">
             <summary>Game log (advanced) <span id="seed-display" class="muted"></span></summary>
             <div id="game-log" class="log"></div>
           </details>

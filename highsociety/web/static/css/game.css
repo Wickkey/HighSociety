@@ -1492,3 +1492,160 @@ button.link-button:hover { color: var(--accent); }
 .finished-closing-avatar { flex: 0 0 auto; width: 44px; height: 44px; border-radius: 50%; font-size: 1.1rem; }
 .finished-closing-line blockquote { margin: 0; font-style: italic; font-weight: 600; color: var(--text); overflow-wrap: anywhere; }
 .finished-closing-line figcaption { margin-top: 0.15rem; font-size: 0.8rem; color: var(--muted); }
+
+/* ---------------- phone game table: everything on one screen ----------------
+   On a phone the table used to be ~2.5 screens tall: the card for sale filled
+   the first, and your money cards, your paintings and the log were all below
+   it. Here it's one screen, ordered like a board app (chess.com, colonist):
+   opponents at the top, the auction in the middle, you and your money at the
+   bottom by your thumb, over the chat bar. The log is a sheet (Log button in
+   the auction header). Only the player's table: spectators keep their layout. */
+.log-sheet-btn { display: none; }
+.card-info-wrap { gap: 0.35rem; }
+@media (max-width: 600px) {
+  body:has(#screen-game:not(.hidden)) .topbar { padding-top: 0.45rem; padding-bottom: 0.45rem; }
+  body:has(#screen-game:not(.hidden)) .topbar h1 { font-size: 1.1rem; }
+  body:has(#screen-game:not(.hidden)) .github-link { display: none; }
+  body:has(#screen-game:not(.hidden)) .profile-chip { padding: 0.35rem 0.6rem; }
+  body:has(#screen-game:not(.hidden)) #app { padding-left: 0.6rem; padding-right: 0.6rem; padding-bottom: 0; }
+
+  #screen-game .panel { padding: 0.55rem 0.7rem; margin-bottom: 0.45rem; border-radius: var(--radius-sm); }
+  #screen-game .table-layout .opponents-panel { order: 0; }
+  #screen-game .table-layout .auction-panel { order: 1; }
+  #screen-game .table-layout #my-panel { order: 2; }
+  #screen-game .table-layout .move-panel { order: 3; }
+  #screen-game .table-layout .log-details { order: 4; }
+
+  /* Small paintings everywhere on the table except the one for sale. */
+  #screen-game .chip-row.small { gap: 0.25rem; margin-top: 0; }
+  #screen-game .chip-row.small .status-card,
+  #screen-game .chip-row.small .card-back { width: 26px; height: 36px; font-size: 0.62rem; padding: 0.1rem; border-radius: 6px; }
+  #screen-game .chip-row.small .status-card .green-dot { top: 3px; right: 3px; width: 5px; height: 5px; box-shadow: none; }
+
+  /* Opponents as tiles: name and points on top, their paintings and current
+     bid underneath. */
+  #screen-game .opponents-panel { padding: 0.4rem; }
+  #screen-game .opponents-panel .panel-header-row { display: none; }
+  /* Two or three opponents share one row; four take two rows of two. */
+  #opponents-list { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 0.35rem; }
+  #opponents-list:has(> .opponent-row:nth-child(4)) { grid-auto-flow: row; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  #opponents-list .opponent-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas: "who meta" "cards bid";
+    align-items: center;
+    column-gap: 0.3rem;
+    row-gap: 0.2rem;
+    /* Room for a row of paintings from the start, so the strip doesn't
+       grow when the first one is sold. */
+    min-height: 3.55rem;
+    padding: 0.3rem 0.4rem;
+    border: 1px solid var(--panel-border);
+    background: rgba(255, 255, 255, 0.35);
+  }
+  #opponents-list .opponent-row.current-turn { padding: 0.3rem 0.4rem; background: var(--accent-soft); }
+  #opponents-list .opponent-header, #opponents-list .opponent-header-left { display: contents; }
+  #opponents-list .opponent-header .name { grid-area: who; min-width: 0; font-size: 0.8rem; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  #opponents-list .opp-elo { display: none; }
+  /* The tile's own frame shows whose turn it is, and a tap on the name still
+     opens the profile: the markers would only cost the name its room. */
+  #opponents-list .opponent-profile-link::after,
+  #opponents-list .opponent-row.current-turn .name::after { content: none; }
+  #opponents-list .bid-badge { grid-area: bid; align-self: end; justify-self: end; font-size: 0.7rem; padding: 0.05rem 0.4rem; }
+  #opponents-list .bid-badge:empty { display: none; }
+  #opponents-list .opponent-header-right { grid-area: meta; margin: 0; gap: 0.25rem; font-size: 0.72rem; flex-wrap: nowrap; justify-content: flex-end; }
+  #opponents-list .pts-word { display: none; }
+  #opponents-list .pts-num::after { content: " pts"; }
+  #opponents-list .chip-row { grid-area: cards; min-height: 0; }
+  #opponents-list .chip-row .status-card, #opponents-list .chip-row .card-back { width: 20px; height: 26px; font-size: 0.55rem; border-radius: 4px; }
+
+  /* The auction: the card a little smaller, the bid on one line under it,
+     and news of each bid shown over the header for a moment rather than in
+     a strip of its own. */
+  #screen-game .auction-panel { position: relative; padding-bottom: 0.45rem; }
+  #screen-game .auction-header { margin-bottom: 0.2rem; padding-bottom: 0.35rem; }
+  #screen-game .auction-stage { position: static; }
+  #screen-game .event-toast {
+    position: absolute; top: 0.3rem; left: 0.5rem; right: 0.5rem; height: 2.3rem;
+    margin: 0; max-width: none; font-size: 0.8rem;
+  }
+  #screen-game .table-talk { top: 2.6rem; bottom: 2.4rem; width: calc(50% - 46px); }
+  #screen-game .auction-card-slot { min-height: 82px; margin: 0.2rem 0; }
+  #screen-game .auction-card-slot .status-card.big { width: 58px; height: 80px; font-size: 1rem; }
+  #screen-game .bid-block { margin-top: 0; display: flex; align-items: baseline; justify-content: center; gap: 0.45rem; }
+  #screen-game .bid-label { display: inline; margin: 0; font-size: 0.66rem; }
+  #screen-game .bid-value { font-size: 1.55rem; line-height: 1.1; }
+
+  /* You: name and points on one line, Resign at the end, your paintings below. */
+  #my-panel {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    align-items: center;
+    column-gap: 0.5rem;
+    row-gap: 0.25rem;
+  }
+  #my-panel h3 { grid-column: 1; grid-row: 1; margin: 0; font-size: 0.85rem; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  /* Once you own paintings they take your name's place: you know who you are. */
+  #my-panel:has(#my-status-cards:not(:empty)) h3 { display: none; }
+  #my-panel .my-points-row { grid-column: 2; grid-row: 1; font-size: 0.85rem; white-space: nowrap; }
+  #my-panel #my-status-cards { grid-column: 1; grid-row: 1; }
+  #my-panel #my-status-cards:empty { display: none; }
+  #my-panel .panel-footer { grid-column: 3; grid-row: 1; margin: 0; }
+  #my-panel #btn-resign { width: auto; margin: 0; padding: 0.3rem 0.7rem; font-size: 0.78rem; }
+
+  /* Your move: no heading (the gold frame says it), chips that fit two rows. */
+  #screen-game .move-panel { padding: 0.5rem 0.6rem; }
+  #screen-game #bid-controls h3, #screen-game #discard-controls h3 { font-size: 0.85rem; margin: 0 0 0.3rem; }
+  #screen-game #bid-controls h3 { display: none; }
+  #screen-game .move-timer { position: absolute; top: 0.45rem; right: 0.55rem; margin: 0; padding: 0.15rem 0.5rem; font-size: 0.75rem; z-index: 2; }
+  #screen-game .move-panel.has-timer .bid-status { padding-right: 4.8rem; }
+  #screen-game .bid-status { font-size: 0.8rem; padding: 0.3rem 0.55rem; margin-bottom: 0; }
+  /* "Waiting for other players…" takes that line's place instead of
+     sitting on top of your money cards. */
+  #screen-game .move-panel.pending .bid-status { visibility: hidden; }
+  #screen-game .move-panel-overlay { align-items: flex-start; padding-top: 0.75rem; font-size: 0.85rem; }
+  #screen-game #my-paintings { gap: 0.3rem; margin-top: 0.4rem; }
+  /* Every money card in one row, sharing the width. */
+  #screen-game #my-money-cards { flex-wrap: nowrap; gap: 0.25rem; margin-top: 0.4rem; }
+  #screen-game #my-money-cards .chip { flex: 1 1 0; min-width: 0; padding: 0.55rem 0; font-size: 0.9rem; text-align: center; }
+  /* The new total beside the buttons, not on a row of its own. */
+  #screen-game #bid-controls { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 0.5rem; align-items: center; }
+  #screen-game #bid-controls > * { grid-column: 1 / -1; }
+  #screen-game #bid-controls > .bid-readout { grid-column: 1; margin-top: 0.45rem; font-size: 0.78rem; line-height: 1.25; }
+  #screen-game #bid-controls > .button-row { grid-column: 2; margin-top: 0.45rem; flex-wrap: nowrap; gap: 0.4rem; }
+  #screen-game #bid-controls .button-row button { width: auto; padding: 0.6rem 0.95rem; }
+  #screen-game #move-error { margin: 0.3rem 0 0; font-size: 0.8rem; }
+
+  /* The log: a sheet over the table, opened from the auction header. */
+  .log-sheet-btn { display: inline-flex; align-items: center; justify-content: center; background: var(--panel-bg-soft); color: var(--text); }
+  .log-sheet-btn svg { width: 16px; height: 16px; }
+  .log-sheet-btn[aria-expanded="true"] { background: var(--accent); color: #fff; }
+  #screen-game .log-details { display: none; }
+  #screen-game.log-sheet-open .log-details {
+    display: block;
+    position: fixed;
+    left: 10px;
+    right: 10px;
+    bottom: calc(var(--chat-bar-space) + env(safe-area-inset-bottom) + var(--keyboard-offset, 0px));
+    z-index: 35;
+    margin: 0;
+    padding: 0.7rem 0.8rem;
+    box-shadow: var(--shadow-lg);
+  }
+  #screen-game.log-sheet-open .log-details .log { max-height: 45vh; }
+}
+/* The narrowest phones: money cards get two rows rather than slivers. */
+@media (max-width: 359px) {
+  #screen-game #my-money-cards { flex-wrap: wrap; }
+  #screen-game #my-money-cards .chip { flex: 0 0 calc((100% - 1.25rem) / 6); }
+}
+/* Short phones (iPhone SE): a little tighter still. */
+@media (max-width: 600px) and (max-height: 620px) {
+  body:has(#screen-game:not(.hidden)) .topbar { padding-top: 0.25rem; padding-bottom: 0.25rem; }
+  #screen-game .panel { margin-bottom: 0.3rem; padding-top: 0.4rem; padding-bottom: 0.4rem; }
+  #screen-game .bid-status { padding-top: 0.2rem; padding-bottom: 0.2rem; }
+  #screen-game #my-money-cards .chip { padding-top: 0.45rem; padding-bottom: 0.45rem; }
+  #screen-game .auction-card-slot { min-height: 64px; }
+  #screen-game .auction-card-slot .status-card.big { width: 46px; height: 62px; font-size: 0.85rem; }
+  #screen-game .auction-card-type { font-size: 0.62rem; }
+}
