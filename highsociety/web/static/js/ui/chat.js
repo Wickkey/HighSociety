@@ -154,8 +154,76 @@ function peekInChatBar(logId, text, durationMs) {
   }, durationMs);
 }
 
+// The phone table (see game.css): no room beside the card, so a message comes
+// out of the speaker's own tile as a speech bubble instead.
+const PHONE_TABLE = '(max-width: 600px)';
+
+function onPhoneTable(logId) {
+  return logId === 'player-chat-log' && window.matchMedia(PHONE_TABLE).matches;
+}
+
+// Your own message on a phone: shown for a moment in the chat box itself,
+// which covers nothing (a bubble down there would sit on your bid buttons).
+function echoInChatBar(logId, text, durationMs) {
+  const input = $(INPUT_FOR_LOG[logId]);
+  input.placeholder = `You: ${text}`;
+  input.classList.add('peeking');
+  clearTimeout(peekTimer);
+  peekTimer = setTimeout(() => {
+    input.placeholder = restingPlaceholder(input.id);
+    input.classList.remove('peeking');
+  }, durationMs);
+}
+
+function showSpeechBubble({ username, name, text, big, tag }, durationMs) {
+  const layer = $('phone-talk');
+  const key = username || name || '';
+  // One bubble per speaker: a new message replaces their last one.
+  [...layer.children].filter((b) => b.dataset.speaker === key).forEach((b) => b.remove());
+  const tile = username
+    ? document.querySelector(`#opponents-list .opponent-row[data-username="${CSS.escape(username)}"]`)
+    : null;
+  const bubble = document.createElement('div');
+  bubble.className = `speech-bubble${big ? ' big' : ''}`;
+  bubble.dataset.speaker = key;
+  // Coming out of their tile says who it is; anyone without one (a
+  // spectator) gets their name on it.
+  if (!tile && name) {
+    const who = document.createElement('span');
+    who.className = 'speech-bubble-name';
+    who.textContent = tag ? `${name} · ${tag}` : name;
+    bubble.appendChild(who);
+  }
+  const body = document.createElement('span');
+  body.className = 'speech-bubble-text';
+  body.textContent = text; // always text, never markup: this came from another player
+  bubble.appendChild(body);
+  layer.appendChild(bubble);
+
+  const area = layer.getBoundingClientRect();
+  const anchor = (tile || document.querySelector('#screen-game .opponents-panel')).getBoundingClientRect();
+  const width = bubble.offsetWidth;
+  const centre = anchor.left + anchor.width / 2 - area.left;
+  const left = Math.max(8, Math.min(area.width - width - 8, centre - width / 2));
+  bubble.style.left = `${left}px`;
+  bubble.style.top = `${anchor.bottom - area.top + 8}px`;
+  bubble.style.setProperty('--tail-x', `${Math.max(14, Math.min(width - 14, centre - left))}px`);
+  requestAnimationFrame(() => bubble.classList.add('show'));
+  setTimeout(() => {
+    bubble.classList.remove('show');
+    setTimeout(() => bubble.remove(), BUBBLE_FADE_MS);
+  }, durationMs);
+}
+
 // `name` is who said it (null for your own bubble), `big` for a lone reaction.
-function showTableBubble(logId, { name, text, mine, big = false, tag = null }) {
+// `username` lets the phone table find the speaker's tile.
+function showTableBubble(logId, { name, text, mine, big = false, tag = null, username = null }) {
+  const duration = Math.min(BUBBLE_MAX_MS, BUBBLE_MIN_MS + text.length * BUBBLE_MS_PER_CHAR);
+  if (onPhoneTable(logId)) {
+    if (mine) echoInChatBar(logId, text, duration);
+    else showSpeechBubble({ username, name, text, big, tag }, duration);
+    return;
+  }
   const lane = $(`${logId.split('-')[0]}-table-talk-${mine ? 'mine' : 'others'}`);
   const bubble = document.createElement('div');
   bubble.className = `table-bubble${big ? ' big' : ''}`;
@@ -176,7 +244,6 @@ function showTableBubble(logId, { name, text, mine, big = false, tag = null }) {
   while (lane.children.length > 1 && lane.scrollHeight > lane.clientHeight) lane.firstElementChild.remove();
   requestAnimationFrame(() => bubble.classList.add('show'));
 
-  const duration = Math.min(BUBBLE_MAX_MS, BUBBLE_MIN_MS + text.length * BUBBLE_MS_PER_CHAR);
   setTimeout(() => {
     bubble.classList.remove('show');
     setTimeout(() => bubble.remove(), BUBBLE_FADE_MS);
@@ -192,6 +259,7 @@ export function showTableReaction(username, emoji, { mine, isSpectator }) {
     text: emoji,
     mine,
     big: true,
+    username,
   });
 }
 
@@ -210,7 +278,7 @@ export function receiveChatMessage(logId, msg) {
   const tag = msg['to_user(s)'] === 'spectators' ? 'spectators only' : null;
   const text = messageBody(msg.prompt || '', from);
   appendBubble(logId, { from, text, mine: false, tag });
-  showTableBubble(logId, { name: nameOf(from), text, mine: false, tag });
+  showTableBubble(logId, { name: nameOf(from), text, mine: false, tag, username: from });
   if (!isLogOpen(logId)) {
     unread += 1;
     renderUnread();

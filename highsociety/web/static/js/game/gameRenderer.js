@@ -393,7 +393,9 @@ export function renderOpponents(isSpectator) {
     // starts (see gameEvents.js's applyAuctionUpdate) -- blank rather than
     // a badge showing "0" whenever they haven't bid at all this round.
     const bidBadge = row.querySelector('.bid-badge');
-    bidBadge.textContent = o.lastBid ? `Bid: ${o.lastBid}` : '';
+    // The word is its own span: a narrow phone tile shows just the number.
+    bidBadge.innerHTML = o.lastBid ? `<span class="bid-word">Bid: </span>${Number(o.lastBid)}` : '';
+    bidBadge.title = o.lastBid ? `Bid: ${o.lastBid}` : '';
 
     const chips = row.querySelector('.chip-row');
     chips.innerHTML = '';
