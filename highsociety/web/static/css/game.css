@@ -1538,7 +1538,7 @@ button.link-button:hover { color: var(--accent); }
   /* Two or three opponents share one row; four take two rows of two. */
   #opponents-list { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 0.35rem; }
 
-  #opponents-list .opponent-row {
+  :is(#opponents-list, #spec-players-list) .opponent-row {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
     grid-template-areas: "who meta" "cards cards";
@@ -1552,24 +1552,24 @@ button.link-button:hover { color: var(--accent); }
     border: 1px solid var(--panel-border);
     background: rgba(255, 255, 255, 0.35);
   }
-  #opponents-list .opponent-row.current-turn { padding: 0.3rem 0.4rem; background: var(--accent-soft); }
-  #opponents-list .opponent-header, #opponents-list .opponent-header-left { display: contents; }
-  #opponents-list .opponent-header .name { grid-area: who; min-width: 0; font-size: 0.8rem; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-  #opponents-list .opp-elo { display: none; }
+  :is(#opponents-list, #spec-players-list) .opponent-row.current-turn { padding: 0.3rem 0.4rem; background: var(--accent-soft); }
+  :is(#opponents-list, #spec-players-list) .opponent-header, :is(#opponents-list, #spec-players-list) .opponent-header-left { display: contents; }
+  :is(#opponents-list, #spec-players-list) .opponent-header .name { grid-area: who; min-width: 0; font-size: 0.8rem; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  :is(#opponents-list, #spec-players-list) .opp-elo { display: none; }
   /* The tile's own frame shows whose turn it is, and a tap on the name still
      opens the profile: the markers would only cost the name its room. */
-  #opponents-list .opponent-profile-link::after,
-  #opponents-list .opponent-row.current-turn .name::after { content: none; }
+  :is(#opponents-list, #spec-players-list) .opponent-profile-link::after,
+  :is(#opponents-list, #spec-players-list) .opponent-row.current-turn .name::after { content: none; }
   /* In the tile's bottom corner, so it never takes room from the name. */
-  #opponents-list .opponent-row { position: relative; }
-  #opponents-list .bid-badge { position: absolute; right: 0.4rem; bottom: 0.35rem; font-size: 0.7rem; padding: 0.05rem 0.4rem; }
-  #opponents-list .opponent-row:has(.bid-badge:not(:empty)) .chip-row { padding-right: 3.4rem; }
-  #opponents-list .bid-badge:empty { display: none; }
-  #opponents-list .opponent-header-right { grid-area: meta; margin: 0; gap: 0.25rem; font-size: 0.72rem; flex-wrap: nowrap; justify-content: flex-end; }
-  #opponents-list .pts-word { display: none; }
-  #opponents-list .pts-num::after { content: " pts"; }
-  #opponents-list .chip-row { grid-area: cards; min-height: 0; }
-  #opponents-list .chip-row .status-card, #opponents-list .chip-row .card-back { width: 20px; height: 26px; font-size: 0.55rem; border-radius: 4px; }
+  :is(#opponents-list, #spec-players-list) .opponent-row { position: relative; }
+  :is(#opponents-list, #spec-players-list) .bid-badge { position: absolute; right: 0.4rem; bottom: 0.35rem; font-size: 0.7rem; padding: 0.05rem 0.4rem; }
+  :is(#opponents-list, #spec-players-list) .opponent-row:has(.bid-badge:not(:empty)) .chip-row { padding-right: 3.4rem; }
+  :is(#opponents-list, #spec-players-list) .bid-badge:empty { display: none; }
+  :is(#opponents-list, #spec-players-list) .opponent-header-right { grid-area: meta; margin: 0; gap: 0.25rem; font-size: 0.72rem; flex-wrap: nowrap; justify-content: flex-end; }
+  :is(#opponents-list, #spec-players-list) .pts-word { display: none; }
+  :is(#opponents-list, #spec-players-list) .pts-num::after { content: " pts"; }
+  :is(#opponents-list, #spec-players-list) .chip-row { grid-area: cards; min-height: 0; }
+  :is(#opponents-list, #spec-players-list) .chip-row .status-card, :is(#opponents-list, #spec-players-list) .chip-row .card-back { width: 20px; height: 26px; font-size: 0.55rem; border-radius: 4px; }
   /* Four opponents (a 5-player game) still share one row: narrower tiles,
      so the name gets a line to itself and points and bid go underneath. */
   #opponents-list:has(> .opponent-row:nth-child(4)) { gap: 0.3rem; }
@@ -1717,4 +1717,78 @@ button.link-button:hover { color: var(--accent); }
   .speech-bubble-name { display: block; font-size: 0.7rem; font-weight: 700; color: var(--muted); }
   .speech-bubble-text { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
   .speech-bubble.big { padding: 0.25rem 0.55rem; font-size: 1.6rem; line-height: 1.1; }
+}
+
+/* ---------------- phone: watching a game ----------------
+   The same one-screen idea as the player's table: every player as a tile at
+   the top, the auction filling the middle, one line saying how the auction
+   stands where a player would have their money, and the chat bar. The app's
+   bottom tab bar steps aside while watching (the header has a way out), the
+   log is a sheet, and chat comes out of the speaker's tile. */
+.spec-bid-summary { display: none; }
+@media (max-width: 600px) {
+  body:has(#screen-spectate:not(.hidden) > #spectate-live-layout:not(.hidden)) .app-sidebar { display: none; }
+  body:has(#screen-spectate:not(.hidden) > #spectate-live-layout:not(.hidden)) { padding-bottom: 0; }
+  #screen-spectate .chat-dock { bottom: var(--keyboard-offset, 0px); }
+  body:has(#screen-spectate:not(.hidden) > #spectate-live-layout:not(.hidden)) .topbar { padding-top: 0.45rem; padding-bottom: 0.45rem; }
+  body:has(#screen-spectate:not(.hidden) > #spectate-live-layout:not(.hidden)) .topbar h1 { font-size: 1.1rem; }
+  body:has(#screen-spectate:not(.hidden) > #spectate-live-layout:not(.hidden)) .profile-chip { padding: 0.35rem 0.6rem; }
+  body:has(#screen-spectate:not(.hidden) > #spectate-live-layout:not(.hidden)) .github-link { display: none; }
+  body:has(#screen-spectate:not(.hidden) > #spectate-live-layout:not(.hidden)) #app { padding-left: 0.6rem; padding-right: 0.6rem; padding-bottom: 0; }
+
+  /* Fill exactly the visible screen; the auction takes what's left. */
+  body:has(#screen-spectate:not(.hidden) > #spectate-live-layout:not(.hidden)) .app-shell,
+  body:has(#screen-spectate:not(.hidden) > #spectate-live-layout:not(.hidden)) .app-main-col { min-height: 100dvh; }
+  body:has(#screen-spectate:not(.hidden) > #spectate-live-layout:not(.hidden)) #app { flex: 1 0 auto; display: flex; flex-direction: column; }
+  #screen-spectate:not(.hidden):has(> #spectate-live-layout:not(.hidden)) { flex: 1 0 auto; display: flex; flex-direction: column; position: relative; }
+  #spectate-live-layout:not(.hidden) { flex: 1 0 auto; display: flex; flex-direction: column; align-items: stretch; }
+
+  #spectate-live-layout .panel { padding: 0.55rem 0.7rem; margin-bottom: 0.45rem; border-radius: var(--radius-sm); }
+  #spectate-live-layout .side-col .panel { order: 0; padding: 0.4rem; }
+  #spectate-live-layout .auction-panel { order: 1; }
+  #spectate-live-layout .spec-bid-summary { order: 2; }
+  #spectate-live-layout .log-details { order: 3; }
+
+  /* Players: three tiles a row (2×2 for four). */
+  #spectate-live-layout .side-col .panel-header-row,
+  #spectate-live-layout .side-col .panel-footer { display: none; }
+  #spec-players-list { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.35rem; }
+  #spec-players-list:has(> .opponent-row:nth-child(4)):not(:has(> .opponent-row:nth-child(5))) { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+
+  /* The auction, as on the player's table. */
+  #spectate-live-layout .auction-panel { position: relative; padding-bottom: 0.55rem; flex: 1 0 auto; display: flex; flex-direction: column; }
+  #spectate-live-layout .auction-header { margin-bottom: 0.2rem; padding-bottom: 0.35rem; }
+  #spectate-live-layout .auction-stage { position: static; flex: 1 1 auto; justify-content: center; min-height: 110px; container-type: size; }
+  #spectate-live-layout .event-toast {
+    position: absolute; top: 0.3rem; left: 0.5rem; right: 0.5rem; height: 2.3rem;
+    margin: 0; max-width: none; font-size: 0.8rem;
+  }
+  #spectate-live-layout .table-talk { display: none; }
+  #spectate-live-layout .auction-card-slot { min-height: 0; margin: 0.3rem 0 0.1rem; }
+  #spectate-live-layout .auction-card-slot .status-card.big {
+    height: clamp(72px, calc(100cqh - 1.9rem), 150px);
+    width: auto;
+    aspect-ratio: 58 / 80;
+    font-size: clamp(1rem, 11cqh, 1.7rem);
+  }
+  #spectate-live-layout .bid-block { margin-top: 0; display: flex; align-items: baseline; justify-content: center; gap: 0.45rem; }
+  #spectate-live-layout .bid-label { display: inline; margin: 0; font-size: 0.66rem; }
+  #spectate-live-layout .bid-value { font-size: 1.7rem; line-height: 1.1; }
+
+  /* How the auction stands, in a line. */
+  #spectate-live-layout .spec-bid-summary {
+    display: block; text-align: center; font-size: 0.88rem; line-height: 1.35;
+    padding: 0.6rem 0.8rem; color: var(--muted);
+  }
+  #spectate-live-layout .spec-bid-summary strong { color: var(--text); }
+
+  /* The log as a sheet, opened from the header. */
+  #spectate-live-layout .log-details { display: none; }
+  #screen-spectate.log-sheet-open .log-details {
+    display: block; position: fixed; left: 10px; right: 10px; z-index: 35; margin: 0;
+    bottom: calc(var(--chat-bar-space) + env(safe-area-inset-bottom) + var(--keyboard-offset, 0px));
+    padding: 0.7rem 0.8rem; box-shadow: var(--shadow-lg);
+  }
+  #screen-spectate.log-sheet-open .log-details .log { max-height: 45vh; }
+  #screen-spectate .phone-talk { display: block; position: absolute; inset: 0; pointer-events: none; z-index: 20; overflow: hidden; }
 }

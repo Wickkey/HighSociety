@@ -158,8 +158,15 @@ function peekInChatBar(logId, text, durationMs) {
 // out of the speaker's own tile as a speech bubble instead.
 const PHONE_TABLE = '(max-width: 600px)';
 
+// Per log: the bubble layer, the tiles a speaker can be found in, and what
+// to point at when they aren't at the table (a watcher).
+const PHONE_TALK = {
+  'player-chat-log': { layer: 'phone-talk', tiles: '#opponents-list', fallback: '#screen-game .opponents-panel' },
+  'spec-chat-log': { layer: 'spec-phone-talk', tiles: '#spec-players-list', fallback: '#spectate-live-layout .side-col .panel' },
+};
+
 function onPhoneTable(logId) {
-  return logId === 'player-chat-log' && window.matchMedia(PHONE_TABLE).matches;
+  return logId in PHONE_TALK && window.matchMedia(PHONE_TABLE).matches;
 }
 
 // Your own message on a phone: shown for a moment in the chat box itself,
@@ -175,13 +182,14 @@ function echoInChatBar(logId, text, durationMs) {
   }, durationMs);
 }
 
-function showSpeechBubble({ username, name, text, big, tag }, durationMs) {
-  const layer = $('phone-talk');
+function showSpeechBubble(logId, { username, name, text, big, tag }, durationMs) {
+  const where = PHONE_TALK[logId];
+  const layer = $(where.layer);
   const key = username || name || '';
   // One bubble per speaker: a new message replaces their last one.
   [...layer.children].filter((b) => b.dataset.speaker === key).forEach((b) => b.remove());
   const tile = username
-    ? document.querySelector(`#opponents-list .opponent-row[data-username="${CSS.escape(username)}"]`)
+    ? document.querySelector(`${where.tiles} .opponent-row[data-username="${CSS.escape(username)}"]`)
     : null;
   const bubble = document.createElement('div');
   bubble.className = `speech-bubble${big ? ' big' : ''}`;
@@ -201,7 +209,7 @@ function showSpeechBubble({ username, name, text, big, tag }, durationMs) {
   layer.appendChild(bubble);
 
   const area = layer.getBoundingClientRect();
-  const anchor = (tile || document.querySelector('#screen-game .opponents-panel')).getBoundingClientRect();
+  const anchor = (tile || document.querySelector(where.fallback)).getBoundingClientRect();
   const width = bubble.offsetWidth;
   const centre = anchor.left + anchor.width / 2 - area.left;
   const left = Math.max(8, Math.min(area.width - width - 8, centre - width / 2));
@@ -221,7 +229,7 @@ function showTableBubble(logId, { name, text, mine, big = false, tag = null, use
   const duration = Math.min(BUBBLE_MAX_MS, BUBBLE_MIN_MS + text.length * BUBBLE_MS_PER_CHAR);
   if (onPhoneTable(logId)) {
     if (mine) echoInChatBar(logId, text, duration);
-    else showSpeechBubble({ username, name, text, big, tag }, duration);
+    else showSpeechBubble(logId, { username, name, text, big, tag }, duration);
     return;
   }
   const lane = $(`${logId.split('-')[0]}-table-talk-${mine ? 'mine' : 'others'}`);

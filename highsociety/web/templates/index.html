@@ -1899,6 +1899,14 @@
               <span id="spec-round-label" class="muted"></span>
               <span id="spec-turn-label" class="turn-label"></span>
               <span class="card-info-wrap">
+                <!-- Phones only (see game.css): the log as a sheet, and a way out
+                     that doesn't need the players panel. -->
+                <button type="button" id="btn-spec-log-sheet" class="card-info-btn log-sheet-btn" aria-label="Game log" aria-expanded="false" aria-controls="spec-game-log-details" title="Game log">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01"/></svg>
+                </button>
+                <button type="button" id="btn-spec-stop-mini" class="card-info-btn log-sheet-btn" aria-label="Stop watching" title="Stop watching">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3"/><path d="M10 17l-5-5 5-5"/><path d="M5 12h11"/></svg>
+                </button>
                 <button type="button" id="spec-card-info-btn" class="card-info-btn hidden" aria-label="How does this card's auction work?" onclick="document.getElementById('spec-card-info-popover').classList.toggle('hidden')">ⓘ</button>
                 <div id="spec-card-info-popover" class="card-info-popover hidden">
                   <div class="card-info-popover-header">
@@ -1934,7 +1942,11 @@
             </div>
           </div>
 
-          <details class="card panel log-details" open>
+          <!-- Phones only: who's ahead in this auction, in one line, where a
+               player would have their money cards. -->
+          <div id="spec-bid-summary" class="card panel spec-bid-summary" aria-live="polite"></div>
+
+          <details id="spec-game-log-details" class="card panel log-details" open>
             <summary>Game log <span id="spec-seed-display" class="muted"></span></summary>
             <div id="spec-game-log" class="log"></div>
           </details>
@@ -1953,6 +1965,8 @@
           </div>
         </div>
       </div>
+      <!-- Phones: chat bubbles from each player's tile (see chat.js). -->
+      <div id="spec-phone-talk" class="phone-talk" aria-live="polite"></div>
       <!-- Chat lives in this slim bar rather than a card in the page: always in
            reach, and the page keeps room for it (.table-layout's bottom padding)
            so it never permanently covers anything. Messages also appear briefly

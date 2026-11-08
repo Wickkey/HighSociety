@@ -405,6 +405,39 @@ export function renderOpponents(isSpectator) {
   container.querySelectorAll('.opponent-row').forEach((row) => {
     if (!seenUsernames.has(row.dataset.username)) row.remove();
   });
+  if (isSpectator) renderSpecBidSummary();
+}
+
+const DISGRACE_TYPES = new Set(['FauxPas', 'Passe', 'Scandale']);
+
+// A watcher on a phone has no money cards of their own, so that spot says how
+// the auction stands instead: who's ahead, and who's out of it. Only shown on
+// phones (see game.css); built as text, since names come from players.
+function renderSpecBidSummary() {
+  const el = $('spec-bid-summary');
+  if (!el) return;
+  const parts = [];
+  if (!game.card) {
+    parts.push(['', 'Waiting for the next auction…']);
+  } else {
+    const disgrace = DISGRACE_TYPES.has(game.card.type);
+    const leader = Object.values(game.opponents).find((o) => !o.outOfAuction && o.active !== false
+      && game.maxBid > 0 && o.lastBid === game.maxBid);
+    if (leader) parts.push(['strong', leader.name], ['', ` ${disgrace ? 'is highest' : 'leads'} at `], ['strong', String(game.maxBid)]);
+    else parts.push(['', 'No bids yet']);
+    if (disgrace) parts.push(['', ' · first to pass takes it']);
+    const passed = Object.values(game.opponents).filter((o) => o.outOfAuction && o.active !== false).map((o) => o.name);
+    if (passed.length && !disgrace) parts.push(['', ` · Passed: ${passed.join(', ')}`]);
+  }
+  const key = JSON.stringify(parts);
+  if (el.dataset.key === key) return; // ticks twice a second: only touch the page on a change
+  el.dataset.key = key;
+  el.textContent = '';
+  parts.forEach(([tag, text]) => {
+    const node = tag ? document.createElement(tag) : document.createTextNode(text);
+    if (tag) node.textContent = text;
+    el.appendChild(node);
+  });
 }
 
 // Ticks the opponents list often enough for the live per-opponent
