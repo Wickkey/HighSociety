@@ -290,15 +290,20 @@ function wireStaticHandlers() {
     e.preventDefault();
     showChallengeScreen(link.dataset.challengeKey);
   });
-  // Phones: the game log is a sheet over the table (see game.css). Closing the
-  // log itself closes the sheet too.
-  const setLogSheet = (open) => {
-    $('screen-game').classList.toggle('log-sheet-open', open);
-    $('btn-game-log-sheet').setAttribute('aria-expanded', String(open));
-    if (open) $('game-log-details').open = true;
-  };
-  $('btn-game-log-sheet').addEventListener('click', () => setLogSheet(!$('screen-game').classList.contains('log-sheet-open')));
-  $('game-log-details').addEventListener('toggle', () => { if (!$('game-log-details').open) setLogSheet(false); });
+  // Phones: the game log is a sheet over the table (see game.css), for players
+  // and watchers alike. Closing the log itself closes the sheet too.
+  [['screen-game', 'btn-game-log-sheet', 'game-log-details'],
+    ['screen-spectate', 'btn-spec-log-sheet', 'spec-game-log-details']].forEach(([screenId, buttonId, detailsId]) => {
+    const setLogSheet = (open) => {
+      $(screenId).classList.toggle('log-sheet-open', open);
+      $(buttonId).setAttribute('aria-expanded', String(open));
+      if (open) $(detailsId).open = true;
+    };
+    $(buttonId).addEventListener('click', () => setLogSheet(!$(screenId).classList.contains('log-sheet-open')));
+    $(detailsId).addEventListener('toggle', () => { if (!$(detailsId).open) setLogSheet(false); });
+  });
+  // The watcher's header button does exactly what the players panel's does.
+  $('btn-spec-stop-mini').addEventListener('click', () => $('btn-stop-watching').click());
   $('btn-player-profile-history-prev').addEventListener('click', onPlayerProfileHistoryPrevClick);
   $('btn-player-profile-history-next').addEventListener('click', onPlayerProfileHistoryNextClick);
   $('game-detail-close').addEventListener('click', closeGameDetailModal);
