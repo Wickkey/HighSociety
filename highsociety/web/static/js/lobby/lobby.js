@@ -803,24 +803,37 @@ export async function onCreateGame() {
 export async function onStartTutorial() {
   if (ensureProfileSet()) return;
   markTutorialOffered(); // starting it counts as "seen", same as dismissing
-  const profile = loadProfile();
   try {
-    const status = await fetchJSON('/api/create_game', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ tutorial: true, host_username: profile ? profile.username : null, login_token: loginToken() }),
-    });
-    stopRoomsPolling();
-    joinIdentityOverridden = false;
-    currentRoomCodeValue = status.room_code;
-    history.replaceState(null, '', `/join?room=${encodeURIComponent(status.room_code)}`);
-    lastStatusValue = status;
-    renderLobby(status);
-    startPolling();
-    onJoin(); // see onCreateGame's identical trailing call for why this is safe/synchronous
+    await startServerSetGame({ tutorial: true });
   } catch (e) {
     showError($('host-error'), e.message);
   }
+}
+
+// A challenge link's game (see web_server.py's /challenge/<bot>): you against
+// that Insane bot and one more, every setting decided by the server. Throws
+// with the server's reason if it can't start.
+export async function startChallengeGame(challengeKey) {
+  await startServerSetGame({ challenge: challengeKey });
+}
+
+// A game whose settings the server decides (the tutorial, a challenge): create
+// it, then take your seat straight away like onCreateGame does.
+async function startServerSetGame(fields) {
+  const profile = loadProfile();
+  const status = await fetchJSON('/api/create_game', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ...fields, host_username: profile ? profile.username : null, login_token: loginToken() }),
+  });
+  stopRoomsPolling();
+  joinIdentityOverridden = false;
+  currentRoomCodeValue = status.room_code;
+  history.replaceState(null, '', `/join?room=${encodeURIComponent(status.room_code)}`);
+  lastStatusValue = status;
+  renderLobby(status);
+  startPolling();
+  onJoin(); // see onCreateGame's identical trailing call for why this is safe/synchronous
 }
 
 // "Suggested, not forced": the Home screen's tutorial CTA (see index.html's

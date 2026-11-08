@@ -1,0 +1,90 @@
+{
+  "version": 1,
+  "about": "What each named bot says at the table, and when. Built from BOT's Personality.MD. Keys under 'bots' are roster keys (common/bot_roster.py). A line fires on any of its triggers, with its own chance, at most max_per_game times, and not again within cooldown_seconds. See personality/table_talk.py for how triggers are detected.",
+  "triggers": {
+    "game_start": "The game has just started.",
+    "outbid_repeat_raiser": "The bot outbids an opponent who has raised two or more times this auction.",
+    "keeps_raising": "The bot raises for the third time or more in one auction.",
+    "aggressive_rival": "The bot raises over an opponent who has outbid it three or more times this game.",
+    "challenge_opponent": "An opponent starts deciding whether to raise right after the bot raised.",
+    "opponent_hesitates": "That opponent is still deciding a few seconds later.",
+    "opponent_slow": "An opponent is taking a long time over any move.",
+    "won_auction": "The bot wins a painting or prestige card.",
+    "won_valuable": "The bot wins a valuable card: a prestige card or a painting worth 7 or more.",
+    "won_uncontested": "The bot wins a card nobody else bid on.",
+    "won_contested": "The bot wins a card after an opponent bid on it and then passed.",
+    "lost_auction": "The bot bid on a card someone else won.",
+    "losing_streak": "The bot has lost three auctions in a row that it bid in.",
+    "took_disgrace": "The bot is stuck with a disgrace card.",
+    "comeback": "The bot was last on points after the fourth auction and is now first.",
+    "won_game": "The bot won the game.",
+    "lost_game": "The bot lost the game but wasn't knocked out.",
+    "eliminated": "The bot finished with the least money and was knocked out.",
+    "opponent_eliminated": "An opponent finished with the least money and was knocked out.",
+    "game_tied": "The bot shares the win with someone."
+  },
+  "defaults": {
+    "chance": 0.5,
+    "max_per_game": 1,
+    "cooldown_seconds": 120
+  },
+  "bots": {
+    "thalapathy": {
+      "lines": [
+        {"text": "Nee padicha school-la naan headmaster da", "triggers": ["outbid_repeat_raiser"], "chance": 0.7},
+        {"text": "Oru vaati mudivu pannitena en pecha naane kekka maten", "triggers": ["keeps_raising"], "chance": 0.7},
+        {"text": "I am waiting", "triggers": ["opponent_slow"], "chance": 0.8, "max_per_game": 2, "cooldown_seconds": 180},
+        {"text": "Antha bayam irukanum da", "triggers": ["opponent_hesitates"], "chance": 0.6},
+        {"text": "Bloody Sweet", "triggers": ["won_valuable"], "chance": 0.7, "max_per_game": 2},
+        {"text": "Mudiyuma? Mudiyadha?", "triggers": ["challenge_opponent"], "chance": 0.4},
+        {"text": "Nenjil kudi-irukum...", "triggers": ["won_game"], "chance": 1.0},
+        {"text": "Nee Pozhapukku Daan Rowdy. Naa Porandadhulendhe Rowdy.", "triggers": ["aggressive_rival"], "chance": 0.8},
+        {"text": "Vaazhka oru vattam da. Athula jeikaravan thoppan. Thokkaravan Jeippan", "triggers": ["losing_streak", "eliminated", "comeback"], "chance": 0.8, "max_per_game": 2, "cooldown_seconds": 240}
+      ]
+    },
+    "batman": {
+      "lines": [
+        {"text": "I'm Batman.", "triggers": ["game_start", "won_valuable"], "chance": 0.5},
+        {"text": "It's not who I am underneath, but what I do that defines me.", "triggers": ["won_game"], "chance": 1.0},
+        {"text": "You either die a hero or you live long enough to see yourself become the villain.", "triggers": ["eliminated", "lost_game"], "chance": 0.8},
+        {"text": "I'm vengeance.", "triggers": ["aggressive_rival", "outbid_repeat_raiser"], "chance": 0.6},
+        {"text": "Fear is a tool.", "triggers": ["opponent_hesitates"], "chance": 0.5},
+        {"text": "When that light hits the sky, it's not just a call. It's a warning.", "triggers": ["comeback", "keeps_raising"], "chance": 0.5}
+      ]
+    },
+    "thanos": {
+      "lines": [
+        {"text": "I am inevitable.", "triggers": ["won_game"], "chance": 1.0},
+        {"text": "Dread it. Run from it. Destiny arrives all the same.", "triggers": ["game_start"], "chance": 0.5},
+        {"text": "Fine. I'll do it myself.", "triggers": ["won_uncontested"], "chance": 0.7},
+        {"text": "Perfectly balanced, as all things should be.", "triggers": ["won_auction", "game_tied"], "chance": 0.35},
+        {"text": "The hardest choices require the strongest wills.", "triggers": ["keeps_raising"], "chance": 0.6},
+        {"text": "A small price to pay for salvation.", "triggers": ["took_disgrace", "won_valuable"], "chance": 0.5},
+        {"text": "Reality is often disappointing.", "triggers": ["lost_auction", "losing_streak"], "chance": 0.3},
+        {"text": "You should have gone for the head.", "triggers": ["won_contested"], "chance": 0.3},
+        {"text": "You could not live with your own failure. Where did that bring you? Back to me.", "triggers": ["aggressive_rival"], "chance": 0.7},
+        {"text": "You're not the only one cursed with knowledge.", "triggers": ["outbid_repeat_raiser"], "chance": 0.5},
+        {"text": "This universe is finite, its resources, finite.", "triggers": ["opponent_hesitates"], "chance": 0.4},
+        {"text": "I hope they remember you.", "triggers": ["opponent_eliminated"], "chance": 0.6},
+        {"text": "Reality can be whatever I want.", "triggers": ["comeback"], "chance": 0.8}
+      ]
+    },
+    "rocky": {
+      "lines": [
+        {"text": "Fist my bump.", "triggers": ["game_start", "won_game"], "chance": 0.6},
+        {"text": "You are my friend. I am your friend. We go together.", "triggers": ["game_start", "game_tied"], "chance": 0.4},
+        {"text": "Good. Proud. I am proud.", "triggers": ["won_valuable", "won_game"], "chance": 0.6},
+        {"text": "Same-same.", "triggers": ["game_tied"], "chance": 0.9},
+        {"text": "Fix! We fix!", "triggers": ["took_disgrace", "losing_streak"], "chance": 0.7},
+        {"text": "Sleep now, human. I watch. I guard.", "triggers": ["opponent_slow"], "chance": 0.7}
+      ]
+    },
+    "magnus_carlsen": {
+      "lines": [
+        {"text": "Too weak, too slow! Come on... he's swimming.", "triggers": ["opponent_slow", "outbid_repeat_raiser"], "chance": 0.6},
+        {"text": "I quit the world championship for this.", "triggers": ["took_disgrace", "losing_streak", "eliminated"], "chance": 0.7},
+        {"text": "He played the Berlin, I played the most solid line, yada yada yada, let's go to the doping control.", "triggers": ["won_game"], "chance": 1.0}
+      ]
+    }
+  }
+}

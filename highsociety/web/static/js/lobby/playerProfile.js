@@ -5,6 +5,7 @@
 // one is a pure viewer of *anyone*, reached by clicking a name on the
 // Leaderboard (leaderboard.js) or in the game detail modal
 // (ui/modals.js), with no edit affordances at all.
+import { challengeForProfile, shareChallenge, showChallengeScreen } from './challenge.js';
 import { $, hide, show, showScreen, setScreenPath } from '../utils/dom.js';
 import { timeAgo } from '../utils/formatting.js';
 import { fetchGamesPage, renderIfChanged } from './gameHistory.js';
@@ -57,6 +58,17 @@ export function getPlayerProfileReturnTo() {
 }
 
 // Back to the profile a replay was opened from, keeping where its own Back goes.
+// An Insane bot's profile offers its challenge: play it now, or send it on.
+export function onProfileChallenge() {
+  const challenge = challengeForProfile(profileUsername);
+  if (challenge) showChallengeScreen(challenge.key);
+}
+
+export function onProfileShareChallenge() {
+  const challenge = challengeForProfile(profileUsername);
+  if (challenge) shareChallenge(challenge);
+}
+
 export function reopenPlayerProfile() {
   showPlayerProfileScreen(profileUsername, profileReturnTo);
 }
@@ -90,6 +102,7 @@ export function showPlayerProfileScreen(username, returnTo = 'leaderboard') {
   // after loading. Bots don't earn achievements.
   const isBot = username.startsWith('__bot_');
   $('player-profile-achievements-section').classList.toggle('hidden', isBot);
+  $('player-profile-challenge').classList.toggle('hidden', !challengeForProfile(username));
   if (!isBot) loadPlayerProfileAchievements(username);
 
   // All three run independently -- none awaits or blocks another, same as

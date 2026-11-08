@@ -26,7 +26,8 @@ BOT_TYPES = {
 }
 
 
-def create_bot_players(bot_mix: list[str], think_time: float = 1.5, taken_usernames: set = None) -> list:
+def create_bot_players(bot_mix: list[str], think_time: float = 1.5, taken_usernames: set = None,
+                       pinned_names: list = None) -> list:
     """
     Build bot instances from a list of type names (e.g. ["greedy", "greedy",
     "pass"]) — the single shared implementation for every entry point that
@@ -37,12 +38,15 @@ def create_bot_players(bot_mix: list[str], think_time: float = 1.5, taken_userna
     taken_usernames: usernames already seated (e.g. in a room a bot is being
     added to after creation) that must not collide with the name assigned
     here — see web_server.py's "add a bot to the lobby" endpoint.
+
+    pinned_names: roster names to seat if the mix has a slot for them (see
+    assign_bot_names).
     """
     # A difficulty preset ("easy"/"medium"/"hard") only ever gets one of its
     # own roster names -- the name is that bot's persistent identity (see
     # common/bot_roster.py). Heuristic types pass through and draw from the
     # whole pool.
-    names = assign_bot_names(len(bot_mix), taken=taken_usernames, difficulties=bot_mix)
+    names = assign_bot_names(len(bot_mix), taken=taken_usernames, difficulties=bot_mix, pinned=pinned_names)
     return [
         BOT_TYPES[bot_type](name=name, username=name.lower(), think_time=think_time)
         for bot_type, name in zip(bot_mix, names)
