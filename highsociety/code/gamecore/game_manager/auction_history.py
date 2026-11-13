@@ -50,8 +50,20 @@ class AuctionHistory:
         self.last_updated_at: float = 0.0
 
     def record_turn(self, players: list[BasePlayer]) -> None:
-        for p in players:
-            self.player_snapshots[p.username] = PlayerSnapshot(
+        # Rebuilt from scratch every time, never updated in place: the room
+        # reuses this object across rematches, and a seat that changed hands
+        # (a different bot, a player who left) must not linger. A stale
+        # snapshot showed up to the bots as an extra player still holding a
+        # bid -- the RL board then had more players than columns, hid a real
+        # bidder, and a bot re-offered a too-low bid forever in an untimed
+        # room. Rebuilding also keeps the dict in this game's turn order,
+        # which encoding.py relies on.
+        self.player_snapshots = {p.username: self._snapshot(p) for p in players}
+        self.last_updated_at = time.time()
+
+    @staticmethod
+    def _snapshot(p: BasePlayer) -> PlayerSnapshot:
+        return PlayerSnapshot(
                 username=p.username,
                 is_bot=not isinstance(p, (CLIPlayer, NetworkPlayer)),
                 money_cards=[c.value for c in p.money_cards],
@@ -63,4 +75,3 @@ class AuctionHistory:
                 active=p.active,
                 in_auction=p.current_participation_in_auction,
             )
-        self.last_updated_at = time.time()
