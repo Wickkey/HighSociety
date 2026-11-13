@@ -88,3 +88,39 @@ def test_wired_into_a_real_game_stays_current_end_to_end():
         snap = history.player_snapshots[p.username]
         assert sorted(snap.money_cards) == sorted(c.value for c in p.money_cards)
         assert snap.points == p.points
+
+
+def test_record_turn_drops_players_no_longer_seated_and_follows_the_new_turn_order(make_player):
+    """The room reuses one AuctionHistory across rematches. A seat that changed
+    hands must not linger: a stale snapshot showed up to the bots as an extra
+    player (still holding last game's bid), which overflowed the RL board's
+    five player columns, hid a real bidder, and left a bot re-offering a
+    too-low bid forever in an untimed room."""
+    batman, rocky, me = make_player("Batman"), make_player("Rocky"), make_player("Me")
+    rocky.place_bid(25)                      # last game ended with money still on the table
+    history = AuctionHistory()
+    history.record_turn([batman, rocky, me])
+
+    magnus, thanos = make_player("Magnus"), make_player("Thanos")
+    history.record_turn([thanos, me, magnus])          # the rematch: different bots, reshuffled
+
+    assert list(history.player_snapshots) == ["thanos", "me", "magnus"]
+
+
+def test_rl_board_sees_every_bid_after_a_rematch_with_different_bots(make_player):
+    from highsociety.code.ai.rl.candidates import bid_totals
+    from highsociety.code.ai.rl.encoding import encode
+
+    old = [make_player(n) for n in ("Batman", "Thalapathy", "Rocky", "Me")]
+    old[2].place_bid(25)
+    history = AuctionHistory()
+    history.record_turn(old)
+
+    me, magnus, thanos, thalapathy = old[3], make_player("Magnus"), make_player("Thanos"), old[1]
+    me.reset_auction_attributes()
+    magnus.place_bid(25)
+    magnus.place_bid(10)                               # 35 on the table, like the stuck game
+    history.record_turn([me, magnus, thanos, thalapathy])
+
+    board = encode(history, [], {"card": {"type": "Passe", "value": -5}}, "thanos")
+    assert bid_totals(board) == (0, 35)

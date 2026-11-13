@@ -681,3 +681,29 @@ class TestTurnClock:
         clock = TurnClock(30)
         assert clock.remaining() is None
         assert not clock.expired()
+
+
+class _StubbornLowBot(PassBot):
+    """Always offers the same too-low bid, the way a deterministic bot would
+    if its view of the table were wrong."""
+
+    def __init__(self, name, username):
+        super().__init__(name, username)
+        self.asked = 0
+
+    def get_bid(self, timeout=None):
+        self.asked += 1
+        return [1]
+
+
+def test_a_bot_repeating_a_too_low_bid_passes_instead_of_thinking_forever(make_player):
+    card = Passe()
+    human = make_player("Human", actions=[[25, 10]])
+    bot = _StubbornLowBot("Bot", "bot")
+    game = make_game([human, bot])        # untimed, like the room where this hung
+
+    loser_id = game.disgrace_card_auction(current_player_id=0, status_card=card)
+
+    assert loser_id == 1
+    assert card in bot.status_cards
+    assert bot.asked == PlayGame.MAX_BOT_REJECTIONS

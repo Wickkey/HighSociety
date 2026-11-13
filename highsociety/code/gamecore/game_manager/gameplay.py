@@ -27,6 +27,10 @@ _TURN_DURATION_UNSET = object()
 
 
 class PlayGame():
+    # How many too-low bids a bot may offer in one turn before it's made to
+    # pass (see _handle_player_turn).
+    MAX_BOT_REJECTIONS = 3
+
     # Floors the gap between consecutive "toast-worthy" broadcasts (see
     # _pace_toast_event) at this many seconds, matching the web frontend's
     # real toast display cadence: app.js's TOAST_DURATION_MS (1500ms) plus
@@ -640,6 +644,13 @@ class PlayGame():
             self._last_turn = (int((time.monotonic() - started) * 1000), reason)
             return result
 
+        # A bot's decision is a pure function of the game state, so a rejected
+        # bid comes back unchanged every time it's re-asked: in an untimed room
+        # that was an endless "thinking" turn. A human can retry for as long as
+        # they like; a bot gets a few tries and then passes.
+        is_bot = not isinstance(player, (CLIPlayer, NetworkPlayer))
+        bot_rejections = 0
+
         while True:
             self._sync_liveness(check)
             remaining_time = clock.remaining()
@@ -671,6 +682,14 @@ class PlayGame():
             # Numeric bids
             bid_value = player.current_bid_value + sum(bids)
             if bid_value <= max_bid:
+                if is_bot:
+                    bot_rejections += 1
+                    if bot_rejections >= self.MAX_BOT_REJECTIONS:
+                        LoggingManager.warning(
+                            f"{player.username} offered a too-low bid {bot_rejections} times "
+                            f"({bid_value} vs {max_bid}); passing for it")
+                        player.withdraw_bid()
+                        return _finish("pass", "invalid_bid")
                 needed = max_bid - player.current_bid_value + 1
                 player.send_message(
                     f"⚠️ Insufficient bid — add at least {needed} more to beat the current highest bid ({max_bid}).",
