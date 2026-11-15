@@ -1543,6 +1543,9 @@ button.link-button:hover { color: var(--accent); }
     grid-template-columns: minmax(0, 1fr) auto;
     grid-template-areas: "who meta" "cards cards";
     align-items: center;
+    /* Tiles in a row share the tallest one's height; keep each one's
+       content at the top so names and points line up across them. */
+    align-content: start;
     column-gap: 0.3rem;
     row-gap: 0.2rem;
     /* Room for a row of paintings from the start, so the strip doesn't
@@ -1563,7 +1566,7 @@ button.link-button:hover { color: var(--accent); }
   /* In the tile's bottom corner, so it never takes room from the name. */
   :is(#opponents-list, #spec-players-list) .opponent-row { position: relative; }
   :is(#opponents-list, #spec-players-list) .bid-badge { position: absolute; right: 0.4rem; bottom: 0.35rem; font-size: 0.7rem; padding: 0.05rem 0.4rem; }
-  :is(#opponents-list, #spec-players-list) .opponent-row:has(.bid-badge:not(:empty)) .chip-row { padding-right: 3.4rem; }
+  :is(#opponents-list, #spec-players-list) .opponent-row:has(.bid-badge:not(:empty)) .chip-row { padding-right: calc(3.4rem + 16px); }
   /* Whose-turn countdown: a badge on the tile's top edge, so it never
      shifts the name or points when it comes and goes. */
   :is(#opponents-list, #spec-players-list) .opp-timer {
@@ -1577,8 +1580,29 @@ button.link-button:hover { color: var(--accent); }
   :is(#opponents-list, #spec-players-list) .opponent-header-right { grid-area: meta; margin: 0; gap: 0.25rem; font-size: 0.72rem; flex-wrap: nowrap; justify-content: flex-end; }
   :is(#opponents-list, #spec-players-list) .pts-word { display: none; }
   :is(#opponents-list, #spec-players-list) .pts-num::after { content: " pts"; }
-  :is(#opponents-list, #spec-players-list) .chip-row { grid-area: cards; min-height: 0; }
-  :is(#opponents-list, #spec-players-list) .chip-row .status-card, :is(#opponents-list, #spec-players-list) .chip-row .card-back { width: 20px; height: 26px; font-size: 0.55rem; border-radius: 4px; }
+  /* A tile's paintings stay on one row however many there are: each card
+     gets a column of at most its own width, and when they don't all fit the
+     columns shrink while the cards keep their size, so they overlap like a
+     hand of cards, the newest fully visible. Wrapping instead made the tile
+     taller mid-game, which pushed the table past one screen during an
+     auction (with the move panel open) and left the tiles misaligned. */
+  :is(#opponents-list, #spec-players-list) .chip-row {
+    grid-area: cards; min-height: 0; min-width: 0;
+    display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 20px);
+    justify-content: start; column-gap: 0.2rem;
+    /* The last card is wider than its shrunk column: room for it to stick
+       out into, so it stays inside the tile. */
+    padding-right: 16px;
+  }
+  /* ".small" matters: without it the general "#screen-game .chip-row.small"
+     size above (26x36) outranked this and these never applied. */
+  :is(#opponents-list, #spec-players-list) .chip-row.small .status-card,
+  :is(#opponents-list, #spec-players-list) .chip-row.small .card-back {
+    width: 20px; height: 26px; font-size: 0.55rem; border-radius: 4px; padding: 0;
+    box-shadow: -1px 0 2px rgba(0, 0, 0, 0.18);
+  }
+  /* Watchers' tiles too, not just the player's table (#screen-game). */
+  :is(#opponents-list, #spec-players-list) .chip-row.small .status-card .green-dot { top: 2px; right: 2px; width: 4px; height: 4px; box-shadow: none; }
   /* Four opponents (a 5-player game) still share one row: narrower tiles,
      so the name gets a line to itself and points and bid go underneath. */
   #opponents-list:has(> .opponent-row:nth-child(4)) { gap: 0.3rem; }
@@ -1592,7 +1616,7 @@ button.link-button:hover { color: var(--accent); }
   #opponents-list:has(> .opponent-row:nth-child(4)) .opponent-header-right { justify-content: flex-start; }
   #opponents-list:has(> .opponent-row:nth-child(4)) .bid-badge { position: static; grid-area: bid; justify-self: end; }
   #opponents-list:has(> .opponent-row:nth-child(4)) .bid-word { display: none; }
-  #opponents-list:has(> .opponent-row:nth-child(4)) .opponent-row .chip-row { padding-right: 0; }
+  #opponents-list:has(> .opponent-row:nth-child(4)) .opponent-row .chip-row { padding-right: 16px; }
 
   /* The auction: the card a little smaller, the bid on one line under it,
      and news of each bid shown over the header for a moment rather than in
